@@ -648,6 +648,16 @@ void mono_sgen_pin_stats_register_object (char *obj, size_t size);
 
 void mono_sgen_add_to_global_remset (gpointer ptr) MONO_INTERNAL;
 
+void sgen_card_table_reset_region (mword start, mword end) MONO_INTERNAL;
+guint8* sgen_card_table_get_card_address (mword address) MONO_INTERNAL;
+void* sgen_card_table_align_pointer (void *ptr) MONO_INTERNAL;
+gboolean sgen_card_table_is_region_marked (mword start, mword end) MONO_INTERNAL;
+void sgen_card_table_mark_address (mword address) MONO_INTERNAL;
+
+#define CARD_BITS 9
+#define CARD_SIZE_IN_BYTES (1 << CARD_BITS)
+
+
 typedef struct _SgenMajorCollector SgenMajorCollector;
 struct _SgenMajorCollector {
 	size_t section_size;

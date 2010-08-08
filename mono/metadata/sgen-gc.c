@@ -317,6 +317,7 @@ static long long time_major_free_bigobjs = 0;
 static long long time_major_los_sweep = 0;
 static long long time_major_sweep = 0;
 static long long time_major_fragment_creation = 0;
+static long long total_remsets_processed = 0;
 
 #define DEBUG(level,a) do {if (G_UNLIKELY ((level) <= SGEN_MAX_DEBUG_LEVEL && (level) <= gc_debug_level)) a;} while (0)
 
@@ -779,6 +780,7 @@ SgenMajorCollector major;
 #include "sgen-gray.c"
 #include "sgen-workers.c"
 #include "sgen-los.c"
+#include "sgen-cardtable.c"
 
 /* Root bitmap descriptors are simpler: the lower three bits describe the type
  * and we either have 30/62 bitmap bits or nibble-based run-length,
@@ -2483,6 +2485,8 @@ init_stats (void)
 	mono_counters_register ("Major LOS sweep", MONO_COUNTER_GC | MONO_COUNTER_LONG, &time_major_los_sweep);
 	mono_counters_register ("Major sweep", MONO_COUNTER_GC | MONO_COUNTER_LONG, &time_major_sweep);
 	mono_counters_register ("Major fragment creation", MONO_COUNTER_GC | MONO_COUNTER_LONG, &time_major_fragment_creation);
+	mono_counters_register ("Total remsets processed", MONO_COUNTER_GC | MONO_COUNTER_LONG, &total_remsets_processed);
+
 
 #ifdef HEAVY_STATISTICS
 	mono_counters_register ("WBarrier set field", MONO_COUNTER_GC | MONO_COUNTER_INT, &stat_wbarrier_set_field);
@@ -2615,6 +2619,8 @@ collect_nursery (size_t requested_size)
 	time_minor_scan_remsets += TV_ELAPSED_MS (atv, btv);
 	DEBUG (2, fprintf (gc_debug_file, "Old generation scan: %d usecs\n", TV_ELAPSED (atv, btv)));
 
+	scan_from_card_tables (nursery_start, nursery_next, &gray_queue);
+
 	drain_gray_stack (&gray_queue);
 
 	TV_GETTIME (atv);
@@ -2732,6 +2738,7 @@ major_do_collection (const char *reason)
 	/* The remsets are not useful for a major collection */
 	clear_remsets ();
 	global_remset_cache_clear ();
+	card_table_clear ();
 
 	TV_GETTIME (atv);
 	init_pinning ();
@@ -4425,7 +4432,7 @@ update_current_thread_stack (void *start)
 #ifndef HEAVY_STATISTICS
 #define MANAGED_ALLOCATION
 #ifndef XDOMAIN_CHECKS_IN_WBARRIER
-#define MANAGED_WBARRIER
+//#define MANAGED_WBARRIER
 #endif
 #endif
 #endif
@@ -4977,6 +4984,7 @@ scan_from_remsets (void *start_nursery, void *end_nursery, GrayQueue *queue)
 			}
 
 			next_p = handle_remset (p, start_nursery, end_nursery, TRUE, queue);
+			++total_remsets_processed;
 
 			/* 
 			 * Clear global remsets of locations which no longer point to the 
@@ -5002,8 +5010,10 @@ scan_from_remsets (void *start_nursery, void *end_nursery, GrayQueue *queue)
 
 		for (i = 0; i < STORE_REMSET_BUFFER_SIZE - 1; ++i) {
 			gpointer addr = store_remset->data [i];
-			if (addr)
+			if (addr) {
 				handle_remset ((mword*)&addr, start_nursery, end_nursery, FALSE, queue);
+				++total_remsets_processed;
+			}
 		}
 
 		mono_sgen_free_internal (store_remset, INTERNAL_MEM_STORE_REMSET);
@@ -5021,6 +5031,7 @@ scan_from_remsets (void *start_nursery, void *end_nursery, GrayQueue *queue)
 				DEBUG (4, fprintf (gc_debug_file, "Scanning remset for thread %p, range: %p-%p, size: %td\n", info, remset->data, remset->store_next, remset->store_next - remset->data));
 				for (p = remset->data; p < remset->store_next;) {
 					p = handle_remset (p, start_nursery, end_nursery, FALSE, queue);
+					++total_remsets_processed;
 				}
 				remset->store_next = remset->data;
 				next = remset->next;
@@ -5030,8 +5041,10 @@ scan_from_remsets (void *start_nursery, void *end_nursery, GrayQueue *queue)
 					mono_sgen_free_internal_dynamic (remset, remset_byte_size (remset), INTERNAL_MEM_REMSET);
 				}
 			}
-			for (j = 0; j < *info->store_remset_buffer_index_addr; ++j)
+			for (j = 0; j < *info->store_remset_buffer_index_addr; ++j) {
 				handle_remset ((mword*)*info->store_remset_buffer_addr + j + 1, start_nursery, end_nursery, FALSE, queue);
+				++total_remsets_processed;
+			}
 			clear_thread_store_remset_buffer (info);
 		}
 	}
@@ -5043,6 +5056,7 @@ scan_from_remsets (void *start_nursery, void *end_nursery, GrayQueue *queue)
 		DEBUG (4, fprintf (gc_debug_file, "Scanning remset for freed thread, range: %p-%p, size: %td\n", remset->data, remset->store_next, remset->store_next - remset->data));
 		for (p = remset->data; p < remset->store_next;) {
 			p = handle_remset (p, start_nursery, end_nursery, FALSE, queue);
+			++total_remsets_processed;
 		}
 		next = remset->next;
 		DEBUG (4, fprintf (gc_debug_file, "Freed remset at %p\n", remset->data));
@@ -5558,16 +5572,21 @@ mono_gc_wbarrier_generic_nostore (gpointer ptr)
 	}
 #endif
 
-	LOCK_GC;
+	//LOCK_GC;
 
 	if (*(gpointer*)ptr)
 		binary_protocol_wbarrier (ptr, *(gpointer*)ptr, (gpointer)LOAD_VTABLE (*(gpointer*)ptr));
 
 	if (ptr_in_nursery (ptr) || ptr_on_stack (ptr) || !ptr_in_nursery (*(gpointer*)ptr)) {
 		DEBUG (8, fprintf (gc_debug_file, "Skipping remset at %p\n", ptr));
-		UNLOCK_GC;
+		//UNLOCK_GC;
 		return;
 	}
+
+	if (ptr_in_nursery(*(gpointer*)ptr))
+		sgen_card_table_mark_address ((mword)ptr);
+
+	return;
 
 	buffer = STORE_REMSET_BUFFER;
 	index = STORE_REMSET_BUFFER_INDEX;
@@ -5891,7 +5910,7 @@ static gboolean missing_remsets;
 #undef HANDLE_PTR
 #define HANDLE_PTR(ptr,obj)	do {	\
 		if (*(ptr) && (char*)*(ptr) >= nursery_start && (char*)*(ptr) < nursery_next) {	\
-		if (!find_in_remsets ((char*)(ptr))) { \
+		if (!find_in_remsets ((char*)(ptr)) && !sgen_card_table_address_is_marked ((mword)ptr)) { \
                 fprintf (gc_debug_file, "Oldspace->newspace reference %p at offset %td in object %p (%s.%s) not found in remsets.\n", *(ptr), (char*)(ptr) - (char*)(obj), (obj), ((MonoObject*)(obj))->vtable->klass->name_space, ((MonoObject*)(obj))->vtable->klass->name); \
 		binary_protocol_missing_remset ((obj), (gpointer)LOAD_VTABLE ((obj)), (char*)(ptr) - (char*)(obj), *(ptr), (gpointer)LOAD_VTABLE(*(ptr)), object_is_pinned (*(ptr))); \
 		if (!object_is_pinned (*(ptr)))				\
@@ -6426,6 +6445,8 @@ mono_gc_base_init (void)
 #ifndef HAVE_KW_THREAD
 	pthread_key_create (&thread_info_key, NULL);
 #endif
+
+	card_table_init ();
 
 	gc_initialized = TRUE;
 	UNLOCK_GC;

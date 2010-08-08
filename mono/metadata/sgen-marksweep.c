@@ -42,6 +42,7 @@
 #define MS_BLOCK_SIZE	(16*1024)
 #define MS_BLOCK_SIZE_SHIFT	14
 #define MAJOR_SECTION_SIZE	MS_BLOCK_SIZE
+#define CARDS_PER_BLOCK (MS_BLOCK_SIZE / CARD_SIZE_IN_BYTES)
 
 #ifdef FIXED_HEAP
 #define MS_DEFAULT_HEAP_NUM_BLOCKS	(32 * 1024) /* 512 MB */
@@ -1323,6 +1324,51 @@ mono_sgen_marksweep_init
 
 	FILL_COLLECTOR_COPY_OBJECT (collector);
 	FILL_COLLECTOR_SCAN_OBJECT (collector);
+}
+
+void __attribute__((noinline))
+major_clear_card_table (void)
+{
+	MSBlockInfo *block;
+
+	for (block = all_blocks; block; block = block->next)
+		sgen_card_table_reset_region ((mword)block->block, (mword)block->block + MS_BLOCK_SIZE);
+}
+
+void __attribute__((noinline))
+major_scan_card_table (SgenGrayQueue *queue)
+{
+	MSBlockInfo *block;
+
+	for (block = all_blocks; block; block = block->next) {
+		int i;
+		int block_obj_size = block->obj_size;
+		guint8 *cards = sgen_card_table_get_card_address ((mword)block->block);
+		char *start = block->block;
+
+		for (i = 0; i < CARDS_PER_BLOCK; ++i, start += CARD_SIZE_IN_BYTES) {
+			int index;
+			char *obj, *end;
+
+			if (!cards [i])
+				continue;
+
+			cards [i] = 0;
+
+			end = start + CARD_SIZE_IN_BYTES;
+			if (i == 0)
+				index = 0;
+			else
+				index = MS_BLOCK_OBJ_INDEX (start, block);
+
+			obj = (char*)MS_BLOCK_OBJ (block, index);
+			while (obj < end) {
+				if (MS_OBJ_ALLOCED (obj, block))
+					minor_scan_object (obj, queue);
+				obj += block_obj_size;
+			}
+		}
+	}
 }
 
 #endif
