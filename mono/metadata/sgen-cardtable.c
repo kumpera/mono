@@ -46,6 +46,16 @@ sgen_card_table_reset_region (mword start, mword end)
 	memset (sgen_card_table_get_card_address (start), 0, (end - start) >> CARD_BITS);
 }
 
+void
+sgen_card_table_mark_range (mword address, mword size)
+{
+	mword end = address + size;
+	do {
+		sgen_card_table_mark_address (address);
+		address += CARD_SIZE_IN_BYTES;
+	} while (address < end);
+}
+
 gboolean
 sgen_card_table_is_region_marked (mword start, mword end)
 {
@@ -83,6 +93,8 @@ card_table_clear (void)
 	los_clear_card_table ();
 }
 
+#if 0
+
 #include <unistd.h>
 #include <sys/mman.h>
 #include <sys/types.h>
@@ -102,3 +114,4 @@ collect_faulted_cards (void)
 
 	printf ("TOTAL card pages %d faulted %d\n", CARD_PAGES, count);
 }
+#endif

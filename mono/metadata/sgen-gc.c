@@ -2620,7 +2620,7 @@ collect_nursery (size_t requested_size)
 	DEBUG (2, fprintf (gc_debug_file, "Old generation scan: %d usecs\n", TV_ELAPSED (atv, btv)));
 
 	scan_from_card_tables (nursery_start, nursery_next, &gray_queue);
-	collect_faulted_cards ();
+	//collect_faulted_cards ();
 
 	drain_gray_stack (&gray_queue);
 
@@ -3735,11 +3735,11 @@ clear_unreachable_ephemerons (CopyOrMarkObjectFunc copy_func, char *start, char 
 			if (was_promoted) {
 				if (ptr_in_nursery (key)) {/*key was not promoted*/
 					DEBUG (5, fprintf (gc_debug_file, "\tAdded remset to key %p\n", key));
-					mono_sgen_add_to_global_remset (&cur->key);
+					sgen_card_table_mark_address ((mword)&cur->key);
 				}
 				if (ptr_in_nursery (cur->value)) {/*value was not promoted*/
 					DEBUG (5, fprintf (gc_debug_file, "\tAdded remset to value %p\n", cur->value));
-					mono_sgen_add_to_global_remset (&cur->value);
+					sgen_card_table_mark_address ((mword)&cur->value);
 				}
 			}
 		}
@@ -4985,6 +4985,7 @@ scan_from_remsets (void *start_nursery, void *end_nursery, GrayQueue *queue)
 			}
 
 			next_p = handle_remset (p, start_nursery, end_nursery, TRUE, queue);
+			printf ("store remset\n");
 			++total_remsets_processed;
 
 			/* 
@@ -5013,6 +5014,7 @@ scan_from_remsets (void *start_nursery, void *end_nursery, GrayQueue *queue)
 			gpointer addr = store_remset->data [i];
 			if (addr) {
 				handle_remset ((mword*)&addr, start_nursery, end_nursery, FALSE, queue);
+				printf ("generic store remset\n");
 				++total_remsets_processed;
 			}
 		}
@@ -5032,6 +5034,7 @@ scan_from_remsets (void *start_nursery, void *end_nursery, GrayQueue *queue)
 				DEBUG (4, fprintf (gc_debug_file, "Scanning remset for thread %p, range: %p-%p, size: %td\n", info, remset->data, remset->store_next, remset->store_next - remset->data));
 				for (p = remset->data; p < remset->store_next;) {
 					p = handle_remset (p, start_nursery, end_nursery, FALSE, queue);
+					printf ("thread store remset\n");
 					++total_remsets_processed;
 				}
 				remset->store_next = remset->data;
@@ -5044,6 +5047,7 @@ scan_from_remsets (void *start_nursery, void *end_nursery, GrayQueue *queue)
 			}
 			for (j = 0; j < *info->store_remset_buffer_index_addr; ++j) {
 				handle_remset ((mword*)*info->store_remset_buffer_addr + j + 1, start_nursery, end_nursery, FALSE, queue);
+				printf ("thread store remset2\n");
 				++total_remsets_processed;
 			}
 			clear_thread_store_remset_buffer (info);
@@ -5057,6 +5061,7 @@ scan_from_remsets (void *start_nursery, void *end_nursery, GrayQueue *queue)
 		DEBUG (4, fprintf (gc_debug_file, "Scanning remset for freed thread, range: %p-%p, size: %td\n", remset->data, remset->store_next, remset->store_next - remset->data));
 		for (p = remset->data; p < remset->store_next;) {
 			p = handle_remset (p, start_nursery, end_nursery, FALSE, queue);
+			printf ("free thread store remset\n");
 			++total_remsets_processed;
 		}
 		next = remset->next;
@@ -5415,22 +5420,10 @@ mono_gc_wbarrier_set_field (MonoObject *obj, gpointer field_ptr, MonoObject* val
 	}
 	DEBUG (8, fprintf (gc_debug_file, "Adding remset at %p\n", field_ptr));
 	LOCK_GC;
-	rs = REMEMBERED_SET;
-	if (rs->store_next < rs->end_set) {
-		*(rs->store_next++) = (mword)field_ptr;
-		*(void**)field_ptr = value;
-		UNLOCK_GC;
-		return;
-	}
-	rs = alloc_remset (rs->end_set - rs->data, (void*)1);
-	rs->next = REMEMBERED_SET;
-	REMEMBERED_SET = rs;
-#ifdef HAVE_KW_THREAD
-	mono_sgen_thread_info_lookup (ARCH_GET_THREAD ())->remset = rs;
-#endif
-	*(rs->store_next++) = (mword)field_ptr;
 	*(void**)field_ptr = value;
+	sgen_card_table_mark_address ((mword)field_ptr);
 	UNLOCK_GC;
+	return;
 }
 
 void
@@ -5445,22 +5438,10 @@ mono_gc_wbarrier_set_arrayref (MonoArray *arr, gpointer slot_ptr, MonoObject* va
 	}
 	DEBUG (8, fprintf (gc_debug_file, "Adding remset at %p\n", slot_ptr));
 	LOCK_GC;
-	rs = REMEMBERED_SET;
-	if (rs->store_next < rs->end_set) {
-		*(rs->store_next++) = (mword)slot_ptr;
-		*(void**)slot_ptr = value;
-		UNLOCK_GC;
-		return;
-	}
-	rs = alloc_remset (rs->end_set - rs->data, (void*)1);
-	rs->next = REMEMBERED_SET;
-	REMEMBERED_SET = rs;
-#ifdef HAVE_KW_THREAD
-	mono_sgen_thread_info_lookup (ARCH_GET_THREAD ())->remset = rs;
-#endif
-	*(rs->store_next++) = (mword)slot_ptr;
 	*(void**)slot_ptr = value;
+	sgen_card_table_mark_address ((mword)slot_ptr);
 	UNLOCK_GC;
+	return;
 }
 
 void
@@ -5475,23 +5456,9 @@ mono_gc_wbarrier_arrayref_copy (gpointer dest_ptr, gpointer src_ptr, int count)
 		UNLOCK_GC;
 		return;
 	}
-	rs = REMEMBERED_SET;
-	DEBUG (8, fprintf (gc_debug_file, "Adding remset at %p, %d\n", dest_ptr, count));
-	if (rs->store_next + 1 < rs->end_set) {
-		*(rs->store_next++) = (mword)dest_ptr | REMSET_RANGE;
-		*(rs->store_next++) = count;
-		UNLOCK_GC;
-		return;
-	}
-	rs = alloc_remset (rs->end_set - rs->data, (void*)1);
-	rs->next = REMEMBERED_SET;
-	REMEMBERED_SET = rs;
-#ifdef HAVE_KW_THREAD
-	mono_sgen_thread_info_lookup (ARCH_GET_THREAD ())->remset = rs;
-#endif
-	*(rs->store_next++) = (mword)dest_ptr | REMSET_RANGE;
-	*(rs->store_next++) = count;
+	sgen_card_table_mark_range ((mword)dest_ptr, count * sizeof (gpointer));
 	UNLOCK_GC;
+	return;
 }
 
 static char *found_obj;
@@ -5534,20 +5501,6 @@ find_object_for_ptr (char *ptr)
 	return found_obj;
 }
 
-static void
-evacuate_remset_buffer (void)
-{
-	gpointer *buffer;
-	TLAB_ACCESS_INIT;
-
-	buffer = STORE_REMSET_BUFFER;
-
-	add_generic_store_remset_from_buffer (buffer);
-	memset (buffer, 0, sizeof (gpointer) * STORE_REMSET_BUFFER_SIZE);
-
-	STORE_REMSET_BUFFER_INDEX = 0;
-}
-
 void
 mono_gc_wbarrier_generic_nostore (gpointer ptr)
 {
@@ -5586,33 +5539,6 @@ mono_gc_wbarrier_generic_nostore (gpointer ptr)
 
 	if (ptr_in_nursery(*(gpointer*)ptr))
 		sgen_card_table_mark_address ((mword)ptr);
-
-	return;
-
-	buffer = STORE_REMSET_BUFFER;
-	index = STORE_REMSET_BUFFER_INDEX;
-	/* This simple optimization eliminates a sizable portion of
-	   entries.  Comparing it to the last but one entry as well
-	   doesn't eliminate significantly more entries. */
-	if (buffer [index] == ptr) {
-		UNLOCK_GC;
-		return;
-	}
-
-	DEBUG (8, fprintf (gc_debug_file, "Adding remset at %p\n", ptr));
-	HEAVY_STAT (++stat_wbarrier_generic_store_remset);
-
-	++index;
-	if (index >= STORE_REMSET_BUFFER_SIZE) {
-		evacuate_remset_buffer ();
-		index = STORE_REMSET_BUFFER_INDEX;
-		g_assert (index == 0);
-		++index;
-	}
-	buffer [index] = ptr;
-	STORE_REMSET_BUFFER_INDEX = index;
-
-	UNLOCK_GC;
 }
 
 void
@@ -5649,32 +5575,10 @@ mono_gc_wbarrier_value_copy (gpointer dest, gpointer src, int count, MonoClass *
 	TLAB_ACCESS_INIT;
 	HEAVY_STAT (++stat_wbarrier_value_copy);
 	g_assert (klass->valuetype);
+	size_t size = count * mono_class_value_size (klass, NULL);
 	LOCK_GC;
-	memmove (dest, src, count * mono_class_value_size (klass, NULL));
-	rs = REMEMBERED_SET;
-	if (ptr_in_nursery (dest) || ptr_on_stack (dest) || !klass->has_references) {
-		UNLOCK_GC;
-		return;
-	}
-	g_assert (klass->gc_descr_inited);
-	DEBUG (8, fprintf (gc_debug_file, "Adding value remset at %p, count %d, descr %p for class %s (%p)\n", dest, count, klass->gc_descr, klass->name, klass));
-
-	if (rs->store_next + 3 < rs->end_set) {
-		*(rs->store_next++) = (mword)dest | REMSET_VTYPE;
-		*(rs->store_next++) = (mword)klass->gc_descr;
-		*(rs->store_next++) = (mword)count;
-		UNLOCK_GC;
-		return;
-	}
-	rs = alloc_remset (rs->end_set - rs->data, (void*)1);
-	rs->next = REMEMBERED_SET;
-	REMEMBERED_SET = rs;
-#ifdef HAVE_KW_THREAD
-	mono_sgen_thread_info_lookup (ARCH_GET_THREAD ())->remset = rs;
-#endif
-	*(rs->store_next++) = (mword)dest | REMSET_VTYPE;
-	*(rs->store_next++) = (mword)klass->gc_descr;
-	*(rs->store_next++) = (mword)count;
+	memmove (dest, src, size);
+	sgen_card_table_mark_range ((mword)dest, size);
 	UNLOCK_GC;
 }
 
