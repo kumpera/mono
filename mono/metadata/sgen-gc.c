@@ -2620,6 +2620,7 @@ collect_nursery (size_t requested_size)
 	DEBUG (2, fprintf (gc_debug_file, "Old generation scan: %d usecs\n", TV_ELAPSED (atv, btv)));
 
 	scan_from_card_tables (nursery_start, nursery_next, &gray_queue);
+	collect_faulted_cards ();
 
 	drain_gray_stack (&gray_queue);
 
@@ -4432,7 +4433,7 @@ update_current_thread_stack (void *start)
 #ifndef HEAVY_STATISTICS
 #define MANAGED_ALLOCATION
 #ifndef XDOMAIN_CHECKS_IN_WBARRIER
-//#define MANAGED_WBARRIER
+#define MANAGED_WBARRIER
 #endif
 #endif
 #endif
@@ -6965,8 +6966,20 @@ mono_gc_get_write_barrier (void)
 		// need_wb:
 		mono_mb_patch_branch (mb, label_need_wb);
 
+		//*sgen_card_table_get_card_address (address) = 1;
+
+		//addr = cardtable + (address >> CARD_BITS);
+		mono_mb_emit_ptr (mb, cardtable);
+		mono_mb_emit_ldarg (mb, 0);
+		mono_mb_emit_icon (mb, CARD_BITS);
+		mono_mb_emit_byte (mb, CEE_SHR_UN);
+		mono_mb_emit_byte (mb, CEE_ADD);
+		//*addr = 1
+		mono_mb_emit_icon (mb, 1);
+		mono_mb_emit_byte (mb, CEE_STIND_I1);
+
 		// buffer = STORE_REMSET_BUFFER;
-		buffer_var = mono_mb_add_local (mb, &mono_defaults.int_class->byval_arg);
+		/*buffer_var = mono_mb_add_local (mb, &mono_defaults.int_class->byval_arg);
 		EMIT_TLS_ACCESS (mb, store_remset_buffer, store_remset_buffer_offset);
 		mono_mb_emit_stloc (mb, buffer_var);
 
@@ -7010,27 +7023,27 @@ mono_gc_get_write_barrier (void)
 		// STORE_REMSET_BUFFER_INDEX = buffer_index;
 		EMIT_TLS_ACCESS (mb, store_remset_buffer_index_addr, store_remset_buffer_index_addr_offset);
 		mono_mb_emit_ldloc (mb, buffer_index_var);
-		mono_mb_emit_byte (mb, CEE_STIND_I);
+		mono_mb_emit_byte (mb, CEE_STIND_I);*/
 
 		// return;
 		mono_mb_patch_branch (mb, label_no_wb_1);
 		mono_mb_patch_branch (mb, label_no_wb_2);
 		mono_mb_patch_branch (mb, label_no_wb_3);
-		mono_mb_patch_branch (mb, label_no_wb_4);
+		//mono_mb_patch_branch (mb, label_no_wb_4);
 #ifndef SGEN_ALIGN_NURSERY
 		mono_mb_patch_branch (mb, label_no_wb_5);
 #endif
 		mono_mb_emit_byte (mb, CEE_RET);
 
 		// slow path
-		mono_mb_patch_branch (mb, label_slow_path);
-	}
+		//mono_mb_patch_branch (mb, label_slow_path);
+	} else
 #endif
-
-	mono_mb_emit_ldarg (mb, 0);
-	mono_mb_emit_icall (mb, mono_gc_wbarrier_generic_nostore);
-	mono_mb_emit_byte (mb, CEE_RET);
-
+	{
+		mono_mb_emit_ldarg (mb, 0);
+		mono_mb_emit_icall (mb, mono_gc_wbarrier_generic_nostore);
+		mono_mb_emit_byte (mb, CEE_RET);
+	}
 	res = mono_mb_create_method (mb, sig, 16);
 	mono_mb_free (mb);
 
