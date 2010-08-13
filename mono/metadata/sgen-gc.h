@@ -679,6 +679,8 @@ struct _SgenMajorCollector {
 	void (*free_non_pinned_object) (char *obj, size_t size);
 	void (*find_pin_queue_start_ends) (SgenGrayQueue *queue);
 	void (*pin_objects) (SgenGrayQueue *queue);
+	void (*scan_card_table) (SgenGrayQueue *queue);
+	void (*clear_card_table) (void);
 	void (*init_to_space) (void);
 	void (*sweep) (void);
 	void (*check_scan_starts) (void);

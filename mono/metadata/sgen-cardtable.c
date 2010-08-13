@@ -74,14 +74,12 @@ card_table_init (void)
 }
 
 
-void major_scan_card_table (GrayQueue *queue);
 void los_scan_card_table (GrayQueue *queue);
-void major_clear_card_table (void);
 
 static void
 scan_from_card_tables (void *start_nursery, void *end_nursery, GrayQueue *queue)
 {
-	major_scan_card_table (queue);
+	major.scan_card_table (queue);
 	los_scan_card_table (queue);
 }
 
@@ -89,7 +87,7 @@ static void
 card_table_clear (void)
 {
 	/*XXX we could do this in 2 ways. using mincore or iterating over all sections/los objects */
-	major_clear_card_table ();
+	major.clear_card_table ();
 	los_clear_card_table ();
 }
 

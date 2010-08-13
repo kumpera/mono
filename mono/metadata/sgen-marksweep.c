@@ -1212,6 +1212,52 @@ get_num_major_sections (void)
 	return num_major_sections;
 }
 
+static void
+major_clear_card_table (void)
+{
+	MSBlockInfo *block;
+
+	FOREACH_BLOCK (block) {
+		sgen_card_table_reset_region ((mword)block->block, (mword)block->block + MS_BLOCK_SIZE);
+	} END_FOREACH_BLOCK;
+}
+
+static void
+major_scan_card_table (SgenGrayQueue *queue)
+{
+	MSBlockInfo *block;
+
+	FOREACH_BLOCK (block) {
+		int i;
+		int block_obj_size = block->obj_size;
+		guint8 *cards = sgen_card_table_get_card_address ((mword)block->block);
+		char *start = block->block;
+
+		for (i = 0; i < CARDS_PER_BLOCK; ++i, start += CARD_SIZE_IN_BYTES) {
+			int index;
+			char *obj, *end;
+
+			if (!cards [i])
+				continue;
+
+			cards [i] = 0;
+
+			end = start + CARD_SIZE_IN_BYTES;
+			if (i == 0)
+				index = 0;
+			else
+				index = MS_BLOCK_OBJ_INDEX (start, block);
+
+			obj = (char*)MS_BLOCK_OBJ (block, index);
+			while (obj < end) {
+				if (MS_OBJ_ALLOCED (obj, block))
+					minor_scan_object (obj, queue);
+				obj += block_obj_size;
+			}
+		}
+	} END_FOREACH_BLOCK;
+}
+
 #ifdef FIXED_HEAP
 static gboolean
 major_handle_gc_param (const char *opt)
@@ -1302,6 +1348,8 @@ mono_sgen_marksweep_init
 	collector->free_non_pinned_object = major_free_non_pinned_object;
 	collector->find_pin_queue_start_ends = major_find_pin_queue_start_ends;
 	collector->pin_objects = major_pin_objects;
+	collector->scan_card_table = major_scan_card_table;
+	collector->clear_card_table = major_clear_card_table;
 	collector->init_to_space = major_init_to_space;
 	collector->sweep = major_sweep;
 	collector->check_scan_starts = major_check_scan_starts;
@@ -1324,51 +1372,6 @@ mono_sgen_marksweep_init
 
 	FILL_COLLECTOR_COPY_OBJECT (collector);
 	FILL_COLLECTOR_SCAN_OBJECT (collector);
-}
-
-void __attribute__((noinline))
-major_clear_card_table (void)
-{
-	MSBlockInfo *block;
-
-	for (block = all_blocks; block; block = block->next)
-		sgen_card_table_reset_region ((mword)block->block, (mword)block->block + MS_BLOCK_SIZE);
-}
-
-void __attribute__((noinline))
-major_scan_card_table (SgenGrayQueue *queue)
-{
-	MSBlockInfo *block;
-
-	for (block = all_blocks; block; block = block->next) {
-		int i;
-		int block_obj_size = block->obj_size;
-		guint8 *cards = sgen_card_table_get_card_address ((mword)block->block);
-		char *start = block->block;
-
-		for (i = 0; i < CARDS_PER_BLOCK; ++i, start += CARD_SIZE_IN_BYTES) {
-			int index;
-			char *obj, *end;
-
-			if (!cards [i])
-				continue;
-
-			cards [i] = 0;
-
-			end = start + CARD_SIZE_IN_BYTES;
-			if (i == 0)
-				index = 0;
-			else
-				index = MS_BLOCK_OBJ_INDEX (start, block);
-
-			obj = (char*)MS_BLOCK_OBJ (block, index);
-			while (obj < end) {
-				if (MS_OBJ_ALLOCED (obj, block))
-					minor_scan_object (obj, queue);
-				obj += block_obj_size;
-			}
-		}
-	}
 }
 
 #endif
