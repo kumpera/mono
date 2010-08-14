@@ -466,7 +466,7 @@ los_clear_card_table (void)
 
 }
 
-#define ARRAY_OBJ_INDEX(ptr,array,elem_size) (((char*)(ptr) - ((array) + G_STRUCT_OFFSET (MonoArray, vector))) / (elem_size))
+#define ARRAY_OBJ_INDEX(ptr,array,elem_size) (((char*)(ptr) - ((char*)(array) + G_STRUCT_OFFSET (MonoArray, vector))) / (elem_size))
 
 static void __attribute__((noinline))
 los_scan_card_table (GrayQueue *queue)
@@ -480,16 +480,11 @@ los_scan_card_table (GrayQueue *queue)
 		if (!klass->has_references)
 			continue;
 
-		if (sgen_card_table_is_region_marked ((mword)obj->data, (mword)obj->data + obj->size)) {
-			sgen_card_table_reset_region ((mword)obj->data, (mword)obj->data + obj->size);
-			major.minor_scan_object (obj->data, queue);
-		}
-		continue;
-
 		if (vt->rank) {
+			MonoArray *arr = obj->data;
 			mword desc = (mword)klass->element_class->gc_descr;
 			char *start = sgen_card_table_align_pointer (obj->data);
-			char *end = start + obj->size;
+			char *end = obj->data + obj->size;
 			int size = mono_array_element_size (klass);
 
 			g_assert (desc);
@@ -507,8 +502,10 @@ los_scan_card_table (GrayQueue *queue)
 
 				*card_addr = 0;
 				card_end = start + CARD_SIZE_IN_BYTES;
+				if (end < card_end)
+					card_end = end;
 
-				if (start <= obj->data)
+				if (start <= arr->vector)
 					index = 0;
 				else
 					index = ARRAY_OBJ_INDEX (start, obj->data, size);
@@ -534,8 +531,8 @@ los_scan_card_table (GrayQueue *queue)
 			}
 		} else {
 			if (sgen_card_table_is_region_marked ((mword)obj->data, (mword)obj->data + obj->size)) {
-				major.minor_scan_object (obj->data, queue);
 				sgen_card_table_reset_region ((mword)obj->data, (mword)obj->data + obj->size);
+				major.minor_scan_object (obj->data, queue);
 			}
 		}
 	}
