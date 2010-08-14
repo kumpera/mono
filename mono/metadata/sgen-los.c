@@ -480,6 +480,12 @@ los_scan_card_table (GrayQueue *queue)
 		if (!klass->has_references)
 			continue;
 
+		if (sgen_card_table_is_region_marked ((mword)obj->data, (mword)obj->data + obj->size)) {
+			sgen_card_table_reset_region ((mword)obj->data, (mword)obj->data + obj->size);
+			major.minor_scan_object (obj->data, queue);
+		}
+		continue;
+
 		if (vt->rank) {
 			mword desc = (mword)klass->element_class->gc_descr;
 			char *start = sgen_card_table_align_pointer (obj->data);
