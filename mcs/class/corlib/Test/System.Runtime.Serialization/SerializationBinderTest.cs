@@ -1,8 +1,7 @@
 //
-// ccrewrite.cs
+// System.Runtime.Serialization.SerializationBinderTest.cs.
 //
-// Authors:
-//	Marek Safar (marek.safar@gmail.com)
+// Author: Carlos Alberto Cortez  <calberto.cortez@gmail.com>
 //
 // Copyright (C) 2010 Novell, Inc (http://www.novell.com)
 //
@@ -26,13 +25,36 @@
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 //
 
-namespace Mono.CodeContracts.Rewrite
+using System;
+using System.Runtime.Serialization;
+using NUnit.Framework;
+
+namespace MonoTests.System.Runtime.Serialization
 {
-	class Driver
+	[TestFixture]
+	public class SerializationBinderTest
 	{
-		public static int Main ()
+#if NET_4_0
+		[Test]
+		public void BindToName ()
 		{
-			return 0;
+			TestSerializationBinder binder = new TestSerializationBinder ();
+			string assembly_name;
+			string type_name;
+
+			binder.BindToName (typeof (SerializationBinder), out assembly_name, out type_name);
+			Assert.AreEqual (null, assembly_name, "#A0");
+			Assert.AreEqual (null, type_name, "#A1");
+		}
+#endif
+	}
+
+	class TestSerializationBinder : SerializationBinder
+	{
+		public override Type BindToType (string assemblyName, string typeName)
+		{
+			return null;
 		}
 	}
 }
+
