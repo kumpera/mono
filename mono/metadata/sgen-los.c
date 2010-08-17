@@ -50,6 +50,7 @@
 /*
  * This shouldn't be much smaller or larger than MAX_SMALL_OBJ_SIZE.
  * Must be at least sizeof (LOSSection).
+ * This value MUST be a multiple of CARD_SIZE_IN_BYTES
  */
 #define LOS_CHUNK_SIZE		4096
 #define LOS_CHUNK_BITS		12
@@ -466,6 +467,14 @@ los_clear_card_table (void)
 
 }
 
+static void __attribute__((noinline))
+los_iterate_live_block_ranges (sgen_cardtable_block_callback callback)
+{
+	LOSObject *obj;
+	for (obj = los_object_list; obj; obj = obj->next)
+		callback ((mword)obj->data, (mword)obj->size);
+}
+
 #define ARRAY_OBJ_INDEX(ptr,array,elem_size) (((char*)(ptr) - ((char*)(array) + G_STRUCT_OFFSET (MonoArray, vector))) / (elem_size))
 
 static void __attribute__((noinline))
@@ -481,7 +490,7 @@ los_scan_card_table (GrayQueue *queue)
 			continue;
 
 		if (vt->rank) {
-			MonoArray *arr = obj->data;
+			MonoArray *arr = (MonoArray *)obj->data;
 			mword desc = (mword)klass->element_class->gc_descr;
 			char *start = sgen_card_table_align_pointer (obj->data);
 			char *end = obj->data + obj->size;
@@ -491,21 +500,16 @@ los_scan_card_table (GrayQueue *queue)
 
 			for (; start <= end; start += CARD_SIZE_IN_BYTES) {
 				char *elem, *card_end;
-				guint8 *card_addr;
 				uintptr_t index;
-				card_addr = sgen_card_table_get_card_address ((mword)start);
 
-				if (!*card_addr) {
-					//++card_ignored;
+				if (!sgen_card_table_card_begin_scanning ((mword)start))
 					continue;
-				}
 
-				*card_addr = 0;
 				card_end = start + CARD_SIZE_IN_BYTES;
 				if (end < card_end)
 					card_end = end;
 
-				if (start <= arr->vector)
+				if (start <= (char*)&arr->vector [0])
 					index = 0;
 				else
 					index = ARRAY_OBJ_INDEX (start, obj->data, size);
@@ -530,8 +534,7 @@ los_scan_card_table (GrayQueue *queue)
 				}
 			}
 		} else {
-			if (sgen_card_table_is_region_marked ((mword)obj->data, (mword)obj->data + obj->size)) {
-				sgen_card_table_reset_region ((mword)obj->data, (mword)obj->data + obj->size);
+			if (sgen_card_table_region_begin_scanning ((mword)obj->data, (mword)obj->data + obj->size)) {
 				major.minor_scan_object (obj->data, queue);
 			}
 		}

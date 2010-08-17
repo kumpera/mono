@@ -5871,8 +5871,10 @@ check_consistency (void)
 
 #undef HANDLE_PTR
 #define HANDLE_PTR(ptr,obj)	do {					\
-		if (*(ptr))						\
-			g_assert (LOAD_VTABLE (*(ptr)));		\
+		if (*(ptr)) {						\
+			if (!LOAD_VTABLE (*(ptr)))	\
+				g_error ("Could not load vtable for ptr %p from object %p", ptr, obj);	\
+		}	\
 	} while (0)
 
 static void
@@ -6877,6 +6879,10 @@ mono_gc_get_write_barrier (void)
 		mono_mb_emit_ldarg (mb, 0);
 		mono_mb_emit_icon (mb, CARD_BITS);
 		mono_mb_emit_byte (mb, CEE_SHR_UN);
+#ifdef OVERLAPPING_CARDS
+		mono_mb_emit_icon (mb, CARD_MASK);
+		mono_mb_emit_byte (mb, CEE_AND);
+#endif
 		mono_mb_emit_byte (mb, CEE_ADD);
 		//*addr = 1
 		mono_mb_emit_icon (mb, 1);
