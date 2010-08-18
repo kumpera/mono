@@ -298,6 +298,7 @@ static int stat_wbarrier_object_copy = 0;
 static long long time_minor_pre_collection_fragment_clear = 0;
 static long long time_minor_pinning = 0;
 static long long time_minor_scan_remsets = 0;
+static long long time_minor_scan_cardtables = 0;
 static long long time_minor_scan_pinned = 0;
 static long long time_minor_scan_registered_roots = 0;
 static long long time_minor_scan_thread_data = 0;
@@ -2466,6 +2467,7 @@ init_stats (void)
 	mono_counters_register ("Minor fragment clear", MONO_COUNTER_GC | MONO_COUNTER_LONG, &time_minor_pre_collection_fragment_clear);
 	mono_counters_register ("Minor pinning", MONO_COUNTER_GC | MONO_COUNTER_LONG, &time_minor_pinning);
 	mono_counters_register ("Minor scan remsets", MONO_COUNTER_GC | MONO_COUNTER_LONG, &time_minor_scan_remsets);
+	mono_counters_register ("Minor scan card tables", MONO_COUNTER_GC | MONO_COUNTER_LONG, &time_minor_scan_cardtables);
 	mono_counters_register ("Minor scan pinned", MONO_COUNTER_GC | MONO_COUNTER_LONG, &time_minor_scan_pinned);
 	mono_counters_register ("Minor scan registered roots", MONO_COUNTER_GC | MONO_COUNTER_LONG, &time_minor_scan_registered_roots);
 	mono_counters_register ("Minor scan thread data", MONO_COUNTER_GC | MONO_COUNTER_LONG, &time_minor_scan_thread_data);
@@ -2619,8 +2621,11 @@ collect_nursery (size_t requested_size)
 	time_minor_scan_remsets += TV_ELAPSED_MS (atv, btv);
 	DEBUG (2, fprintf (gc_debug_file, "Old generation scan: %d usecs\n", TV_ELAPSED (atv, btv)));
 
+	/*temp hack, fix it later when we remove the remset code*/
+	TV_GETTIME (atv);
 	scan_from_card_tables (nursery_start, nursery_next, &gray_queue);
-	//collect_faulted_cards ();
+	TV_GETTIME (btv);
+	time_minor_scan_cardtables += TV_ELAPSED_MS (atv, btv);
 
 	drain_gray_stack (&gray_queue);
 
