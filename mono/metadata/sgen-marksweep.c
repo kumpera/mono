@@ -1218,7 +1218,8 @@ major_clear_card_table (void)
 	MSBlockInfo *block;
 
 	FOREACH_BLOCK (block) {
-		sgen_card_table_reset_region ((mword)block->block, (mword)block->block + MS_BLOCK_SIZE);
+		if (block->has_references)
+			sgen_card_table_reset_region ((mword)block->block, (mword)block->block + MS_BLOCK_SIZE);
 	} END_FOREACH_BLOCK;
 }
 
@@ -1228,7 +1229,8 @@ major_iterate_live_block_ranges (sgen_cardtable_block_callback callback)
 	MSBlockInfo *block;
 
 	FOREACH_BLOCK (block) {
-		callback ((mword)block->block, MS_BLOCK_SIZE);
+		if (block->has_references)
+			callback ((mword)block->block, MS_BLOCK_SIZE);
 	} END_FOREACH_BLOCK;
 }
 
@@ -1241,6 +1243,9 @@ major_scan_card_table (SgenGrayQueue *queue)
 		int i;
 		int block_obj_size = block->obj_size;
 		char *start = block->block;
+
+		if (!block->has_references)
+			continue;
 
 		for (i = 0; i < CARDS_PER_BLOCK; ++i, start += CARD_SIZE_IN_BYTES) {
 			int index;

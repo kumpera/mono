@@ -456,14 +456,13 @@ static void __attribute__((noinline))
 los_clear_card_table (void)
 {
 	LOSObject *obj;
-	LOSSection *section;
 	for (obj = los_object_list; obj; obj = obj->next) {
-		if (obj->huge_object)
+		MonoVTable *vt = (MonoVTable*)LOAD_VTABLE (obj->data);
+		MonoClass *klass = vt->klass;
+
+		if (klass->has_references)
 			sgen_card_table_reset_region ((mword)obj->data, (mword)obj->data + obj->size);
 	}
-
-	for (section = los_sections; section; section = section->next)
-		sgen_card_table_reset_region ((mword)section, (mword)section + LOS_SECTION_SIZE);
 
 }
 
@@ -471,8 +470,13 @@ static void __attribute__((noinline))
 los_iterate_live_block_ranges (sgen_cardtable_block_callback callback)
 {
 	LOSObject *obj;
-	for (obj = los_object_list; obj; obj = obj->next)
-		callback ((mword)obj->data, (mword)obj->size);
+	for (obj = los_object_list; obj; obj = obj->next) {
+		MonoVTable *vt = (MonoVTable*)LOAD_VTABLE (obj->data);
+		MonoClass *klass = vt->klass;
+
+		if (klass->has_references)
+			callback ((mword)obj->data, (mword)obj->size);
+	}
 }
 
 #define ARRAY_OBJ_INDEX(ptr,array,elem_size) (((char*)(ptr) - ((char*)(array) + G_STRUCT_OFFSET (MonoArray, vector))) / (elem_size))
