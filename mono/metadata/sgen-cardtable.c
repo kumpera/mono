@@ -90,6 +90,8 @@ sgen_card_table_region_begin_scanning (mword start, mword end)
 	sgen_card_table_reset_region (old_start, end);
 	return res;
 }
+
+
 #endif
 
 #ifdef USE_FINE_GRAINED_CARD_TABLE_REFINEMENTS
@@ -111,6 +113,14 @@ sgen_card_table_mark_address (mword address)
 	*sgen_card_table_get_card_address (address) = 1;
 }
 
+/*FIXME this won't work with the parallel mark code*/
+void
+sgen_card_table_remark_address (mword address)
+{
+	guint8 *card = sgen_card_table_get_card_address (address);
+	mword bit = (address >> REFINEMENT_SHIFT) & REFINEMENT_MASK;
+	*card |= 1 << (bit + REFINEMENT_EXTRA_SHIFT);
+}
 
 void*
 sgen_card_table_align_pointer (void *ptr)

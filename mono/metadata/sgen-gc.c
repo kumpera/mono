@@ -3742,11 +3742,11 @@ clear_unreachable_ephemerons (CopyOrMarkObjectFunc copy_func, char *start, char 
 			if (was_promoted) {
 				if (ptr_in_nursery (key)) {/*key was not promoted*/
 					DEBUG (5, fprintf (gc_debug_file, "\tAdded remset to key %p\n", key));
-					sgen_card_table_mark_address ((mword)&cur->key);
+					sgen_card_table_remark_address ((mword)&cur->key);
 				}
 				if (ptr_in_nursery (cur->value)) {/*value was not promoted*/
 					DEBUG (5, fprintf (gc_debug_file, "\tAdded remset to value %p\n", cur->value));
-					sgen_card_table_mark_address ((mword)&cur->value);
+					sgen_card_table_remark_address ((mword)&cur->value);
 				}
 			}
 		}

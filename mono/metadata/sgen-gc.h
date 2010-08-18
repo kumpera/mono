@@ -653,6 +653,7 @@ void* sgen_card_table_align_pointer (void *ptr) MONO_INTERNAL;
 gboolean sgen_card_table_card_begin_scanning (mword address) MONO_INTERNAL;
 gboolean sgen_card_table_region_begin_scanning (mword start, mword end) MONO_INTERNAL;
 void sgen_card_table_mark_address (mword address) MONO_INTERNAL;
+void sgen_card_table_remark_address (mword address) MONO_INTERNAL;
 void sgen_card_table_mark_range (mword address, mword size) MONO_INTERNAL;
 typedef void (*sgen_cardtable_block_callback) (mword start, mword size);
 
