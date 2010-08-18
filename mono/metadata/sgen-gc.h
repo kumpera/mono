@@ -660,7 +660,7 @@ typedef void (*sgen_cardtable_block_callback) (mword start, mword size);
 #define CARD_SIZE_IN_BYTES (1 << CARD_BITS)
 
 /*XXX HACK fixme*/
-#define OVERLAPPING_CARDS
+//#define OVERLAPPING_CARDS
 #define CARD_MASK ((1 << 9) - 1)
 
 

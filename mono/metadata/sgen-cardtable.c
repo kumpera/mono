@@ -9,7 +9,8 @@
  */
 
 /*XXX the 18 here is for testing, restore to 32 later*/
-#define CARD_COUNT_BITS (18 - CARD_BITS)
+//#define CARD_COUNT_BITS (18 - CARD_BITS)
+#define CARD_COUNT_BITS (32 - CARD_BITS)
 #define CARD_COUNT_IN_BYTES (1 << CARD_COUNT_BITS)
 
 
@@ -50,6 +51,18 @@ sgen_card_table_region_begin_scanning (mword start, mword end)
 
 #else
 
+static guint8*
+sgen_card_table_get_card_address (mword address)
+{
+	return cardtable + (address >> CARD_BITS);
+}
+
+static gboolean
+sgen_card_table_address_is_marked (mword address)
+{
+	return *sgen_card_table_get_card_address (address) != 0;
+}
+
 gboolean
 sgen_card_table_card_begin_scanning (mword address)
 {
@@ -57,12 +70,6 @@ sgen_card_table_card_begin_scanning (mword address)
 	gboolean res = *card;
 	*card = 0;
 	return res;
-}
-
-static guint8*
-sgen_card_table_get_card_address (mword address)
-{
-	return cardtable + (address >> CARD_BITS);
 }
 
 gboolean
@@ -90,11 +97,6 @@ sgen_card_table_mark_address (mword address)
 	*sgen_card_table_get_card_address (address) = 1;
 }
 
-static gboolean
-sgen_card_table_address_is_marked (mword address)
-{
-	return *sgen_card_table_get_card_address (address) != 0;
-}
 
 void*
 sgen_card_table_align_pointer (void *ptr)
