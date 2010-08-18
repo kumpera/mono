@@ -5411,8 +5411,6 @@ alloc_remset (int size, gpointer id) {
 void
 mono_gc_wbarrier_set_field (MonoObject *obj, gpointer field_ptr, MonoObject* value)
 {
-	RememberedSet *rs;
-	TLAB_ACCESS_INIT;
 	HEAVY_STAT (++stat_wbarrier_set_field);
 	if (ptr_in_nursery (field_ptr)) {
 		*(void**)field_ptr = value;
@@ -5429,8 +5427,6 @@ mono_gc_wbarrier_set_field (MonoObject *obj, gpointer field_ptr, MonoObject* val
 void
 mono_gc_wbarrier_set_arrayref (MonoArray *arr, gpointer slot_ptr, MonoObject* value)
 {
-	RememberedSet *rs;
-	TLAB_ACCESS_INIT;
 	HEAVY_STAT (++stat_wbarrier_set_arrayref);
 	if (ptr_in_nursery (slot_ptr)) {
 		*(void**)slot_ptr = value;
@@ -5447,8 +5443,6 @@ mono_gc_wbarrier_set_arrayref (MonoArray *arr, gpointer slot_ptr, MonoObject* va
 void
 mono_gc_wbarrier_arrayref_copy (gpointer dest_ptr, gpointer src_ptr, int count)
 {
-	RememberedSet *rs;
-	TLAB_ACCESS_INIT;
 	HEAVY_STAT (++stat_wbarrier_arrayref_copy);
 	LOCK_GC;
 	memmove (dest_ptr, src_ptr, count * sizeof (gpointer));
@@ -5504,8 +5498,6 @@ find_object_for_ptr (char *ptr)
 void
 mono_gc_wbarrier_generic_nostore (gpointer ptr)
 {
-	gpointer *buffer;
-	int index;
 	TLAB_ACCESS_INIT;
 
 	HEAVY_STAT (++stat_wbarrier_generic_store);
@@ -5526,14 +5518,11 @@ mono_gc_wbarrier_generic_nostore (gpointer ptr)
 	}
 #endif
 
-	//LOCK_GC;
-
 	if (*(gpointer*)ptr)
 		binary_protocol_wbarrier (ptr, *(gpointer*)ptr, (gpointer)LOAD_VTABLE (*(gpointer*)ptr));
 
 	if (ptr_in_nursery (ptr) || ptr_on_stack (ptr) || !ptr_in_nursery (*(gpointer*)ptr)) {
 		DEBUG (8, fprintf (gc_debug_file, "Skipping remset at %p\n", ptr));
-		//UNLOCK_GC;
 		return;
 	}
 
@@ -5571,11 +5560,10 @@ void mono_gc_wbarrier_value_copy_bitmap (gpointer _dest, gpointer _src, int size
 void
 mono_gc_wbarrier_value_copy (gpointer dest, gpointer src, int count, MonoClass *klass)
 {
-	RememberedSet *rs;
-	TLAB_ACCESS_INIT;
+	size_t size = count * mono_class_value_size (klass, NULL);
+
 	HEAVY_STAT (++stat_wbarrier_value_copy);
 	g_assert (klass->valuetype);
-	size_t size = count * mono_class_value_size (klass, NULL);
 	LOCK_GC;
 	memmove (dest, src, size);
 	sgen_card_table_mark_range ((mword)dest, size);
@@ -6767,12 +6755,12 @@ mono_gc_get_write_barrier (void)
 	MonoMethodBuilder *mb;
 	MonoMethodSignature *sig;
 #ifdef MANAGED_WBARRIER
-	int label_no_wb_1, label_no_wb_2, label_no_wb_3, label_no_wb_4, label_need_wb, label_slow_path;
+	int label_no_wb_1, label_no_wb_2, label_no_wb_3, label_need_wb;
 #ifndef SGEN_ALIGN_NURSERY
 	int label_continue_1, label_continue_2, label_no_wb_5;
 	int dereferenced_var;
 #endif
-	int buffer_var, buffer_index_var, dummy_var;
+	int dummy_var;
 
 #ifdef HAVE_KW_THREAD
 	int stack_end_offset = -1, store_remset_buffer_offset = -1;
@@ -6888,53 +6876,6 @@ mono_gc_get_write_barrier (void)
 		mono_mb_emit_icon (mb, 1);
 		mono_mb_emit_byte (mb, CEE_STIND_I1);
 
-		// buffer = STORE_REMSET_BUFFER;
-		/*buffer_var = mono_mb_add_local (mb, &mono_defaults.int_class->byval_arg);
-		EMIT_TLS_ACCESS (mb, store_remset_buffer, store_remset_buffer_offset);
-		mono_mb_emit_stloc (mb, buffer_var);
-
-		// buffer_index = STORE_REMSET_BUFFER_INDEX;
-		buffer_index_var = mono_mb_add_local (mb, &mono_defaults.int_class->byval_arg);
-		EMIT_TLS_ACCESS (mb, store_remset_buffer_index, store_remset_buffer_index_offset);
-		mono_mb_emit_stloc (mb, buffer_index_var);
-
-		// if (buffer [buffer_index] == ptr) return;
-		mono_mb_emit_ldloc (mb, buffer_var);
-		mono_mb_emit_ldloc (mb, buffer_index_var);
-		g_assert (sizeof (gpointer) == 4 || sizeof (gpointer) == 8);
-		mono_mb_emit_icon (mb, sizeof (gpointer) == 4 ? 2 : 3);
-		mono_mb_emit_byte (mb, CEE_SHL);
-		mono_mb_emit_byte (mb, CEE_ADD);
-		mono_mb_emit_byte (mb, CEE_LDIND_I);
-		mono_mb_emit_ldarg (mb, 0);
-		label_no_wb_4 = mono_mb_emit_branch (mb, CEE_BEQ);
-
-		// ++buffer_index;
-		mono_mb_emit_ldloc (mb, buffer_index_var);
-		mono_mb_emit_icon (mb, 1);
-		mono_mb_emit_byte (mb, CEE_ADD);
-		mono_mb_emit_stloc (mb, buffer_index_var);
-
-		// if (buffer_index >= STORE_REMSET_BUFFER_SIZE) goto slow_path;
-		mono_mb_emit_ldloc (mb, buffer_index_var);
-		mono_mb_emit_icon (mb, STORE_REMSET_BUFFER_SIZE);
-		label_slow_path = mono_mb_emit_branch (mb, CEE_BGE);
-
-		// buffer [buffer_index] = ptr;
-		mono_mb_emit_ldloc (mb, buffer_var);
-		mono_mb_emit_ldloc (mb, buffer_index_var);
-		g_assert (sizeof (gpointer) == 4 || sizeof (gpointer) == 8);
-		mono_mb_emit_icon (mb, sizeof (gpointer) == 4 ? 2 : 3);
-		mono_mb_emit_byte (mb, CEE_SHL);
-		mono_mb_emit_byte (mb, CEE_ADD);
-		mono_mb_emit_ldarg (mb, 0);
-		mono_mb_emit_byte (mb, CEE_STIND_I);
-
-		// STORE_REMSET_BUFFER_INDEX = buffer_index;
-		EMIT_TLS_ACCESS (mb, store_remset_buffer_index_addr, store_remset_buffer_index_addr_offset);
-		mono_mb_emit_ldloc (mb, buffer_index_var);
-		mono_mb_emit_byte (mb, CEE_STIND_I);*/
-
 		// return;
 		mono_mb_patch_branch (mb, label_no_wb_1);
 		mono_mb_patch_branch (mb, label_no_wb_2);
@@ -6944,9 +6885,6 @@ mono_gc_get_write_barrier (void)
 		mono_mb_patch_branch (mb, label_no_wb_5);
 #endif
 		mono_mb_emit_byte (mb, CEE_RET);
-
-		// slow path
-		//mono_mb_patch_branch (mb, label_slow_path);
 	} else
 #endif
 	{

@@ -64,7 +64,7 @@ sgen_card_table_address_is_marked (mword address)
 gboolean
 sgen_card_table_card_begin_scanning (mword address)
 {
-	char *card = sgen_card_table_get_card_address (address);
+	guint8 *card = sgen_card_table_get_card_address (address);
 	gboolean res = *card;
 	*card = 0;
 	return res;
