@@ -659,9 +659,9 @@ typedef void (*sgen_cardtable_block_callback) (mword start, mword size);
 #define CARD_BITS 9
 #define CARD_SIZE_IN_BYTES (1 << CARD_BITS)
 
-/*XXX HACK fixme*/
-//#define OVERLAPPING_CARDS
-#define CARD_MASK ((1 << 9) - 1)
+#if SIZEOF_VOID_P == 8
+#define OVERLAPPING_CARDS
+#endif
 
 
 typedef struct _SgenMajorCollector SgenMajorCollector;

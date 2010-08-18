@@ -8,11 +8,9 @@
  *
  */
 
-/*XXX the 18 here is for testing, restore to 32 later*/
-//#define CARD_COUNT_BITS (18 - CARD_BITS)
 #define CARD_COUNT_BITS (32 - CARD_BITS)
 #define CARD_COUNT_IN_BYTES (1 << CARD_COUNT_BITS)
-
+#define CARD_MASK ((1 << CARD_COUNT_BITS) - 1)
 
 static guint8 *cardtable;
 
