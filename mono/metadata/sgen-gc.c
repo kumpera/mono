@@ -2559,6 +2559,7 @@ collect_nursery (size_t requested_size)
 
 	binary_protocol_collection (GENERATION_NURSERY);
 	check_scan_starts ();
+	card_table_collect_stats (TRUE);
 
 	degraded_mode = 0;
 	orig_nursery_next = nursery_next;
@@ -2678,6 +2679,7 @@ collect_nursery (size_t requested_size)
 	g_assert (gray_object_queue_is_empty (&gray_queue));
 
 	check_scan_starts ();
+	card_table_collect_stats (FALSE);
 
 	binary_protocol_flush_buffers ();
 
