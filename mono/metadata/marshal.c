@@ -9339,9 +9339,10 @@ get_virtual_stelemref_kind (MonoClass *element_class)
 {
 	if (element_class == mono_defaults.object_class)
 		return 0;
-	if (MONO_CLASS_IS_INTERFACE (element_class) || element_class->marshalbyref)
+	/*Arrays are sealed but are covariant on their element type, We can't use any of the fast paths.*/
+	if (MONO_CLASS_IS_INTERFACE (element_class) || element_class->marshalbyref || element_class->rank)
 		return 1;
-	if (element_class->flags & TYPE_ATTRIBUTE_SEALED)
+	if ((element_class->flags & TYPE_ATTRIBUTE_SEALED))
 		return 2;
 	return 3;
 }
@@ -9377,10 +9378,25 @@ load_value_class (MonoMethodBuilder *mb, int vklass)
 	mono_mb_emit_byte (mb, CEE_LDIND_I);
 	mono_mb_emit_stloc (mb, vklass);
 }
+
+#if 0
+static void
+printf_invalid_cast (MonoObject *array, size_t index, MonoObject *value)
+{
+	if (value)
+		printf ("INVALID CAST array %s value %s\n", mono_type_get_full_name(array->vtable->klass), mono_type_get_full_name (value->vtable->klass));
+	else
+		printf ("INVALID CAST array %s value NULL\n", mono_type_get_full_name(array->vtable->klass));
+
+}
+#endif
+
 /*
  * TODO:
  *	- Separate simple interfaces from variant interfaces or mbr types. This way we can avoid the icall for them.
  *	- Emit a (new) mono bytecode that produces OP_COND_EXC_NE_UN to raise ArrayTypeMismatch
+ *	- Maybe mve some MonoClass field into the vtable to reduce the number of loads
+ *	- Add a case for arrays of arrays.
  */
 MonoMethod*
 mono_marshal_get_virtual_stelemref (MonoClass *array_class)
@@ -9401,6 +9417,8 @@ mono_marshal_get_virtual_stelemref (MonoClass *array_class)
 	if (cached_methods [kind])
 		return cached_methods [kind];
 
+
+
 	mb = mono_mb_new_no_dup_name (mono_defaults.object_class, g_strdup_printf ("virt_stelemref_%d", kind), MONO_WRAPPER_STELEMREF);
 
 	sig = mono_metadata_signature_alloc (mono_defaults.corlib, 2);
@@ -9410,6 +9428,15 @@ mono_marshal_get_virtual_stelemref (MonoClass *array_class)
 	sig->hasthis = TRUE;
 	sig->params [0] = &mono_defaults.int_class->byval_arg; /* this is a natural sized int */
 	sig->params [1] = &mono_defaults.object_class->byval_arg;
+
+#if 0
+	MonoMethodSignature *csig;
+	csig = mono_metadata_signature_alloc (mono_defaults.corlib, 3);
+	csig->ret = &mono_defaults.void_class->byval_arg;
+	csig->params [0] = &mono_defaults.object_class->byval_arg;
+	csig->params [1] = &mono_defaults.int_class->byval_arg; /* this is a natural sized int */
+	csig->params [2] = &mono_defaults.object_class->byval_arg;
+#endif
 
 	/*For now simply call plain old stelemref*/
 	switch (kind) {
@@ -9486,11 +9513,11 @@ mono_marshal_get_virtual_stelemref (MonoClass *array_class)
 
 		do_exception:
 			throw new ArrayTypeMismatchException ();
-
 		*/
 		aklass = mono_mb_add_local (mb, &mono_defaults.int_class->byval_arg);
 		vklass = mono_mb_add_local (mb, &mono_defaults.int_class->byval_arg);
 		array_slot_addr = mono_mb_add_local (mb, &mono_defaults.object_class->this_arg);
+
 
 		/* ldelema (implicit bound check) */
 		load_array_element_address (mb);
@@ -9520,6 +9547,14 @@ mono_marshal_get_virtual_stelemref (MonoClass *array_class)
 
 		/* do_exception: */
 		mono_mb_patch_branch (mb, b2);
+
+#if 0
+		mono_mb_emit_ldarg (mb, 0);
+		mono_mb_emit_ldarg (mb, 1);
+		mono_mb_emit_ldarg (mb, 2);
+		mono_mb_emit_native_call (mb, csig, record_vstore_2);
+#endif
+
 		mono_mb_emit_exception (mb, "ArrayTypeMismatchException", NULL);
 		break;
 
@@ -9609,6 +9644,11 @@ mono_marshal_get_virtual_stelemref (MonoClass *array_class)
 		/* do_exception: */
 		mono_mb_patch_branch (mb, b2);
 		mono_mb_patch_branch (mb, b3);
+
+		mono_mb_emit_ldarg (mb, 0);
+		mono_mb_emit_ldarg (mb, 1);
+		mono_mb_emit_ldarg (mb, 2);
+		mono_mb_emit_native_call (mb, csig, record_vstore_2);
 		mono_mb_emit_exception (mb, "ArrayTypeMismatchException", NULL);
 		break;
 
