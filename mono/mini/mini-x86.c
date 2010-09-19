@@ -5507,6 +5507,12 @@ mono_arch_build_imt_thunk (MonoVTable *vtable, MonoDomain *domain, MonoIMTCheckI
 	}
 #endif
 
+	{
+		char *buff = g_strdup_printf ("imt_%s_%s_entries_%d", vtable->klass->name_space, vtable->klass->name, count);
+		mono_emit_jit_tramp (start, code - start, buff);
+		g_free (buff);
+	}
+
 	return start;
 }
 

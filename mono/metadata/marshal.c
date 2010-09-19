@@ -9645,10 +9645,12 @@ mono_marshal_get_virtual_stelemref (MonoClass *array_class)
 		mono_mb_patch_branch (mb, b2);
 		mono_mb_patch_branch (mb, b3);
 
+#if 0
 		mono_mb_emit_ldarg (mb, 0);
 		mono_mb_emit_ldarg (mb, 1);
 		mono_mb_emit_ldarg (mb, 2);
 		mono_mb_emit_native_call (mb, csig, record_vstore_2);
+#endif
 		mono_mb_emit_exception (mb, "ArrayTypeMismatchException", NULL);
 		break;
 
