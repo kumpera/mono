@@ -16,6 +16,9 @@
 
 #include "jit-icalls.h"
 
+#include <mono/utils/mono-counters.h>
+
+
 void*
 mono_ldftn (MonoMethod *method)
 {
@@ -1029,6 +1032,90 @@ mono_object_castclass (MonoObject *obj, MonoClass *klass)
 
 	mono_raise_exception (mono_exception_from_name (mono_defaults.corlib,
 					"System", "InvalidCastException"));
+
+	return NULL;
+}
+
+MonoObject*
+mono_object_variant_castclass (MonoObject *obj, MonoClass *klass, gpointer *cache)
+{
+	static int inited;
+	static int num_jit_castclass, num_jit_castclass_hits;
+
+	MonoJitTlsData *jit_tls = NULL;
+	gpointer cached_vtable, obj_vtable;
+
+	if (!inited) {
+		mono_counters_register ("Variant castclass calls", MONO_COUNTER_JIT | MONO_COUNTER_INT, &num_jit_castclass);
+		mono_counters_register ("Variant castclass hits", MONO_COUNTER_JIT | MONO_COUNTER_INT, &num_jit_castclass_hits);
+		inited = TRUE;
+	}
+
+	if (mini_get_debug_options ()->better_cast_details) {
+		jit_tls = TlsGetValue (mono_jit_tls_id);
+		jit_tls->class_cast_from = NULL;
+	}
+
+	++num_jit_castclass;
+
+	if (!obj)
+		return NULL;
+
+	cached_vtable = *cache;
+	obj_vtable = obj->vtable;
+
+	if (cached_vtable == obj_vtable) {
+		++num_jit_castclass_hits;
+		return obj;
+	}
+
+	if (mono_object_isinst (obj, klass)) {
+		*cache = obj_vtable;
+		return obj;
+	}
+
+	if (mini_get_debug_options ()->better_cast_details) {
+		jit_tls->class_cast_from = obj->vtable->klass;
+		jit_tls->class_cast_to = klass;
+	}
+
+	mono_raise_exception (mono_exception_from_name (mono_defaults.corlib,
+					"System", "InvalidCastException"));
+
+	return NULL;
+}
+
+MonoObject*
+mono_object_variant_isinst (MonoObject *obj, MonoClass *klass, gpointer *cache)
+{
+	static int inited;
+	static int num_jit_isinst, num_jit_isinst_hits;
+
+	gpointer cached_vtable, obj_vtable;
+
+	if (!inited) {
+		mono_counters_register ("Variant isinst calls", MONO_COUNTER_JIT | MONO_COUNTER_INT, &num_jit_isinst);
+		mono_counters_register ("Variant isinst hits", MONO_COUNTER_JIT | MONO_COUNTER_INT, &num_jit_isinst_hits);
+		inited = TRUE;
+	}
+
+	++num_jit_isinst;
+
+	if (!obj)
+		return NULL;
+
+	cached_vtable = *cache;
+	obj_vtable = obj->vtable;
+
+	if (cached_vtable == obj_vtable) {
+		++num_jit_isinst_hits;
+		return obj;
+	}
+
+	if (mono_object_isinst (obj, klass)) {
+		*cache = obj_vtable;
+		return obj;
+	}
 
 	return NULL;
 }

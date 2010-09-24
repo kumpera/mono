@@ -5035,8 +5035,23 @@ mono_object_unbox (MonoObject *obj)
 MonoObject *
 mono_object_isinst (MonoObject *obj, MonoClass *klass)
 {
+	static int inited = 0;
+	static int iface_variant_cast, delegate_variant_cast;
 	if (!klass->inited)
 		mono_class_init (klass);
+
+	if (!inited) {
+		mono_counters_register ("Interface variant slow casts", MONO_COUNTER_GENERICS | MONO_COUNTER_INT, &iface_variant_cast);
+		mono_counters_register ("Delegate variant slow casts", MONO_COUNTER_GENERICS | MONO_COUNTER_INT, &delegate_variant_cast);
+		inited = TRUE;
+	}
+
+	if (mono_class_has_variant_generic_params (klass)) {
+		if (klass->flags & TYPE_ATTRIBUTE_INTERFACE)
+			++iface_variant_cast;
+		else
+			++delegate_variant_cast;
+	}
 
 	if (klass->marshalbyref || (klass->flags & TYPE_ATTRIBUTE_INTERFACE))
 		return mono_object_isinst_mbyref (obj, klass);

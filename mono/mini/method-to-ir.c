@@ -3283,17 +3283,21 @@ handle_box (MonoCompile *cfg, MonoInst *val, MonoClass *klass, int context_used)
 }
 
 static gboolean
-mono_class_has_is_complext_variant (MonoClass *klass)
+mono_class_has_is_complext_variant (MonoClass *klass, int context_used)
 {
 	int i;
 	MonoGenericContainer *container;
 	MonoGenericInst *ginst;
 
-	if (!klass->generic_class)
+	if (klass->generic_class) {
+		container = klass->generic_class->container_class->generic_container;
+		ginst = klass->generic_class->context.class_inst;
+	} else if (klass->generic_container && context_used) {
+		container = klass->generic_container;
+		ginst = container->context.class_inst;
+	} else {
 		return FALSE;
-
-	container = klass->generic_class->container_class->generic_container;
-	ginst = klass->generic_class->context.class_inst;
+	}
 
 	for (i = 0; i < container->type_argc; ++i) {
 		MonoType *type;
@@ -3307,7 +3311,7 @@ mono_class_has_is_complext_variant (MonoClass *klass)
 }
 
 // FIXME: This doesn't work yet (class libs tests fail?)
-#define is_complex_isinst(klass) (TRUE || (klass->flags & TYPE_ATTRIBUTE_INTERFACE) || klass->rank || mono_class_is_nullable (klass) || klass->marshalbyref || (klass->flags & TYPE_ATTRIBUTE_SEALED) || mono_class_has_is_complext_variant (klass) || klass->byval_arg.type == MONO_TYPE_VAR || klass->byval_arg.type == MONO_TYPE_MVAR)
+#define is_complex_isinst(klass) (TRUE || (klass->flags & TYPE_ATTRIBUTE_INTERFACE) || klass->rank || mono_class_is_nullable (klass) || klass->marshalbyref || (klass->flags & TYPE_ATTRIBUTE_SEALED) || klass->byval_arg.type == MONO_TYPE_VAR || klass->byval_arg.type == MONO_TYPE_MVAR)
 
 /*
  * Returns NULL and set the cfg exception on error.
@@ -3321,12 +3325,23 @@ handle_castclass (MonoCompile *cfg, MonoClass *klass, MonoInst *src, int context
 	MonoInst *klass_inst = NULL;
 
 	if (context_used) {
-		MonoInst *args [2];
+		MonoInst *args [3];
 
 		klass_inst = emit_get_rgctx_klass (cfg, context_used,
 										   klass, MONO_RGCTX_INFO_KLASS);
 
-		if (is_complex_isinst (klass)) {
+		if(mono_class_has_is_complext_variant (klass, context_used)) {
+			/* obj */
+			args [0] = src;
+
+			/* klass */
+			args [1] = klass_inst;
+
+			/* inline cache */
+			args [2] = emit_get_rgctx_method (cfg, context_used, NULL, MONO_RGCTX_INFO_INLINE_CACHE);
+
+			return mono_emit_jit_icall (cfg, mono_object_variant_castclass, args);
+		} else if (is_complex_isinst (klass)) {
 			/* Complex case, handle by an icall */
 
 			/* obj */
@@ -3400,7 +3415,19 @@ handle_isinst (MonoCompile *cfg, MonoClass *klass, MonoInst *src, int context_us
 	if (context_used) {
 		klass_inst = emit_get_rgctx_klass (cfg, context_used, klass, MONO_RGCTX_INFO_KLASS);
 
-		if (is_complex_isinst (klass)) {
+		if(mono_class_has_is_complext_variant (klass, context_used)) {
+			MonoInst *args [3];
+			/* obj */
+			args [0] = src;
+
+			/* klass */
+			args [1] = klass_inst;
+
+			/* inline cache */
+			args [2] = emit_get_rgctx_method (cfg, context_used, NULL, MONO_RGCTX_INFO_INLINE_CACHE);
+
+			return mono_emit_jit_icall (cfg, mono_object_variant_isinst, args);
+		} else if (is_complex_isinst (klass)) {
 			MonoInst *args [2];
 
 			/* Complex case, handle by an icall */
@@ -7865,8 +7892,8 @@ mono_method_to_ir (MonoCompile *cfg, MonoMethod *method, MonoBasicBlock *start_b
 			if (cfg->generic_sharing_context)
 				context_used = mono_class_check_context_used (klass);
 
-			if (!context_used && mono_class_has_is_complext_variant (klass)) {
-				MonoInst *args [2];
+			if (!context_used && mono_class_has_is_complext_variant (klass, context_used)) {
+				MonoInst *args [3];
 
 				/* obj */
 				args [0] = *sp;
@@ -7874,7 +7901,12 @@ mono_method_to_ir (MonoCompile *cfg, MonoMethod *method, MonoBasicBlock *start_b
 				/* klass */
 				EMIT_NEW_CLASSCONST (cfg, args [1], klass);
 
-				ins = mono_emit_jit_icall (cfg, mono_object_castclass, args);
+				/* inline cache*/
+				/*FIXME AOT support*/
+				EMIT_NEW_PCONST (cfg, args [2], mono_domain_alloc0 (cfg->domain, sizeof (gpointer)));
+
+
+				ins = mono_emit_jit_icall (cfg, mono_object_variant_castclass, args);
 				*sp ++ = ins;
 				ip += 5;
 				inline_costs += 2;
@@ -7919,8 +7951,8 @@ mono_method_to_ir (MonoCompile *cfg, MonoMethod *method, MonoBasicBlock *start_b
 			if (cfg->generic_sharing_context)
 				context_used = mono_class_check_context_used (klass);
 
-			if (!context_used && mono_class_has_is_complext_variant (klass)) {
-				MonoInst *args [2];
+			if (!context_used && mono_class_has_is_complext_variant (klass, context_used)) {
+				MonoInst *args [3];
 
 				/* obj */
 				args [0] = *sp;
@@ -7928,7 +7960,11 @@ mono_method_to_ir (MonoCompile *cfg, MonoMethod *method, MonoBasicBlock *start_b
 				/* klass */
 				EMIT_NEW_CLASSCONST (cfg, args [1], klass);
 
-				*sp = mono_emit_jit_icall (cfg, mono_object_isinst, args);
+				/* inline cache*/
+				/*FIXME AOT support*/
+				EMIT_NEW_PCONST (cfg, args [2], mono_domain_alloc0 (cfg->domain, sizeof (gpointer)));
+
+				*sp = mono_emit_jit_icall (cfg, mono_object_variant_isinst, args);
 				sp++;
 				ip += 5;
 				inline_costs += 2;

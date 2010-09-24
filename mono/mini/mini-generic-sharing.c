@@ -904,6 +904,7 @@ instantiate_other_info (MonoDomain *domain, MonoRuntimeGenericContextOtherInfoTe
 	case MONO_RGCTX_INFO_REMOTING_INVOKE_WITH_CHECK:
 		return mono_compile_method (mono_marshal_get_remoting_invoke_with_check (data));
 	case MONO_RGCTX_INFO_METHOD_DELEGATE_CODE:
+	case MONO_RGCTX_INFO_INLINE_CACHE:
 		return mono_domain_alloc0 (domain, sizeof (gpointer));
 	case MONO_RGCTX_INFO_CLASS_FIELD:
 		return data;
@@ -1031,6 +1032,7 @@ other_info_equal (gpointer data1, gpointer data2, int info_type)
 	case MONO_RGCTX_INFO_METHOD_CONTEXT:
 	case MONO_RGCTX_INFO_REMOTING_INVOKE_WITH_CHECK:
 	case MONO_RGCTX_INFO_METHOD_DELEGATE_CODE:
+	case MONO_RGCTX_INFO_INLINE_CACHE:
 		return data1 == data2;
 	default:
 		g_assert_not_reached ();

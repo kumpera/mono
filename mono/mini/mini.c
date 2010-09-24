@@ -6164,6 +6164,9 @@ mini_init (const char *filename, const char *runtime_version)
 
 	register_icall (mono_gc_wbarrier_value_copy_bitmap, "mono_gc_wbarrier_value_copy_bitmap", "void ptr ptr int int", FALSE);
 
+	register_icall (mono_object_variant_castclass, "mono_object_variant_castclass", "object object ptr ptr", FALSE);
+	register_icall (mono_object_variant_isinst, "mono_object_variant_isinst", "object object ptr ptr", FALSE);
+
 #endif
 
 	mono_generic_sharing_init ();
