@@ -1091,7 +1091,7 @@ mono_object_variant_isinst (MonoObject *obj, MonoClass *klass, gpointer *cache)
 	static int inited;
 	static int num_jit_isinst, num_jit_isinst_hits;
 
-	gpointer cached_vtable, obj_vtable;
+	size_t cached_vtable, obj_vtable;
 
 	if (!inited) {
 		mono_counters_register ("Variant isinst calls", MONO_COUNTER_JIT | MONO_COUNTER_INT, &num_jit_isinst);
@@ -1104,17 +1104,20 @@ mono_object_variant_isinst (MonoObject *obj, MonoClass *klass, gpointer *cache)
 	if (!obj)
 		return NULL;
 
-	cached_vtable = *cache;
-	obj_vtable = obj->vtable;
+	cached_vtable = (size_t)*cache;
+	obj_vtable = (size_t)obj->vtable;
 
-	if (cached_vtable == obj_vtable) {
+	if ((cached_vtable & ~0x1) == obj_vtable) {
 		++num_jit_isinst_hits;
-		return obj;
+		return (cached_vtable & ~0x1) ? NULL : obj;
 	}
 
 	if (mono_object_isinst (obj, klass)) {
-		*cache = obj_vtable;
+		*cache = (gpointer)obj_vtable;
 		return obj;
+	} else {
+		/*negative cache*/
+		*cache = (gpointer)(obj_vtable | 0x1);
 	}
 
 	return NULL;
