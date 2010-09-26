@@ -3306,6 +3306,9 @@ mono_class_has_is_complext_variant (MonoClass *klass, int context_used)
 		type = ginst->type_argv [i];
 		if (MONO_TYPE_IS_REFERENCE (type))
 			return TRUE;
+
+		if (context_used && (type->type == MONO_TYPE_VAR || type->type == MONO_TYPE_MVAR))
+			return TRUE;
 	}
 	return FALSE;
 }

@@ -359,6 +359,12 @@ alloc_oti (MonoImage *image)
 
 #define MONO_RGCTX_SLOT_USED_MARKER	((gpointer)&mono_defaults.object_class->byval_arg)
 
+static int
+other_info_has_data (int info_type)
+{
+	return info_type != MONO_RGCTX_INFO_INLINE_CACHE;
+}
+
 /*
  * LOCKING: loader lock
  */
@@ -544,6 +550,8 @@ inflate_other_data (gpointer data, int info_type, MonoGenericContext *context, M
 
 		return &inflated_class->fields [i];
 	}
+	case MONO_RGCTX_INFO_INLINE_CACHE:
+		return data;
 
 	default:
 		g_assert_not_reached ();
@@ -1032,7 +1040,6 @@ other_info_equal (gpointer data1, gpointer data2, int info_type)
 	case MONO_RGCTX_INFO_METHOD_CONTEXT:
 	case MONO_RGCTX_INFO_REMOTING_INVOKE_WITH_CHECK:
 	case MONO_RGCTX_INFO_METHOD_DELEGATE_CODE:
-	case MONO_RGCTX_INFO_INLINE_CACHE:
 		return data1 == data2;
 	default:
 		g_assert_not_reached ();
@@ -1055,22 +1062,27 @@ lookup_or_register_other_info (MonoClass *class, int type_argc, gpointer data, i
 
 	mono_loader_lock ();
 
-	oti_list = get_other_info_templates (rgctx_template, type_argc);
+	if (other_info_has_data (info_type)) {
+		oti_list = get_other_info_templates (rgctx_template, type_argc);
 
-	for (oti = oti_list, i = 0; oti; oti = oti->next, ++i) {
-		gpointer inflated_data;
+		for (oti = oti_list, i = 0; oti; oti = oti->next, ++i) {
+			gpointer inflated_data;
 
-		if (oti->info_type != info_type || !oti->data)
-			continue;
+			if (oti->info_type != info_type || !oti->data)
+				continue;
 
-		inflated_data = inflate_other_info (oti, generic_context, class, TRUE);
+			inflated_data = inflate_other_info (oti, generic_context, class, TRUE);
 
-		if (other_info_equal (data, inflated_data, info_type)) {
+			if (other_info_equal (data, inflated_data, info_type)) {
+				free_inflated_info (info_type, inflated_data);
+				mono_loader_unlock ();
+				return i;
+			}
 			free_inflated_info (info_type, inflated_data);
-			mono_loader_unlock ();
-			return i;
 		}
-		free_inflated_info (info_type, inflated_data);
+	} else {
+		/*The value doesn't really matter. But better use something easy to distinguish.*/
+		data = GINT_TO_POINTER (-1);
 	}
 
 	/* We haven't found the info */
