@@ -3334,6 +3334,7 @@ handle_castclass (MonoCompile *cfg, MonoClass *klass, MonoInst *src, int context
 										   klass, MONO_RGCTX_INFO_KLASS);
 
 		if(mono_class_has_is_complext_variant (klass, context_used)) {
+			MonoMethod *mono_castclass = mono_marshal_get_castclass_with_cache ();
 			/* obj */
 			args [0] = src;
 
@@ -3343,7 +3344,7 @@ handle_castclass (MonoCompile *cfg, MonoClass *klass, MonoInst *src, int context
 			/* inline cache */
 			args [2] = emit_get_rgctx_method (cfg, context_used, NULL, MONO_RGCTX_INFO_INLINE_CACHE);
 
-			return mono_emit_jit_icall (cfg, mono_object_variant_castclass, args);
+			return mono_emit_method_call (cfg, mono_castclass, args, NULL);
 		} else if (is_complex_isinst (klass)) {
 			/* Complex case, handle by an icall */
 
@@ -3419,6 +3420,7 @@ handle_isinst (MonoCompile *cfg, MonoClass *klass, MonoInst *src, int context_us
 		klass_inst = emit_get_rgctx_klass (cfg, context_used, klass, MONO_RGCTX_INFO_KLASS);
 
 		if(mono_class_has_is_complext_variant (klass, context_used)) {
+			MonoMethod *mono_isinst = mono_marshal_get_isinst_with_cache ();
 			MonoInst *args [3];
 			/* obj */
 			args [0] = src;
@@ -3429,7 +3431,7 @@ handle_isinst (MonoCompile *cfg, MonoClass *klass, MonoInst *src, int context_us
 			/* inline cache */
 			args [2] = emit_get_rgctx_method (cfg, context_used, NULL, MONO_RGCTX_INFO_INLINE_CACHE);
 
-			return mono_emit_jit_icall (cfg, mono_object_variant_isinst, args);
+			return mono_emit_method_call (cfg, mono_isinst, args, NULL);
 		} else if (is_complex_isinst (klass)) {
 			MonoInst *args [2];
 
@@ -7896,6 +7898,7 @@ mono_method_to_ir (MonoCompile *cfg, MonoMethod *method, MonoBasicBlock *start_b
 				context_used = mono_class_check_context_used (klass);
 
 			if (!context_used && mono_class_has_is_complext_variant (klass, context_used)) {
+				MonoMethod *mono_castclass = mono_marshal_get_castclass_with_cache ();
 				MonoInst *args [3];
 
 				/* obj */
@@ -7908,9 +7911,8 @@ mono_method_to_ir (MonoCompile *cfg, MonoMethod *method, MonoBasicBlock *start_b
 				/*FIXME AOT support*/
 				EMIT_NEW_PCONST (cfg, args [2], mono_domain_alloc0 (cfg->domain, sizeof (gpointer)));
 
-
-				ins = mono_emit_jit_icall (cfg, mono_object_variant_castclass, args);
-				*sp ++ = ins;
+				/*The wrapper doesn't inline well so the bloat of inlining doesn't pay off.*/
+				*sp++ = mono_emit_method_call (cfg, mono_castclass, args, NULL);
 				ip += 5;
 				inline_costs += 2;
 			} else if (!context_used && (klass->marshalbyref || klass->flags & TYPE_ATTRIBUTE_INTERFACE)) {
@@ -7955,6 +7957,7 @@ mono_method_to_ir (MonoCompile *cfg, MonoMethod *method, MonoBasicBlock *start_b
 				context_used = mono_class_check_context_used (klass);
 
 			if (!context_used && mono_class_has_is_complext_variant (klass, context_used)) {
+				MonoMethod *mono_isinst = mono_marshal_get_isinst_with_cache ();
 				MonoInst *args [3];
 
 				/* obj */
@@ -7967,7 +7970,7 @@ mono_method_to_ir (MonoCompile *cfg, MonoMethod *method, MonoBasicBlock *start_b
 				/*FIXME AOT support*/
 				EMIT_NEW_PCONST (cfg, args [2], mono_domain_alloc0 (cfg->domain, sizeof (gpointer)));
 
-				*sp = mono_emit_jit_icall (cfg, mono_object_variant_isinst, args);
+				*sp = mono_emit_method_call (cfg, mono_isinst, args, NULL);
 				sp++;
 				ip += 5;
 				inline_costs += 2;
@@ -8016,6 +8019,7 @@ mono_method_to_ir (MonoCompile *cfg, MonoMethod *method, MonoBasicBlock *start_b
 			if (generic_class_is_reference_type (cfg, klass)) {
 				/* CASTCLASS FIXME kill this huge slice of duplicated code*/
 				if (!context_used && mono_class_has_is_complext_variant (klass, context_used)) {
+					MonoMethod *mono_castclass = mono_marshal_get_castclass_with_cache ();
 					MonoInst *args [3];
 
 					/* obj */
@@ -8028,9 +8032,8 @@ mono_method_to_ir (MonoCompile *cfg, MonoMethod *method, MonoBasicBlock *start_b
 					/*FIXME AOT support*/
 					EMIT_NEW_PCONST (cfg, args [2], mono_domain_alloc0 (cfg->domain, sizeof (gpointer)));
 
-
-					ins = mono_emit_jit_icall (cfg, mono_object_variant_castclass, args);
-					*sp ++ = ins;
+					/*The wrapper doesn't inline well so the bloat of inlining doesn't pay off.*/
+					*sp++ = mono_emit_method_call (cfg, mono_castclass, args, NULL);
 					ip += 5;
 					inline_costs += 2;
 				} else if (!context_used && (klass->marshalbyref || klass->flags & TYPE_ATTRIBUTE_INTERFACE)) {
