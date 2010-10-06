@@ -8015,7 +8015,25 @@ mono_method_to_ir (MonoCompile *cfg, MonoMethod *method, MonoBasicBlock *start_b
 
 			if (generic_class_is_reference_type (cfg, klass)) {
 				/* CASTCLASS FIXME kill this huge slice of duplicated code*/
-				if (!context_used && (klass->marshalbyref || klass->flags & TYPE_ATTRIBUTE_INTERFACE)) {
+				if (!context_used && mono_class_has_is_complext_variant (klass, context_used)) {
+					MonoInst *args [3];
+
+					/* obj */
+					args [0] = *sp;
+
+					/* klass */
+					EMIT_NEW_CLASSCONST (cfg, args [1], klass);
+
+					/* inline cache*/
+					/*FIXME AOT support*/
+					EMIT_NEW_PCONST (cfg, args [2], mono_domain_alloc0 (cfg->domain, sizeof (gpointer)));
+
+
+					ins = mono_emit_jit_icall (cfg, mono_object_variant_castclass, args);
+					*sp ++ = ins;
+					ip += 5;
+					inline_costs += 2;
+				} else if (!context_used && (klass->marshalbyref || klass->flags & TYPE_ATTRIBUTE_INTERFACE)) {
 					MonoMethod *mono_castclass;
 					MonoInst *iargs [1];
 					int costs;

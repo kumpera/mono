@@ -1109,7 +1109,7 @@ mono_object_variant_isinst (MonoObject *obj, MonoClass *klass, gpointer *cache)
 
 	if ((cached_vtable & ~0x1) == obj_vtable) {
 		++num_jit_isinst_hits;
-		return (cached_vtable & ~0x1) ? NULL : obj;
+		return (cached_vtable & 0x1) ? NULL : obj;
 	}
 
 	if (mono_object_isinst (obj, klass)) {
