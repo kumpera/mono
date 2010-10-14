@@ -1078,7 +1078,7 @@ mono_arch_create_handler_block_trampoline (void)
 		amd64_jump_code (code, tramp);
 	} else {
 		/*Slow path uses a c helper*/
-		amd64_mov_reg_reg (code, AMD64_RAX, AMD64_ESP, 8);
+		amd64_mov_reg_reg (code, AMD64_RAX, AMD64_RSP, 8);
 		amd64_mov_reg_imm (code, AMD64_RBX, tramp);
 		amd64_push_reg (code, AMD64_RBX);
 		amd64_jump_code (code, handler_block_trampoline_helper);

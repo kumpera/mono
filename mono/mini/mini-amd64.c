@@ -7507,7 +7507,7 @@ mono_arch_install_handler_block_guard (MonoJitInfo *ji, MonoJitExceptionInfo *cl
 	handler = clause->handler_start;
 
 	/*REX.W*/
-	if (*hander != 0x48)
+	if (*handler != 0x48)
 		return NULL;
 	++handler;
 
