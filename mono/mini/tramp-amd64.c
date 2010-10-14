@@ -1071,16 +1071,15 @@ mono_arch_create_handler_block_trampoline (void)
 	*/
 
 	if (mono_get_jit_tls_offset () != -1) {
-		code = mono_amd64_emit_tls_get (code, AMD64_RAX, mono_get_jit_tls_offset ());
-		amd64_mov_reg_membase (code, AMD64_RAX, AMD64_RAX, G_STRUCT_OFFSET (MonoJitTlsData, handler_block_return_address), 8);
+		code = mono_amd64_emit_tls_get (code, AMD64_RDI, mono_get_jit_tls_offset ());
 		/*simulate a call*/
-		amd64_push_reg (code, AMD64_RAX);
+		amd64_mov_reg_membase (code, AMD64_RDI, AMD64_RDI, G_STRUCT_OFFSET (MonoJitTlsData, handler_block_return_address), 8);
 		amd64_jump_code (code, tramp);
 	} else {
 		/*Slow path uses a c helper*/
-		amd64_mov_reg_reg (code, AMD64_RAX, AMD64_RSP, 8);
-		amd64_mov_reg_imm (code, AMD64_RBX, tramp);
-		amd64_push_reg (code, AMD64_RBX);
+		amd64_mov_reg_reg (code, AMD64_RDI, AMD64_RSP, 8);
+		amd64_mov_reg_imm (code, AMD64_RAX, tramp);
+		amd64_push_reg (code, AMD64_RAX);
 		amd64_jump_code (code, handler_block_trampoline_helper);
 	}
 
