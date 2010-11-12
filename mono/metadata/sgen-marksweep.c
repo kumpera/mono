@@ -1057,6 +1057,47 @@ mark_pinned_objects_in_block (MSBlockInfo *block, SgenGrayQueue *queue)
 	}
 }
 
+static int
+build_block_free_list (MSBlockInfo *block, int *out_count)
+{
+	int count;
+	int live_count = 0;
+	int obj_index;
+	int obj_size_index;
+
+	obj_size_index = block->obj_size_index;
+	count = MS_BLOCK_FREE / block->obj_size;
+	block->free_list = NULL;
+
+	for (obj_index = 0; obj_index < count; ++obj_index) {
+		int word, bit;
+		void *obj = MS_BLOCK_OBJ (block, obj_index);
+
+		MS_CALC_MARK_BIT (word, bit, obj);
+		if (MS_MARK_BIT (block, word, bit)) {
+			DEBUG (9, g_assert (MS_OBJ_ALLOCED (obj, block)));
+			++live_count;
+		} else {
+			/* an unmarked object */
+			if (MS_OBJ_ALLOCED (obj, block)) {
+				binary_protocol_empty (obj, block->obj_size);
+				memset (obj, 0, block->obj_size);
+			}
+			*(void**)obj = block->free_list;
+			block->free_list = obj;
+		}
+	}
+
+	/* reset mark bits */
+	memset (block->mark_words, 0, sizeof (mword) * MS_NUM_MARK_WORDS);
+
+#ifndef SGEN_PARALLEL_MARK
+	*out_count = count;
+#endif
+
+	return live_count;
+}
+
 static void
 major_sweep (void)
 {
@@ -1093,67 +1134,37 @@ major_sweep (void)
 	while (*iter) {
 		MSBlockInfo *block = *iter;
 #endif
-		int count;
-		gboolean have_live = FALSE;
+		int count, live_count;
+#ifndef SGEN_PARALLEL_MARK
 		gboolean has_pinned;
-		int obj_index;
-		int obj_size_index;
+#endif
 
 #ifdef FIXED_HEAP
 		if (!block->used)
 			continue;
 #endif
 
-		obj_size_index = block->obj_size_index;
-
 #ifndef SGEN_PARALLEL_MARK
 		has_pinned = block->has_pinned;
 		block->has_pinned = block->pinned;
-
 		block->is_to_space = FALSE;
 #endif
-
-		count = MS_BLOCK_FREE / block->obj_size;
-		block->free_list = NULL;
-
-		for (obj_index = 0; obj_index < count; ++obj_index) {
-			int word, bit;
-			void *obj = MS_BLOCK_OBJ (block, obj_index);
-
-			MS_CALC_MARK_BIT (word, bit, obj);
-			if (MS_MARK_BIT (block, word, bit)) {
-				DEBUG (9, g_assert (MS_OBJ_ALLOCED (obj, block)));
-				have_live = TRUE;
-#ifndef SGEN_PARALLEL_MARK
-				if (!has_pinned)
-					++slots_used [obj_size_index];
-#endif
-			} else {
-				/* an unmarked object */
-				if (MS_OBJ_ALLOCED (obj, block)) {
-					binary_protocol_empty (obj, block->obj_size);
-					memset (obj, 0, block->obj_size);
-				}
-				*(void**)obj = block->free_list;
-				block->free_list = obj;
-			}
-		}
-
-		/* reset mark bits */
-		memset (block->mark_words, 0, sizeof (mword) * MS_NUM_MARK_WORDS);
+		live_count = build_block_free_list (block, &count);
 
 		/*
 		 * FIXME: reverse free list so that it's in address
 		 * order
 		 */
-
-		if (have_live) {
+		if (live_count > 0) {
 #ifndef SGEN_PARALLEL_MARK
 			if (!has_pinned) {
+				int obj_size_index = block->obj_size_index;
 				++num_blocks [obj_size_index];
 				slots_available [obj_size_index] += count;
+				slots_used [obj_size_index] += live_count;
 			}
 #endif
+
 
 #ifndef FIXED_HEAP
 			iter = &block->next;
