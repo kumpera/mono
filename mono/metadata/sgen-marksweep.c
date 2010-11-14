@@ -1124,16 +1124,6 @@ major_sweep (void)
 #endif
 	MSBlockInfo **block_array;
 
-#ifndef SGEN_PARALLEL_MARK
-	/* statistics for evacuation */
-	int *slots_available = alloca (sizeof (int) * num_block_obj_sizes);
-	int *slots_used = alloca (sizeof (int) * num_block_obj_sizes);
-	int *num_blocks = alloca (sizeof (int) * num_block_obj_sizes);
-
-	for (i = 0; i < num_block_obj_sizes; ++i)
-		slots_available [i] = slots_used [i] = num_blocks [i] = 0;
-#endif
-
 	/* clear all the free lists */
 	for (i = 0; i < MS_BLOCK_TYPE_MAX; ++i) {
 		MSBlockInfo **free_blocks = free_block_lists [i];
@@ -1176,19 +1166,13 @@ major_sweep (void)
 		 * order
 		 */
 		if (live_count > 0) {
-#ifndef SGEN_PARALLEL_MARK
-			if (!has_pinned) {
-				int obj_size_index = block->obj_size_index;
-				++num_blocks [obj_size_index];
-				slots_available [obj_size_index] += count;
-				slots_used [obj_size_index] += live_count;
-			}
-#endif
-
-
 #ifndef FIXED_HEAP
 			iter = &block->next;
 #endif
+			/*
+			 * If there are free slots in the block, add
+			 * the block to the array for further processing
+			 */
 			if (block->free_list)
 				block_array [block_idx++] = block;
 		} else {
@@ -1209,14 +1193,19 @@ major_sweep (void)
 		}
 	}
 
+	/*
+	 * We sort in descending order, since blocks are then prepended.
+	 *
+	 * Sorting might seen slow but it's speed is basically the same of
+	 * a hand coded bucket partial-sort - no need to sort the buckets
+	 * as the objective here is to make sure we have some degree of
+	 * ordering.
+	 *
+	 */
 	qsort (block_array, block_idx, sizeof (void*), compare_block_by_occupancy);
 
 	for (i = 0; i < block_idx; ++i) {
 		MSBlockInfo *block = block_array [i];
-		/*
-		 * If there are free slots in the block, add
-		 * the block to the corresponding free list.
-		 */
 		MSBlockInfo **free_blocks = FREE_BLOCKS (block->pinned, block->has_references);
 		int index = MS_BLOCK_OBJ_SIZE_INDEX (block->obj_size);
 		block->next_free = free_blocks [index];
@@ -1224,18 +1213,6 @@ major_sweep (void)
 	}
 
 	mono_sgen_free_internal_dynamic (block_array, array_size, INTERNAL_MEM_MS_TABLES);
-
-#ifndef SGEN_PARALLEL_MARK
-	for (i = 0; i < num_block_obj_sizes; ++i) {
-		float usage = (float)slots_used [i] / (float)slots_available [i];
-		int min_blocks = (int)ceil (usage * (float)num_blocks [i]);
-
-		g_printf ("size %d blocks %d [%d / %d] %f min %d waste %d\n",
-			block_obj_sizes [i], num_blocks [i], slots_available [i],
-			slots_used [i], usage, min_blocks, num_blocks [i] - min_blocks);
-	}
-	g_printf ("------\n");
-#endif
 }
 
 static int count_pinned_ref;
@@ -1401,8 +1378,8 @@ process_free_list_for_evacuation (int idx, MSBlockInfo **free_list, gboolean has
 			iter = &block->next_free;
 		}
 	}
-	if (blocks_evacuated)
-		printf ("block size %d %s will have %d blocks evacuated\n", block_obj_sizes [idx], has_ref ? "has_ref" : "no_ref", blocks_evacuated);
+	//if (blocks_evacuated)
+	//	printf ("block size %d %s will have %d blocks evacuated\n", block_obj_sizes [idx], has_ref ? "has_ref" : "no_ref", blocks_evacuated);
 }
 #endif
 
@@ -1418,7 +1395,7 @@ major_start_major_collection (void)
 		process_free_list_for_evacuation (i, &ref_blocks [i], TRUE);
 		process_free_list_for_evacuation (i, &non_ref [i], FALSE);
 	}
-	printf ("---------\n");
+	//printf ("---------\n");
 
 #endif
 }
