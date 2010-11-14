@@ -1346,9 +1346,9 @@ process_free_list_for_evacuation (int idx, MSBlockInfo **free_list, gboolean has
 	MSBlockInfo **iter;
 
 	objects_per_block = MS_BLOCK_FREE / block_obj_sizes [idx];
-	min_objects_before_evacuate = (int)ceil ((float)objects_per_block * 0.4f);
-	min_objects_before_evacuate2 = (int)ceil ((float)objects_per_block * 0.5f);
-	min_objects_before_evacuate3 = (int)ceil ((float)objects_per_block * 0.6f);
+	min_objects_before_evacuate = (int)ceil ((float)objects_per_block * 0.1f);
+	min_objects_before_evacuate2 = (int)ceil ((float)objects_per_block * 0.15f);
+	min_objects_before_evacuate3 = (int)ceil ((float)objects_per_block * 0.2f);
 
 	/*
 	 * Skip till the first interesting block
