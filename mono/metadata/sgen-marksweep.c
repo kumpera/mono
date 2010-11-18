@@ -561,10 +561,6 @@ alloc_obj (int size, gboolean pinned, gboolean has_references)
 	LOCK_MS_BLOCK_LIST;
 
 	if (!free_blocks [size_index]) {
-		/*
-		 if (mono_sgen_get_current_collection_generation () == GENERATION_OLD)
-			printf ("space required for block_size %d %s\n", block_obj_sizes [size_index], has_references ? "has_ref" : "no_ref");
-		*/
 		if (G_UNLIKELY (!ms_alloc_block (size_index, pinned, has_references))) {
 			UNLOCK_MS_BLOCK_LIST;
 			return NULL;
@@ -1314,10 +1310,11 @@ static void
 process_free_list_for_evacuation (int idx, MSBlockInfo **free_list, gboolean has_ref)
 {
 	int count = 0;
-	/*int used_slots = 0;
-	int available_slots = 0;*/
 	int blocks_evacuated = 0;
 	int objects_per_block, min_objects_before_evacuate, min_objects_before_evacuate2, min_objects_before_evacuate3;
+	/*Spare required for evacuation */
+	int available_slots = 0;
+	int requested_slots = 0;
 
 	MSBlockInfo *block, *evacuated;
 	MSBlockInfo **iter;
@@ -1340,7 +1337,6 @@ process_free_list_for_evacuation (int idx, MSBlockInfo **free_list, gboolean has
 		 * -sum used space and available space, subtract how much we expect nursery to take then only select enough blocks
 		 * to fit this budget;
 		 * -use a static metric but adjust it based on how many extra blocks were needed during major;
-		 * -adjust this with the number of available empty blocks;
 		 *
 		 * Other improvements:
 		 * 	-if we need to alloc more blocks but there are not empty blocks available, use some been evacuated
@@ -1353,6 +1349,9 @@ process_free_list_for_evacuation (int idx, MSBlockInfo **free_list, gboolean has
 
 		if (count > 30 && block->live_objects <= min_objects_before_evacuate3)
 			break;
+
+		if (count > 1)
+			available_slots += objects_per_block - block->live_objects;
 
 		iter = &block->next_free;
 	}
@@ -1367,19 +1366,19 @@ process_free_list_for_evacuation (int idx, MSBlockInfo **free_list, gboolean has
 
 	while (*iter) {
 		block = *iter;
-		if (block->has_pinned) {
+		if (block->has_pinned || (requested_slots + block->live_objects) >= available_slots) {
 			*free_list = block;
 			*iter = block->next_free;
 			block->next_free = NULL;
 			free_list = &block->next_free;
+			available_slots += objects_per_block - block->live_objects;
 		} else {
 			++blocks_evacuated;
+			requested_slots += block->live_objects;
 			block->evacuation_requested = TRUE;
 			iter = &block->next_free;
 		}
 	}
-	//if (blocks_evacuated)
-	//	printf ("block size %d %s will have %d blocks evacuated\n", block_obj_sizes [idx], has_ref ? "has_ref" : "no_ref", blocks_evacuated);
 }
 #endif
 
@@ -1395,7 +1394,6 @@ major_start_major_collection (void)
 		process_free_list_for_evacuation (i, &ref_blocks [i], TRUE);
 		process_free_list_for_evacuation (i, &non_ref [i], FALSE);
 	}
-	//printf ("---------\n");
 
 #endif
 }
