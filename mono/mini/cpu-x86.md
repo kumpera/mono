@@ -612,3 +612,7 @@ gc_liveness_def: len:0
 gc_liveness_use: len:0
 gc_spill_slot_liveness_def: len:0
 gc_param_slot_liveness_def: len:0
+
+
+load_lret_low: dest:a len:0
+load_lret_high: dest:d len:0

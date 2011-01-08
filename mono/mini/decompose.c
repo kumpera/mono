@@ -986,8 +986,34 @@ mono_decompose_long_opts (MonoCompile *cfg)
 				break;
 			}
 
-			default:
+			case OP_LCALL: {
+				MonoInst *tmp;
+				MonoCallInst *call;
+				MonoCallInst *orig = (MonoCallInst*)tree;
+				MONO_INST_NEW_CALL (cfg, call, OP_VOIDCALL);
+				*call = *orig;
+				call->inst.opcode = OP_VOIDCALL;
+				call->inst.dreg = -1;
+				call->inst.next = call->inst.prev = NULL;
+				MONO_ADD_INS (cfg->cbb, (MonoInst*)call);					
+
+				MONO_INST_NEW (cfg, tmp, OP_LOAD_LRET_LOW);
+				tmp->dreg = tree->dreg + 1;
+				MONO_ADD_INS (cfg->cbb, tmp);
+
+				MONO_INST_NEW (cfg, tmp, OP_LOAD_LRET_HIGH);
+				tmp->dreg = tree->dreg + 2;
+				MONO_ADD_INS (cfg->cbb, tmp);
 				break;
+			}
+
+			default: {
+				const char *spec = ins_get_spec (tree->opcode);
+				if (spec [MONO_INST_DEST] == 'l' || spec [MONO_INST_SRC1] == 'l' || spec [MONO_INST_SRC2] == 'l'){
+					printf ("UNDECOMPOSED OP: ");mono_print_ins (tree);
+				}
+				break;
+			}
 			}
 
 			if (cfg->cbb->code || (cfg->cbb != first_bb)) {

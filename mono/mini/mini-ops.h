@@ -1277,3 +1277,6 @@ MINI_OP(OP_HPPA_SETF4REG, "hppa_setf4reg", NONE, NONE, NONE)
 #ifdef ENABLE_LLVM
 MINI_OP(OP_LLVM_OUTARG_VT,	"llvm_outarg_vt", IREG, VREG, NONE)
 #endif
+
+MINI_OP(OP_LOAD_LRET_LOW, "load_lret_low", IREG, NONE, NONE)
+MINI_OP(OP_LOAD_LRET_HIGH, "load_lret_high", IREG, NONE, NONE)
