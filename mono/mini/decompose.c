@@ -986,13 +986,16 @@ mono_decompose_long_opts (MonoCompile *cfg)
 				break;
 			}
 
-			case OP_LCALL: {
+			case OP_LCALL:
+			case OP_LCALLVIRT:
+			case OP_LCALL_REG:
+			case OP_LCALL_MEMBASE: {
 				MonoInst *tmp;
 				MonoCallInst *call;
 				MonoCallInst *orig = (MonoCallInst*)tree;
 				MONO_INST_NEW_CALL (cfg, call, OP_VOIDCALL);
 				*call = *orig;
-				call->inst.opcode = OP_VOIDCALL;
+				call->inst.opcode = OP_VOIDCALL + (tree->opcode - OP_LCALL);
 				call->inst.dreg = -1;
 				call->inst.next = call->inst.prev = NULL;
 				MONO_ADD_INS (cfg->cbb, (MonoInst*)call);					
