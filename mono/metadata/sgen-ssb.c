@@ -33,6 +33,7 @@
 
 #include "metadata/gc-internal.h"
 #include "metadata/method-builder.h"
+#include "metadata/sgen-protocol.h"
 #include "metadata/sgen-ssb.h"
 #include "utils/mono-compiler.h"
 #include "utils/mono-counters.h"
@@ -47,16 +48,31 @@ enum {
 
 #undef OPDEF
 
+static const int prime_table[] = {
+	4093,
+	8191,
+	16381,
+	32749,
+	65521,
+	131071,
+	262139,
+	524287,
+	1048573,
+	2097143,
+	4194301,
+	8388593,
+	16777213,
+	33554393,
+	67108859,
+	134217689,
+	268435399,
+	536870909,
+	1073741789,
+	0
+};
 
 #define STORE_REMSET_BUFFER_SIZE	1024
-
-typedef struct _GenericStoreRememberedSet GenericStoreRememberedSet;
-struct _GenericStoreRememberedSet {
-	GenericStoreRememberedSet *next;
-	/* We need one entry less because the first entry of store
-	   remset buffers is always a dummy and we don't copy it. */
-	gpointer data [STORE_REMSET_BUFFER_SIZE - 1];
-};
+#define LOAD_FACTOR 0.7f
 
 #ifdef HAVE_KW_THREAD
 static __thread gpointer *store_remset_buffer;
@@ -69,7 +85,93 @@ static __thread long *store_remset_buffer_index_addr;
 #define STORE_REMSET_BUFFER_INDEX	(__thread_info__->store_remset_buffer_index)
 #endif
 
-static GenericStoreRememberedSet *generic_store_remsets = NULL;
+#define TOMBSTONE ((gpointer)(ssize_t)-1)
+static gpointer *ssb_hashtable = NULL;
+static int ssb_hashtable_size_index = 2;
+static int ssb_hashtable_size, ssb_hashtable_elements;
+
+static void
+insert_no_check (gpointer *table, int table_size, gpointer pointer)
+{
+	int idx, initial_idx, free_slot = -1;
+
+	/*FIXME, look for a good pointer hashing function*/
+	idx = initial_idx = (int)pointer % table_size;
+	do {
+		gpointer k = table [idx];
+
+		if (!k) {
+			if (free_slot == -1)
+				free_slot = idx;
+			break;
+		} else if (k == TOMBSTONE && free_slot == -1) {
+			free_slot = idx;
+		} else if (k == pointer) { 
+			return;
+		}
+
+		if (++idx == table_size) //Wrap around
+			idx = 0;
+	} while (idx != initial_idx);
+
+	table [free_slot] = pointer;
+	++ssb_hashtable_elements;
+}
+
+static void
+rehash (gboolean can_expand)
+{
+	int i;
+	gpointer *new_table;
+	/*FIXME trigger a nursery and only then expand when can_expand == FALSE*/
+	int new_size = prime_table [++ssb_hashtable_size_index];
+
+	g_assert (new_size);
+
+	ssb_hashtable_elements = 0;
+	new_table = mono_sgen_alloc_os_memory (new_size * sizeof (gpointer), TRUE);
+	for (i = 0; i < ssb_hashtable_size; ++i) {
+		if (ssb_hashtable [i] && ssb_hashtable [i] != TOMBSTONE)
+			insert_no_check (new_table, new_size, ssb_hashtable [i]);
+	}
+
+	ssb_hashtable = new_table;
+	ssb_hashtable_size = new_size;
+}
+
+static gboolean
+find_pointer (gpointer pointer)
+{
+	int idx, initial_idx;
+	idx = initial_idx = (int)pointer % ssb_hashtable_size;
+	
+	do {
+		gpointer k = ssb_hashtable [idx];
+		if (k == pointer)
+			return TRUE;
+		if (!k)
+			break;
+		if (++idx == ssb_hashtable_size) //Wrap around
+			idx = 0;
+	} while (idx != initial_idx);
+	return FALSE;
+}
+
+static void
+insert_pointer (gpointer pointer, gboolean can_expand)
+{
+	if (ssb_hashtable_elements >= ssb_hashtable_size * LOAD_FACTOR)
+		rehash (can_expand);
+	insert_no_check (ssb_hashtable, ssb_hashtable_size, pointer);
+}
+
+static void
+insert_from_ssb (gpointer *buffer, int size, gboolean can_expand)
+{
+	int i;
+	for (i = 1; i < size; ++i)
+		insert_pointer (buffer [i], can_expand);
+}
 
 static void
 clear_thread_store_remset_buffer (SgenThreadInfo *info)
@@ -78,26 +180,12 @@ clear_thread_store_remset_buffer (SgenThreadInfo *info)
 	memset (*info->store_remset_buffer_addr, 0, sizeof (gpointer) * STORE_REMSET_BUFFER_SIZE);
 }
 
-static void
-add_generic_store_remset_from_buffer (gpointer *buffer)
-{
-	GenericStoreRememberedSet *remset = mono_sgen_alloc_internal (INTERNAL_MEM_STORE_REMSET);
-	memcpy (remset->data, buffer + 1, sizeof (gpointer) * (STORE_REMSET_BUFFER_SIZE - 1));
-	remset->next = generic_store_remsets;
-	generic_store_remsets = remset;
-}
 
 static void
 sgen_ssb_evacuate_buffer (void)
 {
-	gpointer *buffer;
 	TLAB_ACCESS_INIT;
-
-	buffer = STORE_REMSET_BUFFER;
-
-	add_generic_store_remset_from_buffer (buffer);
-	memset (buffer, 0, sizeof (gpointer) * STORE_REMSET_BUFFER_SIZE);
-
+	insert_from_ssb (STORE_REMSET_BUFFER, STORE_REMSET_BUFFER_SIZE, FALSE);
 	STORE_REMSET_BUFFER_INDEX = 0;
 }
 
@@ -140,34 +228,40 @@ void
 sgen_ssb_scan (void *start_nursery, void *end_nursery, SgenGrayQueue *queue)
 {
 	int i;
-	GenericStoreRememberedSet *store_remset;
 	SgenThreadInfo **thread_table;
 	SgenThreadInfo *info;
 
-	/* the generic store ones */
-	store_remset = generic_store_remsets;
-	while (store_remset) {
-		GenericStoreRememberedSet *next = store_remset->next;
-
-		for (i = 0; i < STORE_REMSET_BUFFER_SIZE - 1; ++i) {
-			gpointer addr = store_remset->data [i];
-			if (addr)
-				handle_remset ((mword*)&addr, start_nursery, end_nursery, FALSE, queue);
-		}
-
-		mono_sgen_free_internal (store_remset, INTERNAL_MEM_STORE_REMSET);
-
-		store_remset = next;
-	}
-	generic_store_remsets = NULL;
-
+	printf ("elements %d\n", ssb_hashtable_elements);
+	/*FLUSH remaining elements*/
 	thread_table = mono_sgen_get_thread_table ();
 	for (i = 0; i < THREAD_HASH_SIZE; ++i) {
 		for (info = thread_table [i]; info; info = info->next) {
-			int j;
-			for (j = 0; j < *info->store_remset_buffer_index_addr; ++j)
-				handle_remset ((mword*)*info->store_remset_buffer_addr + j + 1, start_nursery, end_nursery, FALSE, queue);
+			insert_from_ssb ((gpointer*)*info->store_remset_buffer_addr, *info->store_remset_buffer_index_addr, TRUE);
 			clear_thread_store_remset_buffer (info);
+		}
+	}
+
+	/* the generic store ones */
+	for (i = 0; i < ssb_hashtable_size; ++i) {
+		gpointer *addr = (gpointer*)ssb_hashtable[i];
+		if (addr && addr != TOMBSTONE) {
+			gpointer *ptr = *addr;
+			if (((void*)ptr < start_nursery || (void*)ptr >= end_nursery)) {
+				gpointer new, old = *ptr;
+				major_collector.copy_object (ptr, queue);
+				DEBUG (9, fprintf (gc_debug_file, "Kept object on ssb slot due to promotion at %p with %p\n", ptr, *ptr));
+				if (old)
+					binary_protocol_ptr_update (ptr, old, *ptr, (gpointer)LOAD_VTABLE (*ptr), mono_sgen_safe_object_get_size (*ptr));
+				new = *ptr;
+				if (new < start_nursery || new >= end_nursery) {
+					/*
+					 * If the object was promoted, we can remove it.
+					 */
+					ssb_hashtable[i] = TOMBSTONE;
+				} else {
+					DEBUG (9, fprintf (gc_debug_file, "Keep on the ssb hash because of pinning %p (%p %s)\n", ptr, *ptr, mono_sgen_safe_name (*ptr)));
+				}
+			}
 		}
 	}
 }
@@ -179,11 +273,7 @@ sgen_ssb_clear (void)
 	SgenThreadInfo **thread_table;
 	SgenThreadInfo *info;
 
-	while (generic_store_remsets) {
-		GenericStoreRememberedSet *gs_next = generic_store_remsets->next;
-		mono_sgen_free_internal (generic_store_remsets, INTERNAL_MEM_STORE_REMSET);
-		generic_store_remsets = gs_next;
-	}
+	memset (ssb_hashtable, 0, ssb_hashtable_size * sizeof (gpointer));
 
 	thread_table = mono_sgen_get_thread_table ();
 	for (i = 0; i < THREAD_HASH_SIZE; ++i) {
@@ -196,16 +286,11 @@ gboolean
 sgen_ssb_find (char *addr)
 {
 	int i;
-	GenericStoreRememberedSet *store_remset;
 	SgenThreadInfo **thread_table;
 	SgenThreadInfo *info;
 
-	for (store_remset = generic_store_remsets; store_remset; store_remset = store_remset->next) {
-		for (i = 0; i < STORE_REMSET_BUFFER_SIZE - 1; ++i) {
-			if (store_remset->data [i] == addr)
-				return TRUE;
-		}
-	}
+	if (find_pointer (addr))
+		return TRUE;
 
 	for (i = 0; i < THREAD_HASH_SIZE; ++i) {
 		for (info = thread_table [i]; info; info = info->next) {
@@ -242,15 +327,16 @@ void
 sgen_ssb_unregister_thread (SgenThreadInfo *info)
 {
 	if (*info->store_remset_buffer_index_addr)
-		add_generic_store_remset_from_buffer (*info->store_remset_buffer_addr);
+		insert_from_ssb (*info->store_remset_buffer_addr, STORE_REMSET_BUFFER_SIZE, FALSE);
 	mono_sgen_free_internal (*info->store_remset_buffer_addr, INTERNAL_MEM_STORE_REMSET);
 }
 
 void
 sgen_ssb_init (void)
 {
-	g_assert (sizeof (GenericStoreRememberedSet) == sizeof (gpointer) * STORE_REMSET_BUFFER_SIZE);
-	mono_sgen_register_fixed_internal_mem_type (INTERNAL_MEM_STORE_REMSET, sizeof (GenericStoreRememberedSet));
+	mono_sgen_register_fixed_internal_mem_type (INTERNAL_MEM_STORE_REMSET, sizeof (gpointer) * STORE_REMSET_BUFFER_SIZE);
+	ssb_hashtable_size = prime_table [ssb_hashtable_size_index];
+	ssb_hashtable = mono_sgen_alloc_os_memory (ssb_hashtable_size * sizeof (gpointer), TRUE);
 }
 
 

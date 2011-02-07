@@ -754,6 +754,8 @@ struct _SgenMajorCollector {
 	void (*post_param_init) (void);
 };
 
+extern SgenMajorCollector major_collector MONO_INTERNAL;
+
 void mono_sgen_marksweep_init (SgenMajorCollector *collector) MONO_INTERNAL;
 void mono_sgen_marksweep_fixed_init (SgenMajorCollector *collector) MONO_INTERNAL;
 void mono_sgen_marksweep_par_init (SgenMajorCollector *collector) MONO_INTERNAL;
