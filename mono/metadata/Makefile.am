@@ -200,6 +200,8 @@ libmonoruntime_la_SOURCES = \
 	sgen-major-scan-object.h \
 	sgen-protocol.h		\
 	sgen-scan-object.h	\
+	sgen-ssb.h	\
+	sgen-ssb.c	\
 	string-icalls.c 	\
 	string-icalls.h 	\
 	sysmath.h		\

@@ -52,6 +52,21 @@
 
 //#define SGEN_BINARY_PROTOCOL
 
+/*
+ * Define this and use the "xdomain-checks" MONO_GC_DEBUG option to
+ * have cross-domain checks in the write barrier.
+ */
+//#define XDOMAIN_CHECKS_IN_WBARRIER
+
+#ifndef SGEN_BINARY_PROTOCOL
+#ifndef HEAVY_STATISTICS
+#define MANAGED_ALLOCATION
+#ifndef XDOMAIN_CHECKS_IN_WBARRIER
+#define MANAGED_WBARRIER
+#endif
+#endif
+#endif
+
 #define SGEN_MAX_DEBUG_LEVEL 2
 
 #define THREAD_HASH_SIZE 11
@@ -81,6 +96,13 @@ struct _RememberedSet {
 	RememberedSet *next;
 	mword data [MONO_ZERO_LEN_ARRAY];
 };
+
+#ifdef HAVE_KW_THREAD
+#define TLAB_ACCESS_INIT
+#else
+extern pthread_key_t thread_info_key MONO_INTERNAL;
+#define TLAB_ACCESS_INIT	SgenThreadInfo *__thread_info__ = pthread_getspecific (thread_info_key)
+#endif
 
 /* eventually share with MonoThread? */
 typedef struct _SgenThreadInfo SgenThreadInfo;
@@ -193,9 +215,11 @@ const static int restart_signal_num = SIGXCPU;
  * Recursion is not allowed for the thread lock.
  */
 #define LOCK_DECLARE(name) pthread_mutex_t name = PTHREAD_MUTEX_INITIALIZER
+#define LOCK_EXPORT(name) extern pthread_mutex_t name MONO_INTERNAL;
 /* if changing LOCK_INIT to something that isn't idempotent, look at
    its use in mono_gc_base_init in sgen-gc.c */
 #define LOCK_INIT(name)
+LOCK_EXPORT (gc_mutex);
 #define LOCK_GC pthread_mutex_lock (&gc_mutex)
 #define UNLOCK_GC pthread_mutex_unlock (&gc_mutex)
 #define LOCK_INTERRUPTION pthread_mutex_lock (&interruption_mutex)
@@ -242,6 +266,7 @@ extern int current_collection_generation;
 #else
 #define SGEN_PTR_IN_NURSERY(p,bits,start,end)	((char*)(p) >= (start) && (char*)(p) < (end))
 #endif
+
 
 /* Structure that corresponds to a MonoVTable: desc is a mword so requires
  * no cast from a pointer to an integer
@@ -674,6 +699,7 @@ void mono_sgen_pin_objects_in_section (GCMemSection *section, SgenGrayQueue *que
 void mono_sgen_pin_stats_register_object (char *obj, size_t size);
 
 void mono_sgen_add_to_global_remset (gpointer ptr) MONO_INTERNAL;
+mword* handle_remset (mword *p, void *start_nursery, void *end_nursery, gboolean global, SgenGrayQueue *queue) MONO_INTERNAL;
 
 int mono_sgen_get_current_collection_generation (void) MONO_INTERNAL;
 
@@ -810,6 +836,32 @@ void mono_sgen_los_iterate_live_block_ranges (sgen_cardtable_block_callback call
 void mono_sgen_los_scan_card_table (SgenGrayQueue *queue) MONO_INTERNAL;
 FILE *mono_sgen_get_logfile (void) MONO_INTERNAL;
 
+#ifdef HAVE_KW_THREAD
+#define EMIT_TLS_ACCESS(mb,dummy,offset)	do {	\
+	mono_mb_emit_byte ((mb), MONO_CUSTOM_PREFIX);	\
+	mono_mb_emit_byte ((mb), CEE_MONO_TLS);		\
+	mono_mb_emit_i4 ((mb), (offset));		\
+	} while (0)
+#else
+
+/* 
+ * CEE_MONO_TLS requires the tls offset, not the key, so the code below only works on darwin,
+ * where the two are the same.
+ */
+#ifdef __APPLE__
+#define EMIT_TLS_ACCESS(mb,member,dummy)	do {	\
+	mono_mb_emit_byte ((mb), MONO_CUSTOM_PREFIX);	\
+	mono_mb_emit_byte ((mb), CEE_MONO_TLS);		\
+	mono_mb_emit_i4 ((mb), thread_info_key);	\
+	mono_mb_emit_icon ((mb), G_STRUCT_OFFSET (SgenThreadInfo, member));	\
+	mono_mb_emit_byte ((mb), CEE_ADD);		\
+	mono_mb_emit_byte ((mb), CEE_LDIND_I);		\
+	} while (0)
+#else
+#define EMIT_TLS_ACCESS(mb,member,dummy)	do { g_error ("sgen is not supported when using --with-tls=pthread.\n"); } while (0)
+#endif
+
+#endif
 #endif /* HAVE_SGEN_GC */
 
 #endif /* __MONO_SGENGC_H__ */

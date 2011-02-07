@@ -203,6 +203,7 @@
 #include "metadata/sgen-protocol.h"
 #include "metadata/sgen-archdep.h"
 #include "metadata/sgen-bridge.h"
+#include "metadata/sgen-ssb.h"
 #include "metadata/mono-gc.h"
 #include "metadata/method-builder.h"
 #include "metadata/profiler-private.h"
@@ -400,21 +401,6 @@ struct _RootRecord {
 	mword root_desc;
 };
 
-/*
- * We're never actually using the first element.  It's always set to
- * NULL to simplify the elimination of consecutive duplicate
- * entries.
- */
-#define STORE_REMSET_BUFFER_SIZE	1024
-
-typedef struct _GenericStoreRememberedSet GenericStoreRememberedSet;
-struct _GenericStoreRememberedSet {
-	GenericStoreRememberedSet *next;
-	/* We need one entry less because the first entry of store
-	   remset buffers is always a dummy and we don't copy it. */
-	gpointer data [STORE_REMSET_BUFFER_SIZE - 1];
-};
-
 /* we have 4 possible values in the low 2 bits */
 enum {
 	REMSET_LOCATION, /* just a pointer to the exact location */
@@ -430,7 +416,6 @@ static __thread RememberedSet *remembered_set MONO_TLS_FAST;
 static pthread_key_t remembered_set_key;
 static RememberedSet *global_remset;
 static RememberedSet *freed_thread_remsets;
-static GenericStoreRememberedSet *generic_store_remsets = NULL;
 
 /*A two slots cache for recently inserted remsets */
 static gpointer global_remset_cache [2];
@@ -470,7 +455,7 @@ mono_sgen_safe_name (void* obj)
  * ########  Global data.
  * ######################################################################
  */
-static LOCK_DECLARE (gc_mutex);
+LOCK_DECLARE (gc_mutex);
 static int gc_disabled = 0;
 static int num_minor_gcs = 0;
 static int num_major_gcs = 0;
@@ -665,25 +650,19 @@ add_profile_gc_root (GCRootReport *report, void *object, int rtype, uintptr_t ex
 static char *nursery_start = NULL;
 
 #ifdef HAVE_KW_THREAD
-#define TLAB_ACCESS_INIT
 #define TLAB_START	tlab_start
 #define TLAB_NEXT	tlab_next
 #define TLAB_TEMP_END	tlab_temp_end
 #define TLAB_REAL_END	tlab_real_end
 #define REMEMBERED_SET	remembered_set
-#define STORE_REMSET_BUFFER	store_remset_buffer
-#define STORE_REMSET_BUFFER_INDEX	store_remset_buffer_index
 #define IN_CRITICAL_REGION thread_info->in_critical_region
 #else
-static pthread_key_t thread_info_key;
-#define TLAB_ACCESS_INIT	SgenThreadInfo *__thread_info__ = pthread_getspecific (thread_info_key)
+pthread_key_t thread_info_key;
 #define TLAB_START	(__thread_info__->tlab_start)
 #define TLAB_NEXT	(__thread_info__->tlab_next)
 #define TLAB_TEMP_END	(__thread_info__->tlab_temp_end)
 #define TLAB_REAL_END	(__thread_info__->tlab_real_end)
 #define REMEMBERED_SET	(__thread_info__->remset)
-#define STORE_REMSET_BUFFER	(__thread_info__->store_remset_buffer)
-#define STORE_REMSET_BUFFER_INDEX	(__thread_info__->store_remset_buffer_index)
 #define IN_CRITICAL_REGION (__thread_info__->in_critical_region)
 #endif
 
@@ -701,12 +680,9 @@ static __thread char *tlab_start;
 static __thread char *tlab_next;
 static __thread char *tlab_temp_end;
 static __thread char *tlab_real_end;
-static __thread gpointer *store_remset_buffer;
-static __thread long store_remset_buffer_index;
 /* Used by the managed allocator/wbarrier */
 static __thread char **tlab_next_addr;
 static __thread char *stack_end;
-static __thread long *store_remset_buffer_index_addr;
 #endif
 static char *nursery_next = NULL;
 static char *nursery_frag_real_end = NULL;
@@ -4971,21 +4947,6 @@ update_current_thread_stack (void *start)
 		gc_callbacks.thread_suspend_func (info->runtime_data, NULL);
 }
 
-/*
- * Define this and use the "xdomain-checks" MONO_GC_DEBUG option to
- * have cross-domain checks in the write barrier.
- */
-//#define XDOMAIN_CHECKS_IN_WBARRIER
-
-#ifndef SGEN_BINARY_PROTOCOL
-#ifndef HEAVY_STATISTICS
-#define MANAGED_ALLOCATION
-#ifndef XDOMAIN_CHECKS_IN_WBARRIER
-#define MANAGED_WBARRIER
-#endif
-#endif
-#endif
-
 static gboolean
 is_ip_in_managed_allocator (MonoDomain *domain, gpointer ip);
 
@@ -5346,8 +5307,8 @@ ptr_on_stack (void *ptr)
 	return FALSE;
 }
 
-static mword*
-handle_remset (mword *p, void *start_nursery, void *end_nursery, gboolean global, GrayQueue *queue)
+mword*
+handle_remset (mword *p, void *start_nursery, void *end_nursery, gboolean global, SgenGrayQueue *queue)
 {
 	void **ptr;
 	mword count;
@@ -5509,13 +5470,6 @@ remset_stats (void)
 }
 #endif
 
-static void
-clear_thread_store_remset_buffer (SgenThreadInfo *info)
-{
-	*info->store_remset_buffer_index_addr = 0;
-	memset (*info->store_remset_buffer_addr, 0, sizeof (gpointer) * STORE_REMSET_BUFFER_SIZE);
-}
-
 static size_t
 remset_byte_size (RememberedSet *remset)
 {
@@ -5528,7 +5482,6 @@ scan_from_remsets (void *start_nursery, void *end_nursery, GrayQueue *queue)
 	int i;
 	SgenThreadInfo *info;
 	RememberedSet *remset;
-	GenericStoreRememberedSet *store_remset;
 	mword *p, *next_p, *store_pos;
 
 #ifdef HEAVY_STATISTICS
@@ -5567,28 +5520,13 @@ scan_from_remsets (void *start_nursery, void *end_nursery, GrayQueue *queue)
 		remset->store_next = store_pos;
 	}
 
-	/* the generic store ones */
-	store_remset = generic_store_remsets;
-	while (store_remset) {
-		GenericStoreRememberedSet *next = store_remset->next;
-
-		for (i = 0; i < STORE_REMSET_BUFFER_SIZE - 1; ++i) {
-			gpointer addr = store_remset->data [i];
-			if (addr)
-				handle_remset ((mword*)&addr, start_nursery, end_nursery, FALSE, queue);
-		}
-
-		mono_sgen_free_internal (store_remset, INTERNAL_MEM_STORE_REMSET);
-
-		store_remset = next;
-	}
-	generic_store_remsets = NULL;
+	/*the ssb ones */
+	sgen_ssb_scan (start_nursery, end_nursery, queue);
 
 	/* the per-thread ones */
 	for (i = 0; i < THREAD_HASH_SIZE; ++i) {
 		for (info = thread_table [i]; info; info = info->next) {
 			RememberedSet *next;
-			int j;
 			for (remset = info->remset; remset; remset = next) {
 				DEBUG (4, fprintf (gc_debug_file, "Scanning remset for thread %p, range: %p-%p, size: %td\n", info, remset->data, remset->store_next, remset->store_next - remset->data));
 				for (p = remset->data; p < remset->store_next;)
@@ -5601,9 +5539,6 @@ scan_from_remsets (void *start_nursery, void *end_nursery, GrayQueue *queue)
 					mono_sgen_free_internal_dynamic (remset, remset_byte_size (remset), INTERNAL_MEM_REMSET);
 				}
 			}
-			for (j = 0; j < *info->store_remset_buffer_index_addr; ++j)
-				handle_remset ((mword*)*info->store_remset_buffer_addr + j + 1, start_nursery, end_nursery, FALSE, queue);
-			clear_thread_store_remset_buffer (info);
 		}
 	}
 
@@ -5644,11 +5579,8 @@ clear_remsets (void)
 		}
 	}
 	/* the generic store ones */
-	while (generic_store_remsets) {
-		GenericStoreRememberedSet *gs_next = generic_store_remsets->next;
-		mono_sgen_free_internal (generic_store_remsets, INTERNAL_MEM_STORE_REMSET);
-		generic_store_remsets = gs_next;
-	}
+	sgen_ssb_clear ();
+
 	/* the per-thread ones */
 	for (i = 0; i < THREAD_HASH_SIZE; ++i) {
 		for (info = thread_table [i]; info; info = info->next) {
@@ -5661,7 +5593,6 @@ clear_remsets (void)
 					mono_sgen_free_internal_dynamic (remset, remset_byte_size (remset), INTERNAL_MEM_REMSET);
 				}
 			}
-			clear_thread_store_remset_buffer (info);
 		}
 	}
 
@@ -5726,8 +5657,7 @@ gc_register_current_thread (void *addr)
 	info->tlab_next_addr = &TLAB_NEXT;
 	info->tlab_temp_end_addr = &TLAB_TEMP_END;
 	info->tlab_real_end_addr = &TLAB_REAL_END;
-	info->store_remset_buffer_addr = &STORE_REMSET_BUFFER;
-	info->store_remset_buffer_index_addr = &STORE_REMSET_BUFFER_INDEX;
+	sgen_ssb_register_thread (info);
 	info->stopped_ip = NULL;
 	info->stopped_domain = NULL;
 	info->stopped_regs = NULL;
@@ -5736,7 +5666,6 @@ gc_register_current_thread (void *addr)
 
 #ifdef HAVE_KW_THREAD
 	tlab_next_addr = &tlab_next;
-	store_remset_buffer_index_addr = &store_remset_buffer_index;
 #endif
 
 	/* try to get it with attributes first */
@@ -5779,24 +5708,12 @@ gc_register_current_thread (void *addr)
 	remembered_set = info->remset;
 #endif
 
-	STORE_REMSET_BUFFER = mono_sgen_alloc_internal (INTERNAL_MEM_STORE_REMSET);
-	STORE_REMSET_BUFFER_INDEX = 0;
-
 	DEBUG (3, fprintf (gc_debug_file, "registered thread %p (%p) (hash: %d)\n", info, (gpointer)info->id, hash));
 
 	if (gc_callbacks.thread_attach_func)
 		info->runtime_data = gc_callbacks.thread_attach_func ();
 
 	return info;
-}
-
-static void
-add_generic_store_remset_from_buffer (gpointer *buffer)
-{
-	GenericStoreRememberedSet *remset = mono_sgen_alloc_internal (INTERNAL_MEM_STORE_REMSET);
-	memcpy (remset->data, buffer + 1, sizeof (gpointer) * (STORE_REMSET_BUFFER_SIZE - 1));
-	remset->next = generic_store_remsets;
-	generic_store_remsets = remset;
 }
 
 static void
@@ -5839,9 +5756,7 @@ unregister_current_thread (void)
 			freed_thread_remsets = p->remset;
 		}
 	}
-	if (*p->store_remset_buffer_index_addr)
-		add_generic_store_remset_from_buffer (*p->store_remset_buffer_addr);
-	mono_sgen_free_internal (*p->store_remset_buffer_addr, INTERNAL_MEM_STORE_REMSET);
+	sgen_ssb_unregister_thread (p);
 	free (p);
 }
 
@@ -6192,27 +6107,9 @@ find_object_for_ptr (char *ptr)
 	return found_obj;
 }
 
-static void
-evacuate_remset_buffer (void)
-{
-	gpointer *buffer;
-	TLAB_ACCESS_INIT;
-
-	buffer = STORE_REMSET_BUFFER;
-
-	add_generic_store_remset_from_buffer (buffer);
-	memset (buffer, 0, sizeof (gpointer) * STORE_REMSET_BUFFER_SIZE);
-
-	STORE_REMSET_BUFFER_INDEX = 0;
-}
-
 void
 mono_gc_wbarrier_generic_nostore (gpointer ptr)
 {
-	gpointer *buffer;
-	int index;
-	TLAB_ACCESS_INIT;
-
 	HEAVY_STAT (++stat_wbarrier_generic_store);
 
 #ifdef XDOMAIN_CHECKS_IN_WBARRIER
@@ -6239,38 +6136,10 @@ mono_gc_wbarrier_generic_nostore (gpointer ptr)
 		return;
 	}
 
-	if (use_cardtable) {
-		if (ptr_in_nursery(*(gpointer*)ptr))
-			sgen_card_table_mark_address ((mword)ptr);
-		return;
-	}
-
-	LOCK_GC;
-
-	buffer = STORE_REMSET_BUFFER;
-	index = STORE_REMSET_BUFFER_INDEX;
-	/* This simple optimization eliminates a sizable portion of
-	   entries.  Comparing it to the last but one entry as well
-	   doesn't eliminate significantly more entries. */
-	if (buffer [index] == ptr) {
-		UNLOCK_GC;
-		return;
-	}
-
-	DEBUG (8, fprintf (gc_debug_file, "Adding remset at %p\n", ptr));
-	HEAVY_STAT (++stat_wbarrier_generic_store_remset);
-
-	++index;
-	if (index >= STORE_REMSET_BUFFER_SIZE) {
-		evacuate_remset_buffer ();
-		index = STORE_REMSET_BUFFER_INDEX;
-		g_assert (index == 0);
-		++index;
-	}
-	buffer [index] = ptr;
-	STORE_REMSET_BUFFER_INDEX = index;
-
-	UNLOCK_GC;
+	if (use_cardtable)
+		sgen_card_table_mark_address ((mword)ptr);
+	else
+		sgen_ssb_record_pointer (ptr);
 }
 
 void
@@ -6517,7 +6386,6 @@ find_in_remsets (char *addr)
 	int i;
 	SgenThreadInfo *info;
 	RememberedSet *remset;
-	GenericStoreRememberedSet *store_remset;
 	mword *p;
 	gboolean found = FALSE;
 
@@ -6532,17 +6400,12 @@ find_in_remsets (char *addr)
 	}
 
 	/* the generic store ones */
-	for (store_remset = generic_store_remsets; store_remset; store_remset = store_remset->next) {
-		for (i = 0; i < STORE_REMSET_BUFFER_SIZE - 1; ++i) {
-			if (store_remset->data [i] == addr)
-				return TRUE;
-		}
-	}
+	if (sgen_ssb_find (addr))
+		return TRUE;
 
 	/* the per-thread ones */
 	for (i = 0; i < THREAD_HASH_SIZE; ++i) {
 		for (info = thread_table [i]; info; info = info->next) {
-			int j;
 			for (remset = info->remset; remset; remset = remset->next) {
 				DEBUG (4, fprintf (gc_debug_file, "Scanning remset for thread %p, range: %p-%p, size: %td\n", info, remset->data, remset->store_next, remset->store_next - remset->data));
 				for (p = remset->data; p < remset->store_next;) {
@@ -6550,10 +6413,6 @@ find_in_remsets (char *addr)
 					if (found)
 						return TRUE;
 				}
-			}
-			for (j = 0; j < *info->store_remset_buffer_index_addr; ++j) {
-				if ((*info->store_remset_buffer_addr) [j + 1] == addr)
-					return TRUE;
 			}
 		}
 	}
@@ -7034,9 +6893,8 @@ mono_gc_base_init (void)
 	mono_sgen_register_fixed_internal_mem_type (INTERNAL_MEM_DISLINK, sizeof (DisappearingLink));
 	mono_sgen_register_fixed_internal_mem_type (INTERNAL_MEM_ROOT_RECORD, sizeof (RootRecord));
 	mono_sgen_register_fixed_internal_mem_type (INTERNAL_MEM_GRAY_QUEUE, sizeof (GrayQueueSection));
-	g_assert (sizeof (GenericStoreRememberedSet) == sizeof (gpointer) * STORE_REMSET_BUFFER_SIZE);
-	mono_sgen_register_fixed_internal_mem_type (INTERNAL_MEM_STORE_REMSET, sizeof (GenericStoreRememberedSet));
 	mono_sgen_register_fixed_internal_mem_type (INTERNAL_MEM_EPHEMERON_LINK, sizeof (EphemeronLinkNode));
+	sgen_ssb_init ();
 
 	if (!major_collector_opt || !strcmp (major_collector_opt, "marksweep")) {
 		mono_sgen_marksweep_init (&major_collector);
@@ -7260,32 +7118,6 @@ enum {
 	ATYPE_NUM
 };
 
-#ifdef HAVE_KW_THREAD
-#define EMIT_TLS_ACCESS(mb,dummy,offset)	do {	\
-	mono_mb_emit_byte ((mb), MONO_CUSTOM_PREFIX);	\
-	mono_mb_emit_byte ((mb), CEE_MONO_TLS);		\
-	mono_mb_emit_i4 ((mb), (offset));		\
-	} while (0)
-#else
-
-/* 
- * CEE_MONO_TLS requires the tls offset, not the key, so the code below only works on darwin,
- * where the two are the same.
- */
-#ifdef __APPLE__
-#define EMIT_TLS_ACCESS(mb,member,dummy)	do {	\
-	mono_mb_emit_byte ((mb), MONO_CUSTOM_PREFIX);	\
-	mono_mb_emit_byte ((mb), CEE_MONO_TLS);		\
-	mono_mb_emit_i4 ((mb), thread_info_key);	\
-	mono_mb_emit_icon ((mb), G_STRUCT_OFFSET (SgenThreadInfo, member));	\
-	mono_mb_emit_byte ((mb), CEE_ADD);		\
-	mono_mb_emit_byte ((mb), CEE_LDIND_I);		\
-	} while (0)
-#else
-#define EMIT_TLS_ACCESS(mb,member,dummy)	do { g_error ("sgen is not supported when using --with-tls=pthread.\n"); } while (0)
-#endif
-
-#endif
 
 #ifdef MANAGED_ALLOCATION
 /* FIXME: Do this in the JIT, where specialized allocation sequences can be created
@@ -7660,36 +7492,10 @@ mono_gc_get_managed_allocator_types (void)
 	return ATYPE_NUM;
 }
 
-
 MonoMethod*
 mono_gc_get_write_barrier (void)
 {
 	MonoMethod *res;
-	MonoMethodBuilder *mb;
-	MonoMethodSignature *sig;
-#ifdef MANAGED_WBARRIER
-	int label_no_wb_1, label_no_wb_2, label_no_wb_3, label_no_wb_4, label_need_wb, label_slow_path;
-#ifndef SGEN_ALIGN_NURSERY
-	int label_continue_1, label_continue_2, label_no_wb_5;
-	int dereferenced_var;
-#endif
-	int buffer_var, buffer_index_var, dummy_var;
-
-#ifdef HAVE_KW_THREAD
-	int stack_end_offset = -1, store_remset_buffer_offset = -1;
-	int store_remset_buffer_index_offset = -1, store_remset_buffer_index_addr_offset = -1;
-
-	MONO_THREAD_VAR_OFFSET (stack_end, stack_end_offset);
-	g_assert (stack_end_offset != -1);
-	MONO_THREAD_VAR_OFFSET (store_remset_buffer, store_remset_buffer_offset);
-	g_assert (store_remset_buffer_offset != -1);
-	MONO_THREAD_VAR_OFFSET (store_remset_buffer_index, store_remset_buffer_index_offset);
-	g_assert (store_remset_buffer_index_offset != -1);
-	MONO_THREAD_VAR_OFFSET (store_remset_buffer_index_addr, store_remset_buffer_index_addr_offset);
-	g_assert (store_remset_buffer_index_addr_offset != -1);
-#endif
-#endif
-
 	g_assert (!use_cardtable);
 
 	// FIXME: Maybe create a separate version for ctors (the branch would be
@@ -7697,152 +7503,7 @@ mono_gc_get_write_barrier (void)
 	if (write_barrier_method)
 		return write_barrier_method;
 
-	/* Create the IL version of mono_gc_barrier_generic_store () */
-	sig = mono_metadata_signature_alloc (mono_defaults.corlib, 1);
-	sig->ret = &mono_defaults.void_class->byval_arg;
-	sig->params [0] = &mono_defaults.int_class->byval_arg;
-
-	mb = mono_mb_new (mono_defaults.object_class, "wbarrier", MONO_WRAPPER_WRITE_BARRIER);
-
-#ifdef MANAGED_WBARRIER
-	if (mono_runtime_has_tls_get ()) {
-#ifdef SGEN_ALIGN_NURSERY
-		// if (ptr_in_nursery (ptr)) return;
-		/*
-		 * Masking out the bits might be faster, but we would have to use 64 bit
-		 * immediates, which might be slower.
-		 */
-		mono_mb_emit_ldarg (mb, 0);
-		mono_mb_emit_icon (mb, DEFAULT_NURSERY_BITS);
-		mono_mb_emit_byte (mb, CEE_SHR_UN);
-		mono_mb_emit_icon (mb, (mword)nursery_start >> DEFAULT_NURSERY_BITS);
-		label_no_wb_1 = mono_mb_emit_branch (mb, CEE_BEQ);
-
-		// if (!ptr_in_nursery (*ptr)) return;
-		mono_mb_emit_ldarg (mb, 0);
-		mono_mb_emit_byte (mb, CEE_LDIND_I);
-		mono_mb_emit_icon (mb, DEFAULT_NURSERY_BITS);
-		mono_mb_emit_byte (mb, CEE_SHR_UN);
-		mono_mb_emit_icon (mb, (mword)nursery_start >> DEFAULT_NURSERY_BITS);
-		label_no_wb_2 = mono_mb_emit_branch (mb, CEE_BNE_UN);
-#else
-
-		// if (ptr < (nursery_start)) goto continue;
-		mono_mb_emit_ldarg (mb, 0);
-		mono_mb_emit_ptr (mb, (gpointer) nursery_start);
-		label_continue_1 = mono_mb_emit_branch (mb, CEE_BLT);
-
-		// if (ptr >= nursery_real_end)) goto continue;
-		mono_mb_emit_ldarg (mb, 0);
-		mono_mb_emit_ptr (mb, (gpointer) nursery_real_end);
-		label_continue_2 = mono_mb_emit_branch (mb, CEE_BGE);
-
-		// Otherwise return
-		label_no_wb_1 = mono_mb_emit_branch (mb, CEE_BR);
-
-		// continue:
-		mono_mb_patch_branch (mb, label_continue_1);
-		mono_mb_patch_branch (mb, label_continue_2);
-
-		// Dereference and store in local var
-		dereferenced_var = mono_mb_add_local (mb, &mono_defaults.int_class->byval_arg);
-		mono_mb_emit_ldarg (mb, 0);
-		mono_mb_emit_byte (mb, CEE_LDIND_I);
-		mono_mb_emit_stloc (mb, dereferenced_var);
-
-		// if (*ptr < nursery_start) return;
-		mono_mb_emit_ldloc (mb, dereferenced_var);
-		mono_mb_emit_ptr (mb, (gpointer) nursery_start);
-		label_no_wb_2 = mono_mb_emit_branch (mb, CEE_BLT);
-
-		// if (*ptr >= nursery_end) return;
-		mono_mb_emit_ldloc (mb, dereferenced_var);
-		mono_mb_emit_ptr (mb, (gpointer) nursery_real_end);
-		label_no_wb_5 = mono_mb_emit_branch (mb, CEE_BGE);
-
-#endif 
-		// if (ptr >= stack_end) goto need_wb;
-		mono_mb_emit_ldarg (mb, 0);
-		EMIT_TLS_ACCESS (mb, stack_end, stack_end_offset);
-		label_need_wb = mono_mb_emit_branch (mb, CEE_BGE_UN);
-
-		// if (ptr >= stack_start) return;
-		dummy_var = mono_mb_add_local (mb, &mono_defaults.int_class->byval_arg);
-		mono_mb_emit_ldarg (mb, 0);
-		mono_mb_emit_ldloc_addr (mb, dummy_var);
-		label_no_wb_3 = mono_mb_emit_branch (mb, CEE_BGE_UN);
-
-		// need_wb:
-		mono_mb_patch_branch (mb, label_need_wb);
-
-		// buffer = STORE_REMSET_BUFFER;
-		buffer_var = mono_mb_add_local (mb, &mono_defaults.int_class->byval_arg);
-		EMIT_TLS_ACCESS (mb, store_remset_buffer, store_remset_buffer_offset);
-		mono_mb_emit_stloc (mb, buffer_var);
-
-		// buffer_index = STORE_REMSET_BUFFER_INDEX;
-		buffer_index_var = mono_mb_add_local (mb, &mono_defaults.int_class->byval_arg);
-		EMIT_TLS_ACCESS (mb, store_remset_buffer_index, store_remset_buffer_index_offset);
-		mono_mb_emit_stloc (mb, buffer_index_var);
-
-		// if (buffer [buffer_index] == ptr) return;
-		mono_mb_emit_ldloc (mb, buffer_var);
-		mono_mb_emit_ldloc (mb, buffer_index_var);
-		g_assert (sizeof (gpointer) == 4 || sizeof (gpointer) == 8);
-		mono_mb_emit_icon (mb, sizeof (gpointer) == 4 ? 2 : 3);
-		mono_mb_emit_byte (mb, CEE_SHL);
-		mono_mb_emit_byte (mb, CEE_ADD);
-		mono_mb_emit_byte (mb, CEE_LDIND_I);
-		mono_mb_emit_ldarg (mb, 0);
-		label_no_wb_4 = mono_mb_emit_branch (mb, CEE_BEQ);
-
-		// ++buffer_index;
-		mono_mb_emit_ldloc (mb, buffer_index_var);
-		mono_mb_emit_icon (mb, 1);
-		mono_mb_emit_byte (mb, CEE_ADD);
-		mono_mb_emit_stloc (mb, buffer_index_var);
-
-		// if (buffer_index >= STORE_REMSET_BUFFER_SIZE) goto slow_path;
-		mono_mb_emit_ldloc (mb, buffer_index_var);
-		mono_mb_emit_icon (mb, STORE_REMSET_BUFFER_SIZE);
-		label_slow_path = mono_mb_emit_branch (mb, CEE_BGE);
-
-		// buffer [buffer_index] = ptr;
-		mono_mb_emit_ldloc (mb, buffer_var);
-		mono_mb_emit_ldloc (mb, buffer_index_var);
-		g_assert (sizeof (gpointer) == 4 || sizeof (gpointer) == 8);
-		mono_mb_emit_icon (mb, sizeof (gpointer) == 4 ? 2 : 3);
-		mono_mb_emit_byte (mb, CEE_SHL);
-		mono_mb_emit_byte (mb, CEE_ADD);
-		mono_mb_emit_ldarg (mb, 0);
-		mono_mb_emit_byte (mb, CEE_STIND_I);
-
-		// STORE_REMSET_BUFFER_INDEX = buffer_index;
-		EMIT_TLS_ACCESS (mb, store_remset_buffer_index_addr, store_remset_buffer_index_addr_offset);
-		mono_mb_emit_ldloc (mb, buffer_index_var);
-		mono_mb_emit_byte (mb, CEE_STIND_I);
-
-		// return;
-		mono_mb_patch_branch (mb, label_no_wb_1);
-		mono_mb_patch_branch (mb, label_no_wb_2);
-		mono_mb_patch_branch (mb, label_no_wb_3);
-		mono_mb_patch_branch (mb, label_no_wb_4);
-#ifndef SGEN_ALIGN_NURSERY
-		mono_mb_patch_branch (mb, label_no_wb_5);
-#endif
-		mono_mb_emit_byte (mb, CEE_RET);
-
-		// slow path
-		mono_mb_patch_branch (mb, label_slow_path);
-	}
-#endif
-
-	mono_mb_emit_ldarg (mb, 0);
-	mono_mb_emit_icall (mb, mono_gc_wbarrier_generic_nostore);
-	mono_mb_emit_byte (mb, CEE_RET);
-
-	res = mono_mb_create_method (mb, sig, 16);
-	mono_mb_free (mb);
+	res = sgen_ssb_get_write_barrier ();
 
 	mono_loader_lock ();
 	if (write_barrier_method) {
@@ -7854,7 +7515,6 @@ mono_gc_get_write_barrier (void)
 		write_barrier_method = res;
 	}
 	mono_loader_unlock ();
-
 	return write_barrier_method;
 }
 
