@@ -49,30 +49,32 @@ enum {
 #undef OPDEF
 
 static const int prime_table[] = {
-	4093,
-	8191,
-	16381,
-	32749,
-	65521,
-	131071,
-	262139,
-	524287,
-	1048573,
-	2097143,
-	4194301,
-	8388593,
-	16777213,
-	33554393,
-	67108859,
-	134217689,
-	268435399,
-	536870909,
-	1073741789,
+    4177,
+    6247,
+    9371,
+    14057,
+    21089,
+    31627,
+    47431,
+    71143,
+    106721,
+    160073,
+    240101,
+    360163,
+    540217,
+    810343,
+    1215497,
+    1823231,
+    2734867,
+    4102283,
+    6153409,
+    9230113,
+    13845163,
 	0
 };
 
 #define STORE_REMSET_BUFFER_SIZE	1024
-#define LOAD_FACTOR 0.7f
+#define LOAD_FACTOR 0.5f
 
 #ifdef HAVE_KW_THREAD
 static __thread gpointer *store_remset_buffer;
@@ -90,42 +92,62 @@ static gpointer *ssb_hashtable = NULL;
 static int ssb_hashtable_size_index = 2;
 static int ssb_hashtable_size, ssb_hashtable_elements;
 
+static long long hash_insert_probes = 0;
+static long long hash_inserts = 0;
+
+/*FIXME, look for a good pointer hashing function*/
+static unsigned
+hash_ptr (gpointer ptr)
+{
+	unsigned w = (unsigned)ptr;
+	return (w >> 2) * 2654435761u;
+}
+
 static void
 insert_no_check (gpointer *table, int table_size, gpointer pointer)
 {
-	int idx, initial_idx, free_slot = -1;
+	int idx, initial_idx, free_slot = -1, cnt = 0, tombs = 0;
+	unsigned hash = hash_ptr (pointer);
 
-	/*FIXME, look for a good pointer hashing function*/
-	idx = initial_idx = (int)pointer % table_size;
-	do {
+	++hash_inserts;
+
+	idx = initial_idx = hash % table_size;
+	for (;;) {
 		gpointer k = table [idx];
+		++hash_insert_probes;
 
-		if (!k) {
-			if (free_slot == -1)
-				free_slot = idx;
-			break;
-		} else if (k == TOMBSTONE && free_slot == -1) {
+		if (!k || k == TOMBSTONE) {
 			free_slot = idx;
+			break;
 		} else if (k == pointer) { 
 			return;
 		}
+		idx = (idx + 1) % table_size;
+		++cnt;
+	}
 
-		if (++idx == table_size) //Wrap around
-			idx = 0;
-	} while (idx != initial_idx);
-
+	//printf ("ptr %p at slot %d\n", pointer, free_slot);
+	if (cnt > 40)
+		printf ("used %d tombs %d loops %d %d ini idx %d\n", cnt, tombs, ssb_hashtable_elements, ssb_hashtable_size, initial_idx);
 	table [free_slot] = pointer;
 	++ssb_hashtable_elements;
 }
 
 static void
-rehash (gboolean can_expand)
+rehash (int target, gboolean can_expand)
 {
 	int i;
 	gpointer *new_table;
 	/*FIXME trigger a nursery and only then expand when can_expand == FALSE*/
-	int new_size = prime_table [++ssb_hashtable_size_index];
+	int new_size;
+	for (i = 0; i < sizeof (prime_table) / sizeof (int); ++i) {
+		if (prime_table [i] >= target) {
+			new_size = prime_table [i];
+			break;
+		}
+	}
 
+	//printf ("rehashing to %d\n", new_size);
 	g_assert (new_size);
 
 	ssb_hashtable_elements = 0;
@@ -135,6 +157,7 @@ rehash (gboolean can_expand)
 			insert_no_check (new_table, new_size, ssb_hashtable [i]);
 	}
 
+	mono_sgen_free_os_memory (ssb_hashtable, ssb_hashtable_size);
 	ssb_hashtable = new_table;
 	ssb_hashtable_size = new_size;
 }
@@ -142,26 +165,20 @@ rehash (gboolean can_expand)
 static gboolean
 find_pointer (gpointer pointer)
 {
-	int idx, initial_idx;
-	idx = initial_idx = (int)pointer % ssb_hashtable_size;
-	
-	do {
-		gpointer k = ssb_hashtable [idx];
-		if (k == pointer)
+	int i;
+	for (i = 0; i < ssb_hashtable_size; ++i) {
+		if (ssb_hashtable [i] == pointer)
 			return TRUE;
-		if (!k)
-			break;
-		if (++idx == ssb_hashtable_size) //Wrap around
-			idx = 0;
-	} while (idx != initial_idx);
+	}
 	return FALSE;
 }
 
 static void
 insert_pointer (gpointer pointer, gboolean can_expand)
 {
-	if (ssb_hashtable_elements >= ssb_hashtable_size * LOAD_FACTOR)
-		rehash (can_expand);
+	//printf ("---insert %p\n", pointer);
+	if (ssb_hashtable_elements >= (ssb_hashtable_size * LOAD_FACTOR))
+		rehash (ssb_hashtable_elements * 2 + 1, can_expand);
 	insert_no_check (ssb_hashtable, ssb_hashtable_size, pointer);
 }
 
@@ -169,6 +186,7 @@ static void
 insert_from_ssb (gpointer *buffer, int size, gboolean can_expand)
 {
 	int i;
+//	printf ("flushing %d pointers\n", size - 1);
 	for (i = 1; i < size; ++i)
 		insert_pointer (buffer [i], can_expand);
 }
@@ -196,6 +214,7 @@ sgen_ssb_record_pointer (gpointer ptr)
 	int index;
 	TLAB_ACCESS_INIT;
 
+//	printf ("recording %p\n", ptr);
 	LOCK_GC;
 
 	buffer = STORE_REMSET_BUFFER;
@@ -219,6 +238,7 @@ sgen_ssb_record_pointer (gpointer ptr)
 		++index;
 	}
 	buffer [index] = ptr;
+	//printf ("at idx %d ptr %p\n", index, ptr);
 	STORE_REMSET_BUFFER_INDEX = index;
 
 	UNLOCK_GC;
@@ -231,39 +251,47 @@ sgen_ssb_scan (void *start_nursery, void *end_nursery, SgenGrayQueue *queue)
 	SgenThreadInfo **thread_table;
 	SgenThreadInfo *info;
 
-	printf ("elements %d\n", ssb_hashtable_elements);
+	int cnt = 0;
+	int survived = 0;
+	//printf ("elements %d\n", ssb_hashtable_elements);
 	/*FLUSH remaining elements*/
 	thread_table = mono_sgen_get_thread_table ();
 	for (i = 0; i < THREAD_HASH_SIZE; ++i) {
 		for (info = thread_table [i]; info; info = info->next) {
-			insert_from_ssb ((gpointer*)*info->store_remset_buffer_addr, *info->store_remset_buffer_index_addr, TRUE);
+			insert_from_ssb ((gpointer*)*info->store_remset_buffer_addr, *info->store_remset_buffer_index_addr + 1, TRUE);
 			clear_thread_store_remset_buffer (info);
 		}
 	}
 
 	/* the generic store ones */
+	ssb_hashtable_elements = 0;
 	for (i = 0; i < ssb_hashtable_size; ++i) {
 		gpointer *addr = (gpointer*)ssb_hashtable[i];
 		if (addr && addr != TOMBSTONE) {
-			gpointer *ptr = *addr;
-			if (((void*)ptr < start_nursery || (void*)ptr >= end_nursery)) {
-				gpointer new, old = *ptr;
-				major_collector.copy_object (ptr, queue);
-				DEBUG (9, fprintf (gc_debug_file, "Kept object on ssb slot due to promotion at %p with %p\n", ptr, *ptr));
-				if (old)
-					binary_protocol_ptr_update (ptr, old, *ptr, (gpointer)LOAD_VTABLE (*ptr), mono_sgen_safe_object_get_size (*ptr));
-				new = *ptr;
+			gpointer ptr = *addr;
+			++cnt;
+			//printf ("addr %p ptr %p [%p, %p]\n", addr, ptr, start_nursery, end_nursery);
+			if ((ptr >= start_nursery && ptr < end_nursery)) {
+				gpointer new;
+				major_collector.copy_object (addr, queue);
+				new = *addr;
+
+				/* If the object was promoted, we can remove it. */
 				if (new < start_nursery || new >= end_nursery) {
-					/*
-					 * If the object was promoted, we can remove it.
-					 */
-					ssb_hashtable[i] = TOMBSTONE;
+					ssb_hashtable [i] = TOMBSTONE;
 				} else {
-					DEBUG (9, fprintf (gc_debug_file, "Keep on the ssb hash because of pinning %p (%p %s)\n", ptr, *ptr, mono_sgen_safe_name (*ptr)));
+					++ssb_hashtable_elements;
+					++survived;
 				}
+			} else {
+				ssb_hashtable [i] = TOMBSTONE;
 			}
 		}
 	}
+	if (cnt < ssb_hashtable_size / 3) {
+		rehash (cnt * 2, TRUE);
+	}
+	printf ("found %d survived %d elements %d\n", cnt, survived, ssb_hashtable_elements);
 }
 
 void
@@ -272,6 +300,7 @@ sgen_ssb_clear (void)
 	int i;
 	SgenThreadInfo **thread_table;
 	SgenThreadInfo *info;
+
 
 	memset (ssb_hashtable, 0, ssb_hashtable_size * sizeof (gpointer));
 
@@ -289,12 +318,15 @@ sgen_ssb_find (char *addr)
 	SgenThreadInfo **thread_table;
 	SgenThreadInfo *info;
 
+
 	if (find_pointer (addr))
 		return TRUE;
 
+	thread_table = mono_sgen_get_thread_table ();
 	for (i = 0; i < THREAD_HASH_SIZE; ++i) {
 		for (info = thread_table [i]; info; info = info->next) {
 			int j;
+			//printf ("thread %p buffer %p index %d\n", info, info->store_remset_buffer_addr, info->store_remset_buffer_index_addr);
 			for (j = 0; j < *info->store_remset_buffer_index_addr; ++j) {
 				if ((*info->store_remset_buffer_addr) [j + 1] == addr)
 					return TRUE;
@@ -337,6 +369,9 @@ sgen_ssb_init (void)
 	mono_sgen_register_fixed_internal_mem_type (INTERNAL_MEM_STORE_REMSET, sizeof (gpointer) * STORE_REMSET_BUFFER_SIZE);
 	ssb_hashtable_size = prime_table [ssb_hashtable_size_index];
 	ssb_hashtable = mono_sgen_alloc_os_memory (ssb_hashtable_size * sizeof (gpointer), TRUE);
+
+	mono_counters_register ("ssb inserts", MONO_COUNTER_GC | MONO_COUNTER_LONG, &hash_inserts);
+	mono_counters_register ("ssb insert probes", MONO_COUNTER_GC | MONO_COUNTER_LONG, &hash_insert_probes);
 }
 
 
