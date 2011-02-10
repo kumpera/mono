@@ -2992,6 +2992,7 @@ collect_nursery (size_t requested_size)
 
 	binary_protocol_collection (GENERATION_NURSERY);
 	check_scan_starts ();
+	
 
 	degraded_mode = 0;
 	objects_pinned = 0;
@@ -3044,15 +3045,13 @@ collect_nursery (size_t requested_size)
 	DEBUG (2, fprintf (gc_debug_file, "Finding pinned pointers: %d in %d usecs\n", next_pin_slot, TV_ELAPSED (btv, atv)));
 	DEBUG (4, fprintf (gc_debug_file, "Start scan with %d pinned objects\n", next_pin_slot));
 
-	if (consistency_check_at_minor_collection)
-		check_consistency ();
-
 	/* 
 	 * walk all the roots and copy the young objects to the old generation,
 	 * starting from to_space
 	 */
 
 	scan_from_remsets (nursery_start, nursery_next, &gray_queue);
+
 	/* we don't have complete write barrier yet, so we scan all the old generation sections */
 	TV_GETTIME (btv);
 	time_minor_scan_remsets += TV_ELAPSED_MS (atv, btv);
@@ -3089,6 +3088,9 @@ collect_nursery (size_t requested_size)
 	TV_GETTIME (atv);
 	time_minor_finish_gray_stack += TV_ELAPSED_MS (btv, atv);
 	mono_profiler_gc_event (MONO_GC_EVENT_MARK_END, 0);
+
+	if (consistency_check_at_minor_collection)
+		check_consistency ();
 
 	if (objects_pinned) {
 		evacuate_pin_staging_area ();
@@ -5185,6 +5187,7 @@ stop_world (int generation)
 {
 	int count;
 
+	card_table_before_world_stop (generation);
 	mono_profiler_gc_event (MONO_GC_EVENT_PRE_STOP_WORLD, generation);
 	acquire_gc_locks ();
 
@@ -5198,6 +5201,9 @@ stop_world (int generation)
 	g_assert (count >= 0);
 	DEBUG (3, fprintf (gc_debug_file, "world stopped %d thread(s)\n", count));
 	mono_profiler_gc_event (MONO_GC_EVENT_POST_STOP_WORLD, generation);
+
+	card_table_world_stopped (generation);
+
 	return count;
 }
 
@@ -5233,6 +5239,7 @@ restart_world (int generation)
 	max_pause_usec = MAX (usec, max_pause_usec);
 	DEBUG (2, fprintf (gc_debug_file, "restarted %d thread(s) (pause time: %d usec, max: %d)\n", count, (int)usec, (int)max_pause_usec));
 	mono_profiler_gc_event (MONO_GC_EVENT_POST_START_WORLD, generation);
+
 	return count;
 }
 
@@ -6398,6 +6405,22 @@ const char*descriptor_types [] = {
 	"complex_arr"
 };
 
+void
+verify_ptr (char *ptr)
+{
+	char *start;
+	if (ptr_in_nursery (ptr))
+		return;
+
+	if (mono_sgen_ptr_is_in_los (ptr, &start))
+		return;
+	if (major_collector.ptr_is_in_non_pinned_space (ptr))
+		return;
+
+	if (major_collector.obj_is_from_pinned_alloc (ptr))
+		return;
+	g_error ("invalid pointer %p'\n", ptr);
+}
 void
 describe_ptr (char *ptr)
 {

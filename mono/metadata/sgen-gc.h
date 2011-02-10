@@ -584,6 +584,7 @@ SgenThreadInfo** mono_sgen_get_thread_table (void) MONO_INTERNAL;
 void mono_sgen_wait_for_suspend_ack (int count) MONO_INTERNAL;
 
 gboolean mono_sgen_is_worker_thread (pthread_t thread) MONO_INTERNAL;
+gboolean mono_sgen_is_cardtable_refiner (pthread_t thread) MONO_INTERNAL;
 
 void mono_sgen_update_heap_boundaries (mword low, mword high) MONO_INTERNAL;
 
@@ -682,6 +683,8 @@ void mono_sgen_add_to_global_remset (gpointer ptr) MONO_INTERNAL;
 int mono_sgen_get_current_collection_generation (void) MONO_INTERNAL;
 
 typedef void (*sgen_cardtable_block_callback) (mword start, mword size);
+typedef void (*sgen_cardtable_scan_small) (char *obj, SgenGrayQueue *queue);
+typedef void (*sgen_cardtable_scan_large) (char *obj, mword obj_size, guint8 *cards, SgenGrayQueue *queue);
 
 typedef struct _SgenMajorCollector SgenMajorCollector;
 struct _SgenMajorCollector {
@@ -710,7 +713,7 @@ struct _SgenMajorCollector {
 	void (*free_non_pinned_object) (char *obj, size_t size);
 	void (*find_pin_queue_start_ends) (SgenGrayQueue *queue);
 	void (*pin_objects) (SgenGrayQueue *queue);
-	void (*scan_card_table) (SgenGrayQueue *queue);
+	void (*scan_card_table) (sgen_cardtable_scan_small scan_small, sgen_cardtable_scan_large scan_large, SgenGrayQueue *queue);
 	void (*iterate_live_block_ranges) (sgen_cardtable_block_callback callback);
 	void (*init_to_space) (void);
 	void (*sweep) (void);
@@ -811,7 +814,7 @@ void mono_sgen_los_sweep (void) MONO_INTERNAL;
 gboolean mono_sgen_ptr_is_in_los (char *ptr, char **start) MONO_INTERNAL;
 void mono_sgen_los_iterate_objects (IterateObjectCallbackFunc cb, void *user_data) MONO_INTERNAL;
 void mono_sgen_los_iterate_live_block_ranges (sgen_cardtable_block_callback callback) MONO_INTERNAL;
-void mono_sgen_los_scan_card_table (SgenGrayQueue *queue) MONO_INTERNAL;
+void mono_sgen_los_scan_card_table (sgen_cardtable_scan_large scan_large, SgenGrayQueue *queue) MONO_INTERNAL;
 FILE *mono_sgen_get_logfile (void) MONO_INTERNAL;
 
 #endif /* HAVE_SGEN_GC */

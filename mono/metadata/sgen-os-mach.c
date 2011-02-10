@@ -67,7 +67,7 @@ mono_sgen_thread_handshake (int signum)
 	for (i = 0, count = 0; i < num_threads; i++) {
 		thread_port_t t = thread_list [i];
 		pthread_t pt = pthread_from_mach_thread_np (t);
-		if (t != cur_thread && pt != exception_thread && !mono_sgen_is_worker_thread (pt)) {
+		if (t != cur_thread && pt != exception_thread && !mono_sgen_is_worker_thread (pt) && !mono_sgen_is_cardtable_refiner (pt)) {
 			if (signum == suspend_signal_num) {
 				ret = thread_suspend (t);
 				if (ret != KERN_SUCCESS) {

@@ -466,12 +466,14 @@ mono_sgen_ptr_is_in_los (char *ptr, char **start)
 {
 	LOSObject *obj;
 
-	*start = NULL;
+	if (start)
+		*start = NULL;
 	for (obj = los_object_list; obj; obj = obj->next) {
 		char *end = obj->data + obj->size;
 
 		if (ptr >= obj->data && ptr < end) {
-			*start = obj->data;
+			if (start)
+				*start = obj->data;
 			return TRUE;
 		}
 	}
@@ -500,12 +502,12 @@ mono_sgen_los_iterate_live_block_ranges (sgen_cardtable_block_callback callback)
 
 #ifdef SGEN_HAVE_CARDTABLE
 void
-mono_sgen_los_scan_card_table (SgenGrayQueue *queue)
+mono_sgen_los_scan_card_table (sgen_cardtable_scan_large scan_large, SgenGrayQueue *queue)
 {
 	LOSObject *obj;
 
 	for (obj = los_object_list; obj; obj = obj->next) {
-		sgen_cardtable_scan_object (obj->data, obj->size, NULL, queue);
+		scan_large (obj->data, obj->size, NULL, queue);
 	}
 }
 #endif

@@ -1679,7 +1679,7 @@ skip_card (guint8 *card_data, guint8 *card_data_end)
 #define MS_OBJ_ALLOCED_FAST(o,b)		(*(void**)(o) && (*(char**)(o) < (b) || *(char**)(o) >= (b) + MS_BLOCK_SIZE))
 
 static void
-major_scan_card_table (SgenGrayQueue *queue)
+major_scan_card_table (sgen_cardtable_scan_small scan_small, sgen_cardtable_scan_large scan_large, SgenGrayQueue *queue)
 {
 	MSBlockInfo *block;
 
@@ -1716,7 +1716,7 @@ major_scan_card_table (SgenGrayQueue *queue)
 			while (obj < end) {
 				if (MS_OBJ_ALLOCED_FAST (obj, block_start)) {
 					int card_offset = (obj - base) >> CARD_BITS;
-					sgen_cardtable_scan_object (obj, block_obj_size, cards + card_offset, queue);
+					scan_large (obj, block_obj_size, cards + card_offset, queue);
 				}
 				obj += block_obj_size;
 			}
@@ -1759,7 +1759,7 @@ major_scan_card_table (SgenGrayQueue *queue)
 				while (obj < end) {
 					if (MS_OBJ_ALLOCED_FAST (obj, block_start)) {
 						HEAVY_STAT (++scanned_objects);
-						minor_scan_object (obj, queue);
+						scan_small (obj, queue);
 					}
 					obj += block_obj_size;
 				}
