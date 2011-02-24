@@ -215,6 +215,7 @@
 #include "utils/mono-semaphore.h"
 #include "utils/mono-counters.h"
 #include "utils/mono-proclib.h"
+#include "utils/mono-threads.h"
 
 #include <mono/utils/memcheck.h>
 
@@ -5136,11 +5137,6 @@ mono_gc_deregister_root (char* addr)
  * ######################################################################
  */
 
-/* FIXME: handle large/small config */
-#define HASH_PTHREAD_T(id) (((unsigned int)(id) >> 4) * 2654435761u)
-
-SgenThreadInfo* thread_table [THREAD_HASH_SIZE];
-
 #if USE_SIGNAL_BASED_START_STOP_WORLD
 
 static MonoSemType suspend_ack_semaphore;
@@ -5155,29 +5151,6 @@ static MonoContext cur_thread_ctx = {0};
 static mword cur_thread_regs [ARCH_NUM_REGS] = {0};
 #endif
 
-SgenThreadInfo*
-mono_sgen_thread_info_current (void)
-{
-#ifdef HAVE_KW_THREAD
-	return thread_info;
-#else
-	return pthread_getspecific (thread_info_key);
-#endif
-}
-
-SgenThreadInfo*
-mono_sgen_thread_info_lookup (ARCH_THREAD_TYPE id)
-{
-	unsigned int hash = HASH_PTHREAD_T (id) % THREAD_HASH_SIZE;
-	SgenThreadInfo *info;
-
-	info = thread_table [hash];
-	while (info && !ARCH_THREAD_EQUALS (info->id, id)) {
-		info = info->next;
-	}
-	return info;
-}
-
 static void
 update_current_thread_stack (void *start)
 {
@@ -5185,7 +5158,7 @@ update_current_thread_stack (void *start)
 #ifndef USE_MONO_CTX
 	void *ptr = cur_thread_regs;
 #endif
-	SgenThreadInfo *info = mono_sgen_thread_info_current ();
+	SgenThreadInfo *info = mono_thread_info_current ();
 	
 	info->stack_start = align_pointer (&stack_guard);
 	g_assert (info->stack_start >= info->stack_start_limit && info->stack_start < info->stack_end);
@@ -5248,11 +5221,11 @@ restart_threads_until_none_in_managed_allocator (void)
 				continue;
 			if (!info->stack_start || info->in_critical_region ||
 					is_ip_in_managed_allocator (info->stopped_domain, info->stopped_ip)) {
-				binary_protocol_thread_restart ((gpointer)info->id);
+				binary_protocol_thread_restart ((gpointer)info->info.tid);
 #if defined(__MACH__) && MONO_MACH_ARCH_SUPPORTED
-				result = thread_resume (pthread_mach_thread_np (info->id));
+				result = thread_resume (pthread_mach_thread_np (info->info.tid));
 #else
-				result = pthread_kill (info->id, restart_signal_num);
+				result = pthread_kill (info->info.tid, restart_signal_num);
 #endif
 				if (result == 0) {
 					++restart_count;
@@ -5293,9 +5266,9 @@ restart_threads_until_none_in_managed_allocator (void)
 			if (info->skip || info->stopped_ip == NULL)
 				continue;
 #if defined(__MACH__) && MONO_MACH_ARCH_SUPPORTED
-			result = thread_suspend (pthread_mach_thread_np (info->id));
+			result = thread_suspend (pthread_mach_thread_np (info->info.tid));
 #else
-			result = pthread_kill (info->id, suspend_signal_num);
+			result = pthread_kill (info->info.tid, suspend_signal_num);
 #endif
 			if (result == 0) {
 				++restarted_count;
@@ -5365,7 +5338,7 @@ suspend_handler (int sig, siginfo_t *siginfo, void *context)
 	if (gc_callbacks.thread_suspend_func)
 		gc_callbacks.thread_suspend_func (info->runtime_data, context);
 
-	DEBUG (4, fprintf (gc_debug_file, "Posting suspend_ack_semaphore for suspend from %p %p\n", info, (gpointer)ARCH_GET_THREAD ()));
+	DEBUG (4, fprintf (gc_debug_file, "Posting suspend_ack_semaphore for suspend from %p %p\n", info, (gpointer)mono_native_thread_id_get ()));
 	/* notify the waiting thread */
 	MONO_SEM_POST (suspend_ack_semaphore_ptr);
 	info->stop_count = stop_count;
@@ -5376,7 +5349,7 @@ suspend_handler (int sig, siginfo_t *siginfo, void *context)
 		sigsuspend (&suspend_signal_mask);
 	} while (info->signal != restart_signal_num);
 
-	DEBUG (4, fprintf (gc_debug_file, "Posting suspend_ack_semaphore for resume from %p %p\n", info, (gpointer)ARCH_GET_THREAD ()));
+	DEBUG (4, fprintf (gc_debug_file, "Posting suspend_ack_semaphore for resume from %p %p\n", info, (gpointer)mono_native_thread_id_get ()));
 	/* notify the waiting thread */
 	MONO_SEM_POST (suspend_ack_semaphore_ptr);
 
@@ -5391,7 +5364,7 @@ restart_handler (int sig)
 
 	info = mono_sgen_thread_info_current ();
 	info->signal = restart_signal_num;
-	DEBUG (4, fprintf (gc_debug_file, "Restart handler in %p %p\n", info, (gpointer)ARCH_GET_THREAD ()));
+	DEBUG (4, fprintf (gc_debug_file, "Restart handler in %p %p\n", info, (gpointer)mono_native_thread_id_get ()));
 
 	errno = old_errno;
 }
@@ -5562,7 +5535,7 @@ find_pinning_ref_from_thread (char *obj, size_t size)
 			continue;
 		while (start < (char**)info->stack_end) {
 			if (*start >= obj && *start < endobj) {
-				DEBUG (0, fprintf (gc_debug_file, "Object %p referenced in thread %p (id %p) at %p, stack: %p-%p\n", obj, info, (gpointer)info->id, start, info->stack_start, info->stack_end));
+				DEBUG (0, fprintf (gc_debug_file, "Object %p referenced in thread %p (id %p) at %p, stack: %p-%p\n", obj, info, (gpointer)info->info.tid, start, info->stack_start, info->stack_end));
 			}
 			start++;
 		}
@@ -5584,7 +5557,7 @@ static gboolean
 ptr_on_stack (void *ptr)
 {
 	gpointer stack_start = &stack_start;
-	SgenThreadInfo *info = mono_sgen_thread_info_current ();
+	SgenThreadInfo *info = mono_thread_info_lookup_unsafe (mono_native_thread_id_get ());
 
 	if (ptr >= stack_start && ptr < (gpointer)info->stack_end)
 		return TRUE;
@@ -5936,19 +5909,13 @@ clear_tlabs (void)
 }
 
 /* LOCKING: assumes the GC lock is held */
-static SgenThreadInfo*
-gc_register_current_thread (void *addr)
+static void
+sgen_thread_register (SgenThreadInfo* info, void *addr)
 {
-	int hash;
-	SgenThreadInfo* info = malloc (sizeof (SgenThreadInfo));
 #ifndef HAVE_KW_THREAD
 	SgenThreadInfo *__thread_info__ = info;
 #endif
 
-	if (!info)
-		return NULL;
-
-	memset (info, 0, sizeof (SgenThreadInfo));
 #ifndef HAVE_KW_THREAD
 	info->tlab_start = info->tlab_next = info->tlab_temp_end = info->tlab_real_end = NULL;
 
@@ -5958,7 +5925,9 @@ gc_register_current_thread (void *addr)
 	thread_info = info;
 #endif
 
-	info->id = ARCH_GET_THREAD ();
+	/*this is odd, can we get attached before the gc is inited?*/
+	init_stats ();
+
 	info->stop_count = -1;
 	info->skip = 0;
 	info->signal = 0;
@@ -5977,7 +5946,7 @@ gc_register_current_thread (void *addr)
 	info->stopped_regs = NULL;
 #endif
 
-	binary_protocol_thread_register ((gpointer)info->id);
+	binary_protocol_thread_register ((gpointer)info->info.tid);
 
 #ifdef HAVE_KW_THREAD
 	tlab_next_addr = &tlab_next;
@@ -6017,11 +5986,6 @@ gc_register_current_thread (void *addr)
 	stack_end = info->stack_end;
 #endif
 
-	/* hash into the table */
-	hash = HASH_PTHREAD_T (info->id) % THREAD_HASH_SIZE;
-	info->next = thread_table [hash];
-	thread_table [hash] = info;
-
 	info->remset = alloc_remset (DEFAULT_REMSET_SIZE, info);
 	pthread_setspecific (remembered_set_key, info->remset);
 #ifdef HAVE_KW_THREAD
@@ -6031,12 +5995,10 @@ gc_register_current_thread (void *addr)
 	STORE_REMSET_BUFFER = mono_sgen_alloc_internal (INTERNAL_MEM_STORE_REMSET);
 	STORE_REMSET_BUFFER_INDEX = 0;
 
-	DEBUG (3, fprintf (gc_debug_file, "registered thread %p (%p) (hash: %d)\n", info, (gpointer)info->id, hash));
+	DEBUG (3, fprintf (gc_debug_file, "registered thread %p (%p)\n", info, (gpointer)info->info.tid));
 
 	if (gc_callbacks.thread_attach_func)
 		info->runtime_data = gc_callbacks.thread_attach_func ();
-
-	return info;
 }
 
 static void
@@ -6049,29 +6011,12 @@ add_generic_store_remset_from_buffer (gpointer *buffer)
 }
 
 static void
-unregister_current_thread (void)
+sgen_thread_unregister (SgenThreadInfo *p)
 {
-	int hash;
-	SgenThreadInfo *prev = NULL;
-	SgenThreadInfo *p;
 	RememberedSet *rset;
-	ARCH_THREAD_TYPE id = ARCH_GET_THREAD ();
 
 	binary_protocol_thread_unregister ((gpointer)id);
-
-	hash = HASH_PTHREAD_T (id) % THREAD_HASH_SIZE;
-	p = thread_table [hash];
-	assert (p);
-	DEBUG (3, fprintf (gc_debug_file, "unregister thread %p (%p)\n", p, (gpointer)p->id));
-	while (!ARCH_THREAD_EQUALS (p->id, id)) {
-		prev = p;
-		p = p->next;
-	}
-	if (prev == NULL) {
-		thread_table [hash] = p->next;
-	} else {
-		prev->next = p->next;
-	}
+	DEBUG (3, fprintf (gc_debug_file, "unregister thread %p (%p)\n", p, (gpointer)p->info.tid));
 
 #if defined(__MACH__)
 	mach_port_deallocate (current_task (), p->mach_port);
@@ -6095,11 +6040,10 @@ unregister_current_thread (void)
 	if (*p->store_remset_buffer_index_addr)
 		add_generic_store_remset_from_buffer (*p->store_remset_buffer_addr);
 	mono_sgen_free_internal (*p->store_remset_buffer_addr, INTERNAL_MEM_STORE_REMSET);
-	free (p);
 }
 
 static void
-unregister_thread (void *k)
+sgen_thread_unregister_unlocked (SgenThreadInfo *_unused)
 {
 	/* If a delegate is passed to native code and invoked on a thread we dont
 	 * know about, the jit will register it with mono_jit_thead_attach, but
@@ -6109,35 +6053,24 @@ unregister_thread (void *k)
 	 */
 	if (mono_domain_get ())
 		mono_thread_detach (mono_thread_current ());
-
-	LOCK_GC;
-	unregister_current_thread ();
-	UNLOCK_GC;
 }
 
-gboolean
-mono_gc_register_thread (void *baseptr)
+static void
+sgen_thread_attach (SgenThreadInfo *info)
 {
-	SgenThreadInfo *info;
-
-	LOCK_GC;
-	init_stats ();
-	info = mono_sgen_thread_info_current ();
-	if (info == NULL) {
-		info = gc_register_current_thread (baseptr);
-	} else {
-		/* The main thread might get registered before callbacks are set */
-		if (gc_callbacks.thread_attach_func && !info->runtime_data)
-			info->runtime_data = gc_callbacks.thread_attach_func ();
-	}
-	UNLOCK_GC;
+	if (gc_callbacks.thread_attach_func && !info->runtime_data)
+		info->runtime_data = gc_callbacks.thread_attach_func ();
 
 	/* Need a better place to initialize this */
 	if (!array_fill_vtable && mono_get_root_domain ()) {
 		array_fill_vtable = mono_class_vtable (mono_get_root_domain (), mono_array_class_get (mono_defaults.byte_class, 1));
 	}
-
-	return info != NULL;
+	
+}
+gboolean
+mono_gc_register_thread (void *baseptr)
+{
+	return mono_thread_info_attach (baseptr) != NULL;
 }
 
 /*
@@ -6152,7 +6085,7 @@ mono_gc_set_stack_end (void *stack_end)
 	SgenThreadInfo *info;
 
 	LOCK_GC;
-	info = mono_sgen_thread_info_current ();
+	info = mono_thread_info_current ();
 	if (info) {
 		g_assert (stack_end < info->stack_end);
 		info->stack_end = stack_end;
@@ -6162,62 +6095,11 @@ mono_gc_set_stack_end (void *stack_end)
 
 #if USE_PTHREAD_INTERCEPT
 
-typedef struct {
-	void *(*start_routine) (void *);
-	void *arg;
-	int flags;
-	MonoSemType registered;
-} SgenThreadStartInfo;
-
-static void*
-gc_start_thread (void *arg)
-{
-	SgenThreadStartInfo *start_info = arg;
-	SgenThreadInfo* info;
-	void *t_arg = start_info->arg;
-	void *(*start_func) (void*) = start_info->start_routine;
-	void *result;
-	int post_result;
-
-	LOCK_GC;
-	info = gc_register_current_thread (&result);
-	UNLOCK_GC;
-	post_result = MONO_SEM_POST (&(start_info->registered));
-	g_assert (!post_result);
-	result = start_func (t_arg);
-	g_assert (!mono_domain_get ());
-	/*
-	 * this is done by the pthread key dtor
-	LOCK_GC;
-	unregister_current_thread ();
-	UNLOCK_GC;
-	*/
-
-	return result;
-}
 
 int
 mono_gc_pthread_create (pthread_t *new_thread, const pthread_attr_t *attr, void *(*start_routine)(void *), void *arg)
 {
-	SgenThreadStartInfo *start_info;
-	int result;
-
-	start_info = malloc (sizeof (SgenThreadStartInfo));
-	if (!start_info)
-		return ENOMEM;
-	MONO_SEM_INIT (&(start_info->registered), 0);
-	start_info->arg = arg;
-	start_info->start_routine = start_routine;
-
-	result = pthread_create (new_thread, attr, gc_start_thread, start_info);
-	if (result == 0) {
-		while (MONO_SEM_WAIT (&(start_info->registered)) != 0) {
-			/*if (EINTR != errno) ABORT("sem_wait failed"); */
-		}
-	}
-	MONO_SEM_DESTROY (&(start_info->registered));
-	free (start_info);
-	return result;
+	return mono_threads_pthread_create (new_thread, attr, start_routine, arg);
 }
 
 int
@@ -6306,7 +6188,7 @@ mono_gc_wbarrier_set_field (MonoObject *obj, gpointer field_ptr, MonoObject* val
 		rs->next = REMEMBERED_SET;
 		REMEMBERED_SET = rs;
 #ifdef HAVE_KW_THREAD
-		mono_sgen_thread_info_current ()->remset = rs;
+		mono_thread_info_current ()->remset = rs;
 #endif
 		*(rs->store_next++) = (mword)field_ptr;
 		*(void**)field_ptr = value;
@@ -6344,8 +6226,7 @@ mono_gc_wbarrier_set_arrayref (MonoArray *arr, gpointer slot_ptr, MonoObject* va
 		rs->next = REMEMBERED_SET;
 		REMEMBERED_SET = rs;
 #ifdef HAVE_KW_THREAD
-		mono_sgen_thread_info_current ()->remset = rs;
-#endif
+		mono_thread_info_current ()->remset = rs;
 		*(rs->store_next++) = (mword)slot_ptr;
 		*(void**)slot_ptr = value;
 		UNLOCK_GC;
@@ -6407,7 +6288,8 @@ mono_gc_wbarrier_arrayref_copy (gpointer dest_ptr, gpointer src_ptr, int count)
 		rs->next = REMEMBERED_SET;
 		REMEMBERED_SET = rs;
 #ifdef HAVE_KW_THREAD
-		mono_sgen_thread_info_current ()->remset = rs;
+
+		mono_thread_info_current ()->remset = rs;
 #endif
 		*(rs->store_next++) = (mword)dest_ptr | REMSET_RANGE;
 		*(rs->store_next++) = count;
@@ -6597,8 +6479,7 @@ mono_gc_wbarrier_value_copy (gpointer dest, gpointer src, int count, MonoClass *
 		rs->next = REMEMBERED_SET;
 		REMEMBERED_SET = rs;
 #ifdef HAVE_KW_THREAD
-		mono_sgen_thread_info_current ()->remset = rs;
-#endif
+		mono_thread_info_current ()->remset = rs;
 		*(rs->store_next++) = (mword)dest | REMSET_VTYPE;
 		*(rs->store_next++) = (mword)klass->gc_descr;
 		*(rs->store_next++) = (mword)count;
@@ -6639,7 +6520,7 @@ mono_gc_wbarrier_object_copy (MonoObject* obj, MonoObject *src)
 	rs->next = REMEMBERED_SET;
 	REMEMBERED_SET = rs;
 #ifdef HAVE_KW_THREAD
-	mono_sgen_thread_info_current ()->remset = rs;
+	mono_thread_info_current ()->remset = rs;
 #endif
 	*(rs->store_next++) = (mword)obj | REMSET_OBJECT;
 	UNLOCK_GC;
@@ -7248,7 +7129,7 @@ mono_gc_is_gc_thread (void)
 {
 	gboolean result;
 	LOCK_GC;
-        result = mono_sgen_thread_info_current () != NULL;
+	result = mono_thread_info_current () != NULL;
 	UNLOCK_GC;
 	return result;
 }
@@ -7256,6 +7137,7 @@ mono_gc_is_gc_thread (void)
 void
 mono_gc_base_init (void)
 {
+	MonoThreadInfoCallbacks cb;
 	char *env;
 	char **opts, **ptr;
 	char *major_collector_opt = NULL;
@@ -7275,6 +7157,12 @@ mono_gc_base_init (void)
 	}
 	pagesize = mono_pagesize ();
 	gc_debug_file = stdout;
+
+	cb.thread_register = sgen_thread_register;
+	cb.thread_unregister = sgen_thread_unregister;
+	cb.thread_unregister_unlocked = sgen_thread_unregister_unlocked;
+	cb.thread_attach = sgen_thread_attach;
+	mono_threads_init (&cb, sizeof (SgenThreadInfo));
 
 	LOCK_INIT (interruption_mutex);
 	LOCK_INIT (global_remset_mutex);
@@ -7537,7 +7425,7 @@ mono_gc_base_init (void)
 	global_remset = alloc_remset (1024, NULL);
 	global_remset->next = NULL;
 
-	pthread_key_create (&remembered_set_key, unregister_thread);
+	pthread_key_create (&remembered_set_key, NULL);
 
 #ifndef HAVE_KW_THREAD
 	pthread_key_create (&thread_info_key, NULL);

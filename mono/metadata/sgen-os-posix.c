@@ -42,16 +42,17 @@ mono_sgen_thread_handshake (int signum)
 {
 	int count, result;
 	SgenThreadInfo *info;
-	pthread_t me = pthread_self ();
+
+	MonoNativeThreadId me = mono_native_thread_id_get ();
 
 	count = 0;
 	FOREACH_THREAD (info) {
-		if (ARCH_THREAD_EQUALS (info->id, me)) {
+		if (mono_native_thread_id_equals (info->info.tid, me)) {
 			continue;
 		}
 		/*if (signum == suspend_signal_num && info->stop_count == global_stop_count)
 			continue;*/
-		result = pthread_kill (info->id, signum);
+		result = pthread_kill (info->info.tid, signum);
 		if (result == 0) {
 			count++;
 		} else {
