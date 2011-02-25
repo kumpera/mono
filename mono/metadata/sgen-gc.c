@@ -5548,7 +5548,7 @@ find_pinning_ref_from_thread (char *obj, size_t size)
 #endif
 
 			if (w >= (mword)obj && w < (mword)obj + size)
-				DEBUG (0, fprintf (gc_debug_file, "Object %p referenced in saved reg %d of thread %p (id %p)\n", obj, j, info, (gpointer)info->id));
+				DEBUG (0, fprintf (gc_debug_file, "Object %p referenced in saved reg %d of thread %p (id %p)\n", obj, j, info, (gpointer)info->info.tid));
 		} END_FOREACH_THREAD
 	}
 }
@@ -5909,13 +5909,14 @@ clear_tlabs (void)
 }
 
 /* LOCKING: assumes the GC lock is held */
-static void
+static void*
 sgen_thread_register (SgenThreadInfo* info, void *addr)
 {
 #ifndef HAVE_KW_THREAD
 	SgenThreadInfo *__thread_info__ = info;
 #endif
 
+	LOCK_GC;
 #ifndef HAVE_KW_THREAD
 	info->tlab_start = info->tlab_next = info->tlab_temp_end = info->tlab_real_end = NULL;
 
@@ -5924,9 +5925,6 @@ sgen_thread_register (SgenThreadInfo* info, void *addr)
 #else
 	thread_info = info;
 #endif
-
-	/*this is odd, can we get attached before the gc is inited?*/
-	init_stats ();
 
 	info->stop_count = -1;
 	info->skip = 0;
@@ -5999,6 +5997,9 @@ sgen_thread_register (SgenThreadInfo* info, void *addr)
 
 	if (gc_callbacks.thread_attach_func)
 		info->runtime_data = gc_callbacks.thread_attach_func ();
+
+	UNLOCK_GC;
+	return info;
 }
 
 static void
@@ -6014,6 +6015,17 @@ static void
 sgen_thread_unregister (SgenThreadInfo *p)
 {
 	RememberedSet *rset;
+
+	/* If a delegate is passed to native code and invoked on a thread we dont
+	 * know about, the jit will register it with mono_jit_thead_attach, but
+	 * we have no way of knowing when that thread goes away.  SGen has a TSD
+	 * so we assume that if the domain is still registered, we can detach
+	 * the thread
+	 */
+	if (mono_domain_get ())
+		mono_thread_detach (mono_thread_current ());
+
+	LOCK_GC;
 
 	binary_protocol_thread_unregister ((gpointer)id);
 	DEBUG (3, fprintf (gc_debug_file, "unregister thread %p (%p)\n", p, (gpointer)p->info.tid));
@@ -6040,24 +6052,18 @@ sgen_thread_unregister (SgenThreadInfo *p)
 	if (*p->store_remset_buffer_index_addr)
 		add_generic_store_remset_from_buffer (*p->store_remset_buffer_addr);
 	mono_sgen_free_internal (*p->store_remset_buffer_addr, INTERNAL_MEM_STORE_REMSET);
+	UNLOCK_GC;
 }
 
-static void
-sgen_thread_unregister_unlocked (SgenThreadInfo *_unused)
-{
-	/* If a delegate is passed to native code and invoked on a thread we dont
-	 * know about, the jit will register it with mono_jit_thead_attach, but
-	 * we have no way of knowing when that thread goes away.  SGen has a TSD
-	 * so we assume that if the domain is still registered, we can detach
-	 * the thread
-	 */
-	if (mono_domain_get ())
-		mono_thread_detach (mono_thread_current ());
-}
 
 static void
 sgen_thread_attach (SgenThreadInfo *info)
 {
+	LOCK_GC;
+	/*this is odd, can we get attached before the gc is inited?*/
+	init_stats ();
+	UNLOCK_GC;
+	
 	if (gc_callbacks.thread_attach_func && !info->runtime_data)
 		info->runtime_data = gc_callbacks.thread_attach_func ();
 
@@ -7160,7 +7166,6 @@ mono_gc_base_init (void)
 
 	cb.thread_register = sgen_thread_register;
 	cb.thread_unregister = sgen_thread_unregister;
-	cb.thread_unregister_unlocked = sgen_thread_unregister_unlocked;
 	cb.thread_attach = sgen_thread_attach;
 	mono_threads_init (&cb, sizeof (SgenThreadInfo));
 
@@ -7436,7 +7441,7 @@ mono_gc_base_init (void)
 
 	gc_initialized = TRUE;
 	UNLOCK_GC;
-	mono_gc_register_thread (&sinfo);
+	mono_thread_info_attach (&sinfo);
 }
 
 int

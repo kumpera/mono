@@ -31,17 +31,12 @@ struct _MonoThreadInfo {
 	MonoNativeThreadId tid; /*threading kit id  (pthread_t on posix)*/
 };
 
-typedef void (*mono_thread_info_register_callback)(THREAD_TYPE *info, void *baseaddr);
+typedef void* (*mono_thread_info_register_callback)(THREAD_TYPE *info, void *baseaddr);
 typedef void (*mono_thread_info_callback)(THREAD_TYPE *info);
 
 typedef struct {
-	/*called when a new thread is created or first attached, done inside the GC lock */
 	mono_thread_info_register_callback thread_register;
-	/*called when the thread is about to die, done inside the GC lock */
 	mono_thread_info_callback thread_unregister;
-	/*called when the thread is about to die, done outside of the GC lock */
-	mono_thread_info_callback thread_unregister_unlocked;
-	/*called when attaching subsequent times, done inside the GC lock */
 	mono_thread_info_callback thread_attach;
 } MonoThreadInfoCallbacks;
 

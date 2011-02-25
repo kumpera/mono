@@ -69,34 +69,20 @@ mono_thread_info_lookup (MonoNativeThreadId id)
 }
 
 static void*
-register_thread (void *arg)
+insert_into_table (void *arg)
 {
-	RegisterInfo *reginfo = arg;
-	MonoThreadInfo *info = reginfo->info;
-	int hash;
-
-	info->tid = pthread_self ();
-	
-	if (threads_callbacks.thread_register)
-		threads_callbacks.thread_register (info, reginfo->baseptr);
-
-	hash = HASH_PTHREAD_T (info->tid) % THREAD_HASH_SIZE;
+	MonoThreadInfo *info = arg;
+	int hash = HASH_PTHREAD_T (info->tid) % THREAD_HASH_SIZE;
 	info->next = thread_table [hash];
 	thread_table [hash] = info;
-
-	pthread_setspecific (thread_info_key, info);
 	return NULL;
 }
 
 static void*
-cleanup_thread (void *arg)
+remove_from_table (void *arg)
 {
 	int hash;
 	MonoThreadInfo *info = arg, *p, *prev = NULL;
-
-	if (threads_callbacks.thread_unregister)
-		threads_callbacks.thread_unregister (info);
-
 
 	hash = HASH_PTHREAD_T (info->tid) % THREAD_HASH_SIZE;
 
@@ -114,6 +100,27 @@ cleanup_thread (void *arg)
 	return NULL;
 }
 
+static void*
+register_thread (void *arg)
+{
+	RegisterInfo *reginfo = arg;
+	MonoThreadInfo *info = reginfo->info;
+
+	info->tid = pthread_self ();
+	
+	if (threads_callbacks.thread_register) {
+		if (threads_callbacks.thread_register (info, reginfo->baseptr) == NULL) {
+			printf ("register failed'\n");
+			free (info);
+			return NULL;
+		}
+	}
+
+	mono_gc_invoke_with_gc_lock (insert_into_table, info);
+	pthread_setspecific (thread_info_key, info);
+	return info;
+}
+
 static void
 unregister_thread (void *arg)
 {
@@ -125,25 +132,10 @@ unregister_thread (void *arg)
 	 * so we assume that if the domain is still registered, we can detach
 	 * the thread
 	 */
-	if (threads_callbacks.thread_unregister_unlocked)
-		threads_callbacks.thread_unregister_unlocked (info);
+	if (threads_callbacks.thread_unregister)
+		threads_callbacks.thread_unregister (info);
 
-	mono_gc_invoke_with_gc_lock (cleanup_thread, info);
-}
-
-static void*
-attach_thread (void *baseptr)
-{
-	MonoThreadInfo *info = mono_thread_info_lookup_unsafe (pthread_self ());
-	RegisterInfo reginfo = { info, baseptr };
-	if (!info) {
-		reginfo.info = info = malloc (thread_info_size);
-		memset (info, 0, thread_info_size);
-		register_thread (&reginfo);
-	} else if (threads_callbacks.thread_attach) {
-		threads_callbacks.thread_attach (info);
-	}
-	return info;
+	mono_gc_invoke_with_gc_lock (remove_from_table, info);
 }
 
 static void*
@@ -162,7 +154,7 @@ inner_start_thread (void *arg)
 
 	reginfo.info = info;
 	reginfo.baseptr = &post_result;
-	mono_gc_invoke_with_gc_lock (register_thread, &reginfo);
+	register_thread (&reginfo);
 
 	post_result = MONO_SEM_POST (&(start_info->registered));
 	g_assert (!post_result);
@@ -175,7 +167,17 @@ inner_start_thread (void *arg)
 MonoThreadInfo*
 mono_thread_info_attach (void *baseptr)
 {
-	return mono_gc_invoke_with_gc_lock (attach_thread, baseptr);
+	MonoThreadInfo *info = pthread_getspecific (thread_info_key);
+	RegisterInfo reginfo = { info, baseptr };
+	if (!info) {
+		reginfo.info = info = malloc (thread_info_size);
+		memset (info, 0, thread_info_size);
+		if (!register_thread (&reginfo))
+			return NULL;
+	} else if (threads_callbacks.thread_attach) {
+		threads_callbacks.thread_attach (info);
+	}
+	return info;
 }
 
 int
