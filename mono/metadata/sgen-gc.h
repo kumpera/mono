@@ -29,12 +29,13 @@
 
 #ifdef HAVE_SGEN_GC
 
-#define INSIDE_GC
+typedef struct _SgenThreadInfo SgenThreadInfo;
+#define THREAD_INFO_TYPE SgenThreadInfo
+
 #include <glib.h>
 #include <pthread.h>
 #include <signal.h>
 #include <mono/utils/mono-compiler.h>
-#include <mono/utils/mono-threads.h>
 #include <mono/metadata/class-internals.h>
 #include <mono/metadata/object-internals.h>
 #include <mono/metadata/sgen-archdep.h>
@@ -132,8 +133,6 @@ struct _SgenThreadInfo {
 	long store_remset_buffer_index;
 #endif
 };
-
-extern SgenThreadInfo* thread_table [THREAD_HASH_SIZE] MONO_INTERNAL;
 
 enum {
 	MEMORY_ROLE_GEN0,

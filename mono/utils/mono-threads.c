@@ -40,13 +40,8 @@ MonoThreadInfo *thread_table [THREAD_HASH_SIZE];
 SgenThreadInfo*
 mono_thread_info_current (void)
 {
-#ifdef HAVE_KW_THREAD
-	return thread_info;
-#else
 	return pthread_getspecific (thread_info_key);
-#endif
 }
-
 
 MonoThreadInfo*
 mono_thread_info_lookup_unsafe (MonoNativeThreadId id)
@@ -180,6 +175,14 @@ mono_thread_info_attach (void *baseptr)
 	return info;
 }
 
+void
+mono_threads_init (MonoThreadInfoCallbacks *callbacks, size_t info_size)
+{
+	threads_callbacks = *callbacks;
+	thread_info_size = info_size;
+	pthread_key_create (&thread_info_key, unregister_thread);
+}
+
 int
 mono_threads_pthread_create (pthread_t *new_thread, const pthread_attr_t *attr, void *(*start_routine)(void *), void *arg)
 {
@@ -202,12 +205,4 @@ mono_threads_pthread_create (pthread_t *new_thread, const pthread_attr_t *attr, 
 	MONO_SEM_DESTROY (&(start_info->registered));
 	free (start_info);
 	return result;
-}
-
-void
-mono_threads_init (MonoThreadInfoCallbacks *callbacks, size_t info_size)
-{
-	threads_callbacks = *callbacks;
-	thread_info_size = info_size;
-	pthread_key_create (&thread_info_key, unregister_thread);
 }

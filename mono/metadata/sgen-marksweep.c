@@ -34,13 +34,13 @@
 #include "utils/mono-counters.h"
 #include "utils/mono-semaphore.h"
 #include "utils/mono-time.h"
-#include "metadata/object-internals.h"
-#include "metadata/profiler-private.h"
 
 #include "metadata/sgen-gc.h"
 #include "metadata/sgen-protocol.h"
 #include "metadata/sgen-cardtable.h"
 #include "metadata/gc-internal.h"
+#include "metadata/object-internals.h"
+#include "metadata/profiler-private.h"
 
 #define MS_BLOCK_SIZE	(16*1024)
 #define MS_BLOCK_SIZE_SHIFT	14

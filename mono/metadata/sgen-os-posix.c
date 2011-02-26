@@ -31,8 +31,8 @@
 #include "config.h"
 #ifdef HAVE_SGEN_GC
 #include <glib.h>
-#include "metadata/gc-internal.h"
 #include "metadata/sgen-gc.h"
+#include "metadata/gc-internal.h"
 #include "metadata/sgen-archdep.h"
 #include "metadata/object-internals.h"
 

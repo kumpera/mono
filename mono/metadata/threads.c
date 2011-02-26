@@ -43,6 +43,7 @@
 #include <mono/utils/mono-membar.h>
 #include <mono/utils/mono-time.h>
 #include <mono/utils/hazard-pointer.h>
+#include <mono/utils/mono-threads.h>
 
 #include <mono/metadata/gc-internal.h>
 
@@ -457,6 +458,7 @@ init_root_domain_thread (MonoInternalThread *thread, MonoThread *candidate)
 
 static guint32 WINAPI start_wrapper_internal(void *data)
 {
+	MonoThreadInfo *info;
 	struct StartInfo *start_info=(struct StartInfo *)data;
 	guint32 (*start_func)(void *);
 	void *start_arg;
@@ -476,6 +478,10 @@ static guint32 WINAPI start_wrapper_internal(void *data)
 	 * was created suspended, and these values were set before the
 	 * thread resumed
 	 */
+
+	info = mono_thread_info_current ();
+	g_assert (info);
+	internal->thread_info = info;
 
 	tid=internal->tid;
 

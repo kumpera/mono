@@ -9,6 +9,7 @@
 #include <mono/metadata/threads-types.h>
 #include <mono/io-layer/io-layer.h>
 #include "mono/utils/mono-compiler.h"
+#include "mono/utils/mono-threads.h"
 #include "mono/utils/mono-error.h"
 #include "mono/utils/mono-stack-unwinding.h"
 
@@ -383,7 +384,7 @@ struct _MonoInternalThread {
 	gpointer stack_ptr;
 	gpointer *static_data;
 	gpointer jit_data;
-	gpointer lock_data;
+	MonoThreadInfo *thread_info;
 	MonoAppContext *current_appcontext;
 	int stack_size;
 	gpointer appdomain_refs;

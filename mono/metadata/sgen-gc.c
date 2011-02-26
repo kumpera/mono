@@ -193,12 +193,12 @@
 #ifdef __MACH__
 #define _XOPEN_SOURCE
 #endif
+#include "metadata/sgen-gc.h"
 #include "metadata/metadata-internals.h"
 #include "metadata/class-internals.h"
 #include "metadata/gc-internal.h"
 #include "metadata/object-internals.h"
 #include "metadata/threads.h"
-#include "metadata/sgen-gc.h"
 #include "metadata/sgen-cardtable.h"
 #include "metadata/sgen-protocol.h"
 #include "metadata/sgen-archdep.h"
@@ -215,7 +215,6 @@
 #include "utils/mono-semaphore.h"
 #include "utils/mono-counters.h"
 #include "utils/mono-proclib.h"
-#include "utils/mono-threads.h"
 
 #include <mono/utils/memcheck.h>
 
