@@ -12,6 +12,8 @@
 
 #include <mono/utils/mono-semaphore.h>
 
+#include <pthread.h>
+
 typedef struct _MonoThreadInfo MonoThreadInfo;
 
 typedef pthread_t MonoNativeThreadId;
@@ -23,9 +25,23 @@ typedef pthread_t MonoNativeThreadId;
 #define THREAD_INFO_TYPE MonoThreadInfo
 #endif
 
+enum {
+	STATE_RUNNING,
+	STATE_SHUTING_DOWN,
+	STATE_DEAD
+};
+
 struct _MonoThreadInfo {
 	THREAD_INFO_TYPE *next; /*next thread in the hashtable*/
 	MonoNativeThreadId tid; /*threading kit id  (pthread_t on posix)*/
+	int thread_state; /*must only be changed by the owner thread*/
+
+	/* suspend machinery, fields protected by the suspend_lock */
+	pthread_mutex_t suspend_lock;
+	int suspend_count;
+	MonoSemType suspend_semaphore;
+	MonoSemType resume_semaphore;
+
 };
 
 typedef void* (*mono_thread_info_register_callback)(THREAD_INFO_TYPE *info, void *baseaddr);
@@ -81,4 +97,8 @@ mono_thread_info_lookup_unsafe (MonoNativeThreadId id) MONO_INTERNAL;
 THREAD_INFO_TYPE *
 mono_thread_info_current (void) MONO_INTERNAL;
 
+gboolean
+mono_thread_info_suspend_sync (MonoNativeThreadId tid) MONO_INTERNAL;
+
 #endif /* _MONO_THREADS_H_ */
+

@@ -10,6 +10,7 @@
 #include <mono/utils/mono-compiler.h>
 #include <mono/utils/mono-semaphore.h>
 #include <mono/utils/mono-threads.h>
+#include <mono/utils/mono-sigcontext.h>
 #include <mono/metadata/gc-internal.h>
 
 #include <pthread.h>
@@ -33,6 +34,9 @@ static int thread_info_size;
 static MonoThreadInfoCallbacks threads_callbacks;
 static pthread_key_t thread_info_key;
 MonoThreadInfo *thread_table [THREAD_HASH_SIZE];
+
+static void
+suspend_signal_handler (int _dummy, siginfo_t *info, void *context);
 
 #define HASH_PTHREAD_T(id) (((unsigned int)(id) >> 4) * 2654435761u)
 #define ARCH_THREAD_EQUALS(a,b) pthread_equal (a, b)
@@ -102,7 +106,10 @@ register_thread (void *arg)
 	MonoThreadInfo *info = reginfo->info;
 
 	info->tid = pthread_self ();
-	
+	pthread_mutex_init (&info->suspend_lock, NULL);
+	MONO_SEM_INIT (&info->suspend_semaphore, 0);
+	MONO_SEM_INIT (&info->resume_semaphore, 0);
+
 	if (threads_callbacks.thread_register) {
 		if (threads_callbacks.thread_register (info, reginfo->baseptr) == NULL) {
 			printf ("register failed'\n");
@@ -175,12 +182,30 @@ mono_thread_info_attach (void *baseptr)
 	return info;
 }
 
+static void
+mono_posix_add_signal_handler (int signo, gpointer handler)
+{
+	/*FIXME, move the code from mini to utils and do the right thing!*/
+	struct sigaction sa;
+	struct sigaction previous_sa;
+
+	sa.sa_sigaction = handler;
+	sigemptyset (&sa.sa_mask);
+	sa.sa_flags = SA_SIGINFO;
+
+	g_assert (sigaction (signo, &sa, &previous_sa) != -1);
+
+}
+
+
 void
 mono_threads_init (MonoThreadInfoCallbacks *callbacks, size_t info_size)
 {
 	threads_callbacks = *callbacks;
 	thread_info_size = info_size;
 	pthread_key_create (&thread_info_key, unregister_thread);
+
+	mono_posix_add_signal_handler (SIGUSR2, suspend_signal_handler);
 }
 
 int
@@ -205,4 +230,60 @@ mono_threads_pthread_create (pthread_t *new_thread, const pthread_attr_t *attr, 
 	MONO_SEM_DESTROY (&(start_info->registered));
 	free (start_info);
 	return result;
+}
+
+static void
+suspend_signal_handler (int _dummy, siginfo_t *info, void *context)
+{
+	MonoThreadInfo *current = mono_thread_info_current ();
+
+	current->stopped_ip = (void*)UCONTEXT_REG_EIP (context);
+
+	MONO_SEM_POST (&current->suspend_semaphore);
+	while (MONO_SEM_WAIT (&current->resume_semaphore) != 0) {
+		/*if (EINTR != errno) ABORT("sem_wait failed"); */
+	}
+}
+
+static gboolean
+is_thread_in_critical_region (MonoThreadInfo *info)
+{
+	return FALSE;
+}
+
+static void*
+suspend_thread_sync (void *arg)
+{
+	MonoNativeThreadId tid = (MonoNativeThreadId)arg;
+	MonoThreadInfo *info = mono_thread_info_lookup_unsafe (tid);
+	if (!info)
+		return NULL;
+
+	pthread_mutex_lock (&info->suspend_lock);
+	if (info->suspend_count) {
+		++info->suspend_count;
+		pthread_mutex_unlock (&info->suspend_lock);
+		return info;
+	}
+
+	do {
+		pthread_kill (tid, SIGUSR2);
+		while (MONO_SEM_WAIT (&info->suspend_semaphore) != 0) {
+			/*if (EINTR != errno) ABORT("sem_wait failed"); */
+		}
+		if (!is_thread_in_critical_region (info)) 
+			break;
+		MONO_SEM_POST (&info->resume_semaphore);
+		//check for
+	} while (1);
+	++info->suspend_count;
+	pthread_mutex_unlock (&info->suspend_lock);
+
+	return info;
+}
+
+gboolean
+mono_thread_info_suspend_sync (MonoNativeThreadId tid)
+{
+	return mono_gc_invoke_with_gc_lock (suspend_thread_sync, tid) != NULL;
 }
