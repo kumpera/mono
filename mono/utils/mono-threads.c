@@ -10,7 +10,6 @@
 #include <mono/utils/mono-compiler.h>
 #include <mono/utils/mono-semaphore.h>
 #include <mono/utils/mono-threads.h>
-#include <mono/utils/mono-sigcontext.h>
 #include <mono/metadata/gc-internal.h>
 
 #include <pthread.h>
@@ -237,7 +236,9 @@ suspend_signal_handler (int _dummy, siginfo_t *info, void *context)
 {
 	MonoThreadInfo *current = mono_thread_info_current ();
 
-	current->stopped_ip = (void*)UCONTEXT_REG_EIP (context);
+	mono_sigctx_to_monoctx (context, &current->thread_context);
+
+//	current->stopped_ip = (void*)UCONTEXT_REG_EIP (context);
 
 	MONO_SEM_POST (&current->suspend_semaphore);
 	while (MONO_SEM_WAIT (&current->resume_semaphore) != 0) {

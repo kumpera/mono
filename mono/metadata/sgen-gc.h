@@ -36,6 +36,7 @@ typedef struct _SgenThreadInfo SgenThreadInfo;
 #include <pthread.h>
 #include <signal.h>
 #include <mono/utils/mono-compiler.h>
+#include <mono/utils/mono-threads.h>
 #include <mono/metadata/class-internals.h>
 #include <mono/metadata/object-internals.h>
 #include <mono/metadata/sgen-archdep.h>

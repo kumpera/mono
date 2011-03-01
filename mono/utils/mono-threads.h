@@ -11,6 +11,7 @@
 #define _MONO_THREADS_H_
 
 #include <mono/utils/mono-semaphore.h>
+#include <mono/utils/mono-context.h>
 
 #include <pthread.h>
 
@@ -42,6 +43,8 @@ struct _MonoThreadInfo {
 	MonoSemType suspend_semaphore;
 	MonoSemType resume_semaphore;
 
+	/*Only needed on posix, only valid if the thread finished suspending*/
+	MonoContext thread_context;
 };
 
 typedef void* (*mono_thread_info_register_callback)(THREAD_INFO_TYPE *info, void *baseaddr);
