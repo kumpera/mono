@@ -85,9 +85,7 @@ monoutils_sources = \
 	hazard-pointer.c	\
 	hazard-pointer.h	\
 	mono-threads.c	\
-	mono-threads.h	\
-	mono-context.c	\
-	mono-context.h
+	mono-threads.h
 
 arch_sources = 
 
