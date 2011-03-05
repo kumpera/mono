@@ -2025,6 +2025,24 @@ static void CALLBACK interruption_request_apc (ULONG_PTR param)
 }
 #endif /* HOST_WIN32 */
 
+/*TEMP HACK*/
+static gboolean
+is_thread_in_critical_region (MonoThreadInfo *info)
+{
+	return FALSE;
+}
+
+
+static void
+self_interrupt_thread (void)
+{
+	MonoThreadInfo *info = mono_thread_info_current ();
+	printf ("finally reached the interrupt callback!\n");
+	MonoException *exc = mono_thread_request_interruption (FALSE); 
+	if (exc) /*We must use _with_context since we didn't trampoline into the runtime*/
+		mono_raise_exception_with_context (exc, &info->thread_context);
+}
+
 /*
  * signal_thread_state_change
  *
@@ -2033,6 +2051,7 @@ static void CALLBACK interruption_request_apc (ULONG_PTR param)
  */
 static void signal_thread_state_change (MonoInternalThread *thread)
 {
+	MonoThreadInfo *info = NULL;
 	if (thread == mono_thread_internal_current ()) {
 		/* Do it synchronously */
 		MonoException *exc = mono_thread_request_interruption (FALSE); 
@@ -2044,16 +2063,46 @@ static void signal_thread_state_change (MonoInternalThread *thread)
 	QueueUserAPC ((PAPCFUNC)interruption_request_apc, thread->handle, NULL);
 #else
 	/* fixme: store the state somewhere */
-	mono_thread_kill (thread, mono_thread_get_abort_signal ());
 
-	/* 
-	 * This will cause waits to be broken.
-	 * It will also prevent the thread from entering a wait, so if the thread returns
-	 * from the wait before it receives the abort signal, it will just spin in the wait
-	 * functions in the io-layer until the signal handler calls QueueUserAPC which will
-	 * make it return.
-	 */
-	wapi_interrupt_thread (thread->handle);
+	/*FIXME we need to check 2 conditions here, request to interrupt this thread or if the target died*/
+	for (;;) {
+		if (!(info = mono_thread_info_suspend_sync ((pthread_t)(gpointer)(gsize)thread->tid))) {
+			g_warning ("failed to suspend the target, hoefully it is dead");
+			return;
+		}
+		/*WARNING: We now are in signal context until we resume the thread. */
+		if (!is_thread_in_critical_region (info))
+			break;
+		mono_thread_info_resume ((pthread_t)(gpointer)(gsize)thread->tid);
+		Sleep (1);
+	}
+	/*FIXME what should be done here?*/
+	g_assert (info->domain);
+
+	/*FIXME add support for interrupt guards. */
+
+	/*Figure out where the thread is*/
+	MonoJitInfo *ji = mono_jit_info_table_find (info->domain, MONO_CONTEXT_GET_IP (&info->thread_context));
+	if (ji) {
+		/*We are in managed code*/
+		/*Set the thread to call */
+		printf ("in managed land \n");
+		mono_thread_info_setup_async_call (info, self_interrupt_thread);
+	} else {
+		printf ("not in managed land \n");
+		/* 
+		 * This will cause waits to be broken.
+		 * It will also prevent the thread from entering a wait, so if the thread returns
+		 * from the wait before it receives the abort signal, it will just spin in the wait
+		 * functions in the io-layer until the signal handler calls QueueUserAPC which will
+		 * make it return.
+		 */
+		wapi_interrupt_thread (thread->handle);
+	}
+	/*FIXME we need to wait for interruption to complete -- figure out how much into interruption we should wait for here*/
+	mono_thread_info_resume ((pthread_t)(gpointer)(gsize)thread->tid);
+	//mono_thread_kill (thread, mono_thread_get_abort_signal ());
+
 #endif /* HOST_WIN32 */
 }
 
@@ -2105,7 +2154,7 @@ ves_icall_System_Threading_Thread_Abort (MonoInternalThread *thread, MonoObject 
 	if (!shutting_down)
 		/* Make sure the thread is awake */
 		mono_thread_resume (thread);
-	
+
 	signal_thread_state_change (thread);
 }
 

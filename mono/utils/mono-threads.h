@@ -45,6 +45,12 @@ struct _MonoThreadInfo {
 
 	/*Only needed on posix, only valid if the thread finished suspending*/
 	MonoContext thread_context;
+	gboolean thread_context_modified;
+	void *domain;
+
+	/*async call machinery, thread MUST be suspended for this to be usable*/
+	void (*async_target)(void);
+	mgreg_t old_ip;
 };
 
 typedef void* (*mono_thread_info_register_callback)(THREAD_INFO_TYPE *info, void *baseaddr);
@@ -100,8 +106,13 @@ mono_thread_info_lookup_unsafe (MonoNativeThreadId id) MONO_INTERNAL;
 THREAD_INFO_TYPE *
 mono_thread_info_current (void) MONO_INTERNAL;
 
-gboolean
+MonoThreadInfo*
 mono_thread_info_suspend_sync (MonoNativeThreadId tid) MONO_INTERNAL;
 
-#endif /* _MONO_THREADS_H_ */
+gboolean
+mono_thread_info_resume (MonoNativeThreadId tid) MONO_INTERNAL;
 
+void
+mono_thread_info_setup_async_call (MonoThreadInfo *info, void (*target_func)(void)) MONO_INTERNAL;
+
+#endif /* _MONO_THREADS_H_ */

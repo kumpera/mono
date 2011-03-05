@@ -11,6 +11,7 @@
 #include <mono/utils/mono-semaphore.h>
 #include <mono/utils/mono-threads.h>
 #include <mono/metadata/gc-internal.h>
+#include <mono/metadata/appdomain.h>
 
 #include <pthread.h>
 #include <errno.h>
@@ -193,7 +194,6 @@ mono_posix_add_signal_handler (int signo, gpointer handler)
 	sa.sa_flags = SA_SIGINFO;
 
 	g_assert (sigaction (signo, &sa, &previous_sa) != -1);
-
 }
 
 
@@ -236,20 +236,20 @@ suspend_signal_handler (int _dummy, siginfo_t *info, void *context)
 {
 	MonoThreadInfo *current = mono_thread_info_current ();
 
+	printf ("in suspend sighandler\n");
+	current->thread_context_modified = FALSE;
 	mono_sigctx_to_monoctx (context, &current->thread_context);
 
-//	current->stopped_ip = (void*)UCONTEXT_REG_EIP (context);
+
+	/*FIXME Move this out and/or implement remote TLS read on all targets.*/
+	current->domain = mono_domain_get ();
 
 	MONO_SEM_POST (&current->suspend_semaphore);
 	while (MONO_SEM_WAIT (&current->resume_semaphore) != 0) {
 		/*if (EINTR != errno) ABORT("sem_wait failed"); */
 	}
-}
-
-static gboolean
-is_thread_in_critical_region (MonoThreadInfo *info)
-{
-	return FALSE;
+	if (current->thread_context_modified)
+		mono_monoctx_to_sigctx (&current->thread_context, context);
 }
 
 static void*
@@ -267,24 +267,88 @@ suspend_thread_sync (void *arg)
 		return info;
 	}
 
-	do {
-		pthread_kill (tid, SIGUSR2);
-		while (MONO_SEM_WAIT (&info->suspend_semaphore) != 0) {
-			/*if (EINTR != errno) ABORT("sem_wait failed"); */
-		}
-		if (!is_thread_in_critical_region (info)) 
-			break;
-		MONO_SEM_POST (&info->resume_semaphore);
-		//check for
-	} while (1);
+	pthread_kill (tid, SIGUSR2);
+	while (MONO_SEM_WAIT (&info->suspend_semaphore) != 0) {
+		g_assert (errno == EINTR);
+	}
 	++info->suspend_count;
 	pthread_mutex_unlock (&info->suspend_lock);
 
 	return info;
 }
 
-gboolean
+static void*
+resume_thread (void *arg)
+{
+	MonoNativeThreadId tid = (MonoNativeThreadId)arg;
+	MonoThreadInfo *info = mono_thread_info_lookup_unsafe (tid);
+	if (!info)
+		return NULL;
+
+	g_assert (info->suspend_count);
+	pthread_mutex_lock (&info->suspend_lock);
+	if (--info->suspend_count == 0)
+		MONO_SEM_POST (&info->resume_semaphore);
+
+	pthread_mutex_unlock (&info->suspend_lock);
+	return info;
+}
+
+static void*
+thread_async_call_trampoline_enter (void)
+{
+	MonoThreadInfo *info = mono_thread_info_current ();
+	void (*async_target)(void) = info->async_target;
+	MONO_CONTEXT_SET_IP (&info->thread_context, info->old_ip);
+	info->async_target = NULL;
+	async_target ();
+	return (void*)info->old_ip;
+}
+
+/*VERY UGLY HACK WARNING, this is just a Proof of Concept */
+static void async_call_trampoline (void);
+__asm(
+  "_async_call_trampoline:\n"
+  "  push %eax\n" /*dummy area for the return address. XXX we could avoid this by using a xchg, is it worth? */
+  "  push %eax\n"
+  "  push %ecx\n"
+  "  push %edx\n"
+  "  movl %esp, %eax\n"
+  "  subl $16, %esp\n"
+  "  andl $-16, %esp\n" /*now we are stack aligned */
+  "  subl $12, %esp\n"
+  "  push %eax\n"
+  "  call _thread_async_call_trampoline_enter\n"
+  "  pop %ecx\n" /*unaligned stack */
+  "  mov %ecx, %esp\n" /*now stack is [dummy, eax, ecx, edx]*/
+  "  pop %edx\n" /*[dummy, eax, ecx] */
+  "  pop %ecx\n" /*[dummy, eax] */
+  "  mov %eax, 0x4(%esp)\n" /*[return address, eax]*/
+  "  pop %eax\n" /*[return address]*/
+  "  ret"
+);
+
+
+void
+mono_thread_info_setup_async_call (MonoThreadInfo *info, void (*target_func)(void))
+{
+	g_assert (info->suspend_count);
+	/*FIXME this is a bad assert, we should prove proper locking and fail if one is already set*/
+	g_assert (!info->async_target);
+	info->async_target = target_func;
+	info->old_ip = (mgreg_t)MONO_CONTEXT_GET_IP (&info->thread_context);
+	MONO_CONTEXT_SET_IP (&info->thread_context, &async_call_trampoline);
+	info->thread_context_modified = TRUE;
+}
+
+MonoThreadInfo*
 mono_thread_info_suspend_sync (MonoNativeThreadId tid)
 {
-	return mono_gc_invoke_with_gc_lock (suspend_thread_sync, tid) != NULL;
+	return mono_gc_invoke_with_gc_lock (suspend_thread_sync, tid);
+}
+
+gboolean
+mono_thread_info_resume (MonoNativeThreadId tid)
+{
+	return mono_gc_invoke_with_gc_lock (resume_thread, tid) != NULL;
 }

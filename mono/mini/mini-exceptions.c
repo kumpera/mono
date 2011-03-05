@@ -1847,6 +1847,21 @@ mono_handle_exception (MonoContext *ctx, gpointer obj, gpointer original_ip, gbo
 	return mono_handle_exception_internal (ctx, obj, original_ip, FALSE, NULL);
 }
 
+static void
+mono_handle_exception_with_context (MonoContext *ctx, MonoObject *obj, gboolean test_only)
+{
+	static void (*restore_context) (MonoContext *);
+
+	if (mono_debugger_handle_exception (ctx, (MonoObject *)obj))
+		return;
+
+	mono_handle_exception (ctx, obj, MONO_CONTEXT_GET_IP (ctx), test_only);
+	if (!restore_context)
+		restore_context = mono_get_restore_context ();
+
+	restore_context (ctx);
+}
+
 #ifdef MONO_ARCH_SIGSEGV_ON_ALTSTACK
 
 #ifndef MONO_ARCH_USE_SIGACTION

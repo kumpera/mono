@@ -5630,6 +5630,12 @@ mono_get_eh_callbacks (void)
 	return &eh_callbacks;
 }
 
+void
+mono_install_handler_with_context (MonoExceptionFuncWithContext func)
+{
+	ex_handler_with_ctx = func;
+}
+
 /**
  * mono_raise_exception:
  * @ex: exception object
@@ -5655,6 +5661,17 @@ mono_raise_exception (MonoException *ex)
 	eh_callbacks.mono_raise_exception (ex);
 }
 
+void
+mono_raise_exception_with_context (MonoException *ex, void *ctx) 
+{
+	if (((MonoObject*)ex)->vtable->klass == mono_defaults.threadabortexception_class) {
+		MonoInternalThread *thread = mono_thread_internal_current ();
+		g_assert (ex->object.vtable->domain == mono_domain_get ());
+		MONO_OBJECT_SETREF (thread, abort_exc, ex);
+	}
+	
+	ex_handler_with_ctx (ex, ctx);
+}
 /**
  * mono_wait_handle_new:
  * @domain: Domain where the object will be created
