@@ -32,6 +32,7 @@ typedef struct {
 
 static int thread_info_size;
 static MonoThreadInfoCallbacks threads_callbacks;
+static MonoThreadInfoRuntimeCallbacks runtime_callbacks;
 static pthread_key_t thread_info_key;
 MonoThreadInfo *thread_table [THREAD_HASH_SIZE];
 
@@ -207,6 +208,12 @@ mono_threads_init (MonoThreadInfoCallbacks *callbacks, size_t info_size)
 	mono_posix_add_signal_handler (SIGUSR2, suspend_signal_handler);
 }
 
+void
+mono_threads_runtime_init (MonoThreadInfoRuntimeCallbacks *callbacks)
+{
+	runtime_callbacks = *callbacks;
+}
+
 int
 mono_threads_pthread_create (pthread_t *new_thread, const pthread_attr_t *attr, void *(*start_routine)(void *), void *arg)
 {
@@ -237,7 +244,7 @@ suspend_signal_handler (int _dummy, siginfo_t *info, void *context)
 	MonoThreadInfo *current = mono_thread_info_current ();
 
 	printf ("in suspend sighandler\n");
-	current->thread_context_modified = FALSE;
+	//current->thread_context_modified = FALSE;
 	mono_sigctx_to_monoctx (context, &current->thread_context);
 
 
@@ -248,8 +255,12 @@ suspend_signal_handler (int _dummy, siginfo_t *info, void *context)
 	while (MONO_SEM_WAIT (&current->resume_semaphore) != 0) {
 		/*if (EINTR != errno) ABORT("sem_wait failed"); */
 	}
-	if (current->thread_context_modified)
-		mono_monoctx_to_sigctx (&current->thread_context, context);
+
+	if (current->async_target) {
+		MonoContext tmp = current->thread_context;
+		runtime_callbacks.setup_async_callback (&tmp, current->async_target, current->user_data);
+		mono_monoctx_to_sigctx (&tmp, context);
+	}
 }
 
 static void*
@@ -294,51 +305,15 @@ resume_thread (void *arg)
 	return info;
 }
 
-static void*
-thread_async_call_trampoline_enter (void)
-{
-	MonoThreadInfo *info = mono_thread_info_current ();
-	void (*async_target)(void) = info->async_target;
-	MONO_CONTEXT_SET_IP (&info->thread_context, info->old_ip);
-	info->async_target = NULL;
-	async_target ();
-	return (void*)info->old_ip;
-}
-
-/*VERY UGLY HACK WARNING, this is just a Proof of Concept */
-static void async_call_trampoline (void);
-__asm(
-  "_async_call_trampoline:\n"
-  "  push %eax\n" /*dummy area for the return address. XXX we could avoid this by using a xchg, is it worth? */
-  "  push %eax\n"
-  "  push %ecx\n"
-  "  push %edx\n"
-  "  movl %esp, %eax\n"
-  "  subl $16, %esp\n"
-  "  andl $-16, %esp\n" /*now we are stack aligned */
-  "  subl $12, %esp\n"
-  "  push %eax\n"
-  "  call _thread_async_call_trampoline_enter\n"
-  "  pop %ecx\n" /*unaligned stack */
-  "  mov %ecx, %esp\n" /*now stack is [dummy, eax, ecx, edx]*/
-  "  pop %edx\n" /*[dummy, eax, ecx] */
-  "  pop %ecx\n" /*[dummy, eax] */
-  "  mov %eax, 0x4(%esp)\n" /*[return address, eax]*/
-  "  pop %eax\n" /*[return address]*/
-  "  ret"
-);
-
-
 void
-mono_thread_info_setup_async_call (MonoThreadInfo *info, void (*target_func)(void))
+mono_thread_info_setup_async_call (MonoThreadInfo *info, void (*target_func)(void*), void *user_data)
 {
 	g_assert (info->suspend_count);
 	/*FIXME this is a bad assert, we should prove proper locking and fail if one is already set*/
 	g_assert (!info->async_target);
 	info->async_target = target_func;
-	info->old_ip = (mgreg_t)MONO_CONTEXT_GET_IP (&info->thread_context);
-	MONO_CONTEXT_SET_IP (&info->thread_context, &async_call_trampoline);
-	info->thread_context_modified = TRUE;
+	/* This is not GC tracked */
+	info->user_data = user_data;
 }
 
 MonoThreadInfo*

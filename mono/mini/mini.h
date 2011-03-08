@@ -2058,6 +2058,13 @@ gpointer mono_arch_create_handler_block_trampoline (void) MONO_INTERNAL;
 gpointer mono_create_handler_block_trampoline (void) MONO_INTERNAL;
 gboolean mono_install_handler_block_guard (MonoInternalThread *thread, MonoContext *ctx) MONO_INTERNAL;
 
+/*Async exception delivery*/
+void
+mono_setup_async_callback (MonoContext *ctx, void (*async_cb)(void *fun), gpointer user_data) MONO_INTERNAL;
+
+void
+mono_arch_setup_async_callback (MonoContext *ctx, void (*async_cb)(void *fun), gpointer user_data) MONO_INTERNAL;
+
 /* Exception handling */
 typedef gboolean (*MonoJitStackWalk)            (StackFrameInfo *frame, MonoContext *ctx, gpointer data);
 

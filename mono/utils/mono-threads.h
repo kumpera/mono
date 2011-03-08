@@ -45,12 +45,11 @@ struct _MonoThreadInfo {
 
 	/*Only needed on posix, only valid if the thread finished suspending*/
 	MonoContext thread_context;
-	gboolean thread_context_modified;
 	void *domain;
 
 	/*async call machinery, thread MUST be suspended for this to be usable*/
-	void (*async_target)(void);
-	mgreg_t old_ip;
+	void (*async_target)(void*);
+	void *user_data;
 };
 
 typedef void* (*mono_thread_info_register_callback)(THREAD_INFO_TYPE *info, void *baseaddr);
@@ -61,6 +60,13 @@ typedef struct {
 	mono_thread_info_callback thread_unregister;
 	mono_thread_info_callback thread_attach;
 } MonoThreadInfoCallbacks;
+
+
+typedef void (*mono_thread_info_setup_async_callback) (MonoContext *ctx, void (*async_cb)(void *fun), gpointer user_data);
+
+typedef struct {
+	mono_thread_info_setup_async_callback setup_async_callback;
+} MonoThreadInfoRuntimeCallbacks;
 
 #define THREAD_HASH_SIZE 11
 
@@ -84,6 +90,9 @@ extern THREAD_INFO_TYPE *thread_table [THREAD_HASH_SIZE] MONO_INTERNAL;
  */
 void
 mono_threads_init (MonoThreadInfoCallbacks *callbacks, size_t thread_info_size) MONO_INTERNAL;
+
+void
+mono_threads_runtime_init (MonoThreadInfoRuntimeCallbacks *callbacks) MONO_INTERNAL;
 
 /*FIXME figure out windows and boehm (eg, use this in place of mono_gc_pthread_create family)*/
 int
@@ -113,6 +122,6 @@ gboolean
 mono_thread_info_resume (MonoNativeThreadId tid) MONO_INTERNAL;
 
 void
-mono_thread_info_setup_async_call (MonoThreadInfo *info, void (*target_func)(void)) MONO_INTERNAL;
+mono_thread_info_setup_async_call (MonoThreadInfo *info, void (*target_func)(void*), void *user_data) MONO_INTERNAL;
 
 #endif /* _MONO_THREADS_H_ */

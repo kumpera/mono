@@ -996,8 +996,31 @@ mono_x86_get_signal_exception_trampoline (MonoTrampInfo **info, gboolean aot)
 	return start;
 }
 
+void
+mono_arch_setup_async_callback (MonoContext *ctx, void (*async_cb)(void *fun), gpointer user_data)
+{
+	ctx->eax = (mgreg_t)user_data;
+	ctx->ecx = ctx->eip;
+	ctx->edx = (mgreg_t)async_cb;
+	/*align the stack*/
+	ctx->esp = (ctx->esp - 16) & ~15;
+	ctx->eip = (mgreg_t)signal_exception_trampoline;
+}
+
 gboolean
 mono_arch_handle_exception (void *sigctx, gpointer obj, gboolean test_only)
+{
+	MonoContext ctx;
+	g_assert (!test_only);
+
+	mono_sigctx_to_monoctx (sigctx, &ctx);
+	mono_setup_async_callback (&ctx, handle_signal_exception, obj);
+	mono_monoctx_to_sigctx (&ctx, sigctx);
+	return TRUE;
+}
+
+gboolean
+mono_arch_handle_exception2 (void *sigctx, gpointer obj, gboolean test_only)
 {
 #if defined(MONO_ARCH_USE_SIGACTION)
 	ucontext_t *ctx = (ucontext_t*)sigctx;

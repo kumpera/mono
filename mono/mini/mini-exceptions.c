@@ -1848,14 +1848,15 @@ mono_handle_exception (MonoContext *ctx, gpointer obj, gpointer original_ip, gbo
 }
 
 static void
-mono_handle_exception_with_context (MonoContext *ctx, MonoObject *obj, gboolean test_only)
+mono_handle_exception_with_context (MonoException *obj, void *mctx)
 {
+	MonoContext *ctx = mctx;
 	static void (*restore_context) (MonoContext *);
 
 	if (mono_debugger_handle_exception (ctx, (MonoObject *)obj))
 		return;
 
-	mono_handle_exception (ctx, obj, MONO_CONTEXT_GET_IP (ctx), test_only);
+	mono_handle_exception (ctx, obj, MONO_CONTEXT_GET_IP (ctx), FALSE);
 	if (!restore_context)
 		restore_context = mono_get_restore_context ();
 
@@ -2514,6 +2515,7 @@ mono_set_cast_details (MonoClass *from, MonoClass *to)
 	}
 }
 
+<<<<<<< HEAD
 
 /*returns false if the thread is not attached*/
 gboolean
@@ -2589,4 +2591,14 @@ mono_raise_exception_with_ctx (MonoException *exc, MonoContext *ctx)
 
 	mono_handle_exception (ctx, exc, NULL, FALSE);
 	restore_context (ctx);
+}
+
+/*FIXME Move all monoctx -> sigctx conversion to signal handlers once all archs support utils/mono-context */
+void
+mono_setup_async_callback (MonoContext *ctx, void (*async_cb)(void *fun), gpointer user_data)
+{
+	MonoJitTlsData *jit_tls = TlsGetValue (mono_jit_tls_id);
+	jit_tls->ex_ctx = *ctx;
+
+	mono_arch_setup_async_callback (ctx, async_cb, user_data);
 }

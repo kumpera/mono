@@ -53,6 +53,7 @@
 #include <mono/utils/mono-counters.h>
 #include <mono/utils/mono-logger-internal.h>
 #include <mono/utils/mono-mmap.h>
+#include <mono/utils/mono-threads.h>
 #include <mono/utils/dtrace.h>
 
 #include "mini.h"
@@ -6143,6 +6144,7 @@ mini_init (const char *filename, const char *runtime_version)
 {
 	MonoDomain *domain;
 	MonoRuntimeCallbacks callbacks;
+	MonoThreadInfoRuntimeCallbacks ticallbacks;
 
 	MONO_PROBE_VES_INIT_BEGIN ();
 
@@ -6196,6 +6198,9 @@ mini_init (const char *filename, const char *runtime_version)
 #endif
 
 	mono_install_callbacks (&callbacks);
+
+	ticallbacks.setup_async_callback = mono_setup_async_callback;
+	mono_threads_runtime_init (&ticallbacks);
 
 	if (getenv ("MONO_DEBUG") != NULL)
 		mini_parse_debug_options ();

@@ -2032,13 +2032,13 @@ is_thread_in_critical_region (MonoThreadInfo *info)
 	return FALSE;
 }
 
-
 static void
-self_interrupt_thread (void)
+self_interrupt_thread (void *_unused)
 {
 	MonoThreadInfo *info = mono_thread_info_current ();
 	printf ("finally reached the interrupt callback!\n");
-	MonoException *exc = mono_thread_request_interruption (FALSE); 
+	MonoException *exc = mono_thread_request_interruption (TRUE); 
+	printf ("exception is %p\n", exc);
 	if (exc) /*We must use _with_context since we didn't trampoline into the runtime*/
 		mono_raise_exception_with_context (exc, &info->thread_context);
 }
@@ -2083,11 +2083,12 @@ static void signal_thread_state_change (MonoInternalThread *thread)
 
 	/*Figure out where the thread is*/
 	MonoJitInfo *ji = mono_jit_info_table_find (info->domain, MONO_CONTEXT_GET_IP (&info->thread_context));
-	if (ji) {
+	gboolean running_managed = ji != NULL;
+	if (running_managed) {
 		/*We are in managed code*/
 		/*Set the thread to call */
 		printf ("in managed land \n");
-		mono_thread_info_setup_async_call (info, self_interrupt_thread);
+		mono_thread_info_setup_async_call (info, self_interrupt_thread, NULL);
 	} else {
 		printf ("not in managed land \n");
 		/* 
