@@ -2515,8 +2515,6 @@ mono_set_cast_details (MonoClass *from, MonoClass *to)
 	}
 }
 
-<<<<<<< HEAD
-
 /*returns false if the thread is not attached*/
 gboolean
 mono_thread_state_init_from_sigctx (MonoThreadUnwindState *ctx, void *sigctx)
