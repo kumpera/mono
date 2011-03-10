@@ -5630,12 +5630,6 @@ mono_get_eh_callbacks (void)
 	return &eh_callbacks;
 }
 
-void
-mono_install_handler_with_context (MonoExceptionFuncWithContext func)
-{
-	ex_handler_with_ctx = func;
-}
-
 /**
  * mono_raise_exception:
  * @ex: exception object
@@ -5670,7 +5664,7 @@ mono_raise_exception_with_context (MonoException *ex, void *ctx)
 		MONO_OBJECT_SETREF (thread, abort_exc, ex);
 	}
 	
-	ex_handler_with_ctx (ex, ctx);
+	eh_callbacks.mono_raise_exception_with_ctx (ex, ctx);
 }
 /**
  * mono_wait_handle_new:
