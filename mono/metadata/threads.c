@@ -2041,6 +2041,7 @@ self_interrupt_thread (void *_unused)
 	printf ("exception is %p\n", exc);
 	if (exc) /*We must use _with_context since we didn't trampoline into the runtime*/
 		mono_raise_exception_with_context (exc, &info->thread_context);
+	g_assert_not_reached (); /*this MUST not happen since we can't resume from an async call*/
 }
 
 /*
@@ -2089,6 +2090,7 @@ static void signal_thread_state_change (MonoInternalThread *thread)
 		/*Set the thread to call */
 		printf ("in managed land \n");
 		mono_thread_info_setup_async_call (info, self_interrupt_thread, NULL);
+		mono_thread_info_resume ((pthread_t)(gpointer)(gsize)thread->tid);
 	} else {
 		printf ("not in managed land \n");
 		/* 
@@ -2098,10 +2100,11 @@ static void signal_thread_state_change (MonoInternalThread *thread)
 		 * functions in the io-layer until the signal handler calls QueueUserAPC which will
 		 * make it return.
 		 */
+		mono_thread_info_resume ((pthread_t)(gpointer)(gsize)thread->tid);
 		wapi_interrupt_thread (thread->handle);
 	}
 	/*FIXME we need to wait for interruption to complete -- figure out how much into interruption we should wait for here*/
-	mono_thread_info_resume ((pthread_t)(gpointer)(gsize)thread->tid);
+
 	//mono_thread_kill (thread, mono_thread_get_abort_signal ());
 
 #endif /* HOST_WIN32 */
