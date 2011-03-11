@@ -959,6 +959,17 @@ create_allocator (int atype, int offset)
 
 static MonoMethod* alloc_method_cache [ATYPE_NUM];
 
+gboolean
+mono_gc_is_critical_method (MonoMethod *method)
+{
+	int i;
+	for (i = 0; i < ATYPE_NUM; ++i) {
+		if (alloc_method_cache [i] == method)
+			return TRUE;
+	}
+	return FALSE;
+}
+
 /*
  * If possible, generate a managed method that can quickly allocate objects in class
  * @klass. The method will typically have an thread-local inline allocation sequence.
@@ -1175,6 +1186,12 @@ mono_gc_get_bitmap_for_descr (void *descr, int *numbits)
 void
 mono_gc_set_gc_callbacks (MonoGCCallbacks *callbacks)
 {
+}
+
+gboolean
+mono_gc_is_critical_method (MonoMethod *method)
+{
+	return FALSE;
 }
 
 /*

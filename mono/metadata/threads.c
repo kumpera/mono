@@ -2061,9 +2061,8 @@ is_thread_in_critical_region (MonoThreadInfo *info, MonoJitInfo **out_ji)
 		return TRUE;
 	}
 
-	//TODO
-	//if (mono_gc_is_critical_thread (info, method))
-	//	return TRUE;
+	if (mono_gc_is_critical_method (method))
+		return TRUE;
 
 	//FIXME handle regions the runtme doesn't want to be interruptible.
 	//same
@@ -2077,7 +2076,7 @@ self_interrupt_thread (void *_unused)
 {
 	MonoThreadInfo *info = mono_thread_info_current ();
 	printf ("finally reached the interrupt callback!\n");
-	MonoException *exc = mono_thread_request_interruption (TRUE); 
+	MonoException *exc = mono_thread_execute_interruption (mono_thread_internal_current ()); 
 	printf ("exception is %p\n", exc);
 	if (exc) /*We must use _with_context since we didn't trampoline into the runtime*/
 		mono_raise_exception_with_context (exc, &info->suspend_state.ctx);
@@ -2112,6 +2111,12 @@ static void signal_thread_state_change (MonoInternalThread *thread)
 #ifdef HOST_WIN32
 	QueueUserAPC ((PAPCFUNC)interruption_request_apc, thread->handle, NULL);
 #else
+
+	/*someone is already interrupting it*/
+	if (InterlockedCompareExchange (&thread->interruption_requested, 1, 0) == 1)
+		return;
+	
+
 	/*FIXME we need to check 2 conditions here, request to interrupt this thread or if the target died*/
 	for (;;) {
 		if (!(info = mono_thread_info_suspend_sync ((pthread_t)(gpointer)(gsize)thread->tid))) {
@@ -2144,6 +2149,7 @@ static void signal_thread_state_change (MonoInternalThread *thread)
 		 * functions in the io-layer until the signal handler calls QueueUserAPC which will
 		 * make it return.
 		 */
+		InterlockedIncrement (&thread_interruption_requested);
 		mono_thread_info_resume ((pthread_t)(gpointer)(gsize)thread->tid);
 		wapi_interrupt_thread (thread->handle);
 	}

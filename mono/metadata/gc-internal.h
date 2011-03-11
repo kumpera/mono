@@ -335,6 +335,7 @@ gboolean mono_gc_precise_stack_mark_enabled (void) MONO_INTERNAL;
 
 FILE *mono_gc_get_logfile (void) MONO_INTERNAL;
 
+gboolean mono_gc_is_critical_method (MonoMethod *method) MONO_INTERNAL;
 typedef void (*mono_reference_queue_callback) (void *user_data);
 
 typedef struct _MonoReferenceQueue MonoReferenceQueue;

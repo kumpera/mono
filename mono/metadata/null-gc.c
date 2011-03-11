@@ -365,6 +365,12 @@ mono_gc_set_gc_callbacks (MonoGCCallbacks *callbacks)
 {
 }
 
+gboolean
+mono_gc_is_critical_method (MonoMethod *method)
+{
+	return FALSE;
+}
+
 #ifndef HOST_WIN32
 
 int
