@@ -11,9 +11,10 @@
 #define _MONO_THREADS_H_
 
 #include <mono/utils/mono-semaphore.h>
-#include <mono/utils/mono-context.h>
+#include <mono/utils/mono-stack-unwinding.h>
 
 #include <pthread.h>
+#include <glib.h>
 
 typedef struct _MonoThreadInfo MonoThreadInfo;
 
@@ -44,28 +45,24 @@ struct _MonoThreadInfo {
 	MonoSemType resume_semaphore;
 
 	/*Only needed on posix, only valid if the thread finished suspending*/
-	MonoContext thread_context;
-	void *domain;
+	MonoThreadUnwindState suspend_state;
 
 	/*async call machinery, thread MUST be suspended for this to be usable*/
 	void (*async_target)(void*);
 	void *user_data;
 };
 
-typedef void* (*mono_thread_info_register_callback)(THREAD_INFO_TYPE *info, void *baseaddr);
-typedef void (*mono_thread_info_callback)(THREAD_INFO_TYPE *info);
-
 typedef struct {
-	mono_thread_info_register_callback thread_register;
-	mono_thread_info_callback thread_unregister;
-	mono_thread_info_callback thread_attach;
+	void* (*thread_register)(THREAD_INFO_TYPE *info, void *baseaddr);
+	void (*thread_unregister)(THREAD_INFO_TYPE *info);
+	void (*thread_attach)(THREAD_INFO_TYPE *info);
 } MonoThreadInfoCallbacks;
-
 
 typedef void (*mono_thread_info_setup_async_callback) (MonoContext *ctx, void (*async_cb)(void *fun), gpointer user_data);
 
 typedef struct {
-	mono_thread_info_setup_async_callback setup_async_callback;
+	void (*setup_async_callback) (MonoContext *ctx, void (*async_cb)(void *fun), gpointer user_data);
+	gboolean (*thread_state_init_from_sigctx) (MonoThreadUnwindState *state, void *sigctx);
 } MonoThreadInfoRuntimeCallbacks;
 
 #define THREAD_HASH_SIZE 11

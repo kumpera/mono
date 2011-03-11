@@ -244,20 +244,15 @@ suspend_signal_handler (int _dummy, siginfo_t *info, void *context)
 	MonoThreadInfo *current = mono_thread_info_current ();
 
 	printf ("in suspend sighandler\n");
-	//current->thread_context_modified = FALSE;
-	mono_sigctx_to_monoctx (context, &current->thread_context);
 
-
-	/*FIXME Move this out and/or implement remote TLS read on all targets.*/
-	current->domain = mono_domain_get ();
-
+	g_assert (runtime_callbacks.thread_state_init_from_sigctx (&current->suspend_state, context));
 	MONO_SEM_POST (&current->suspend_semaphore);
 	while (MONO_SEM_WAIT (&current->resume_semaphore) != 0) {
 		/*if (EINTR != errno) ABORT("sem_wait failed"); */
 	}
 
 	if (current->async_target) {
-		MonoContext tmp = current->thread_context;
+		MonoContext tmp = current->suspend_state.ctx;
 		runtime_callbacks.setup_async_callback (&tmp, current->async_target, current->user_data);
 		mono_monoctx_to_sigctx (&tmp, context);
 	}

@@ -2025,10 +2025,50 @@ static void CALLBACK interruption_request_apc (ULONG_PTR param)
 }
 #endif /* HOST_WIN32 */
 
+
+static gboolean
+last_managed (MonoStackFrameInfo *frame, MonoContext *ctx, gpointer data)
+{
+	MonoJitInfo **dest = data;
+	*dest = frame->ji;
+	return TRUE;
+}
+
+static MonoJitInfo*
+get_last_managed (MonoThreadInfo *info)
+{
+	MonoJitInfo *ji = NULL;
+	mono_get_eh_callbacks ()->mono_walk_stack_with_state (last_managed, &info->suspend_state, MONO_UNWIND_SIGNAL_SAFE, &ji);
+	return ji;
+}
+
 /*TEMP HACK*/
 static gboolean
-is_thread_in_critical_region (MonoThreadInfo *info)
+is_thread_in_critical_region (MonoThreadInfo *info, MonoJitInfo **out_ji)
 {
+	MonoJitInfo *ji = get_last_managed (info);
+	MonoMethod *method;
+	*out_ji = ji;
+	if (!ji)
+		return FALSE;
+
+	method = ji->method;
+
+	switch (method->wrapper_type) {
+	case MONO_WRAPPER_RUNTIME_INVOKE:
+	case MONO_WRAPPER_XDOMAIN_INVOKE:
+	case MONO_WRAPPER_XDOMAIN_DISPATCH:	
+		return TRUE;
+	}
+
+	//TODO
+	//if (mono_gc_is_critical_thread (info, method))
+	//	return TRUE;
+
+	//FIXME handle regions the runtme doesn't want to be interruptible.
+	//same
+	if (method->name [0] == 'X')
+		return TRUE;
 	return FALSE;
 }
 
@@ -2040,10 +2080,18 @@ self_interrupt_thread (void *_unused)
 	MonoException *exc = mono_thread_request_interruption (TRUE); 
 	printf ("exception is %p\n", exc);
 	if (exc) /*We must use _with_context since we didn't trampoline into the runtime*/
-		mono_raise_exception_with_context (exc, &info->thread_context);
+		mono_raise_exception_with_context (exc, &info->suspend_state.ctx);
 	g_assert_not_reached (); /*this MUST not happen since we can't resume from an async call*/
 }
 
+
+static gboolean
+mono_jit_info_match (MonoJitInfo *ji, gpointer ip)
+{
+	if (!ji)
+		return FALSE;
+	return ji->code_start <= ip && (char*)ip < (char*)ji->code_start + ji->code_size;
+}
 /*
  * signal_thread_state_change
  *
@@ -2052,6 +2100,7 @@ self_interrupt_thread (void *_unused)
  */
 static void signal_thread_state_change (MonoInternalThread *thread)
 {
+	MonoJitInfo *ji;
 	MonoThreadInfo *info = NULL;
 	if (thread == mono_thread_internal_current ()) {
 		/* Do it synchronously */
@@ -2063,8 +2112,6 @@ static void signal_thread_state_change (MonoInternalThread *thread)
 #ifdef HOST_WIN32
 	QueueUserAPC ((PAPCFUNC)interruption_request_apc, thread->handle, NULL);
 #else
-	/* fixme: store the state somewhere */
-
 	/*FIXME we need to check 2 conditions here, request to interrupt this thread or if the target died*/
 	for (;;) {
 		if (!(info = mono_thread_info_suspend_sync ((pthread_t)(gpointer)(gsize)thread->tid))) {
@@ -2072,19 +2119,16 @@ static void signal_thread_state_change (MonoInternalThread *thread)
 			return;
 		}
 		/*WARNING: We now are in signal context until we resume the thread. */
-		if (!is_thread_in_critical_region (info))
+		if (!is_thread_in_critical_region (info, &ji))
 			break;
+		printf ("method in critical region, resuming\n");
 		mono_thread_info_resume ((pthread_t)(gpointer)(gsize)thread->tid);
 		Sleep (1);
 	}
-	/*FIXME what should be done here?*/
-	g_assert (info->domain);
-
-	/*FIXME add support for interrupt guards. */
 
 	/*Figure out where the thread is*/
-	MonoJitInfo *ji = mono_jit_info_table_find (info->domain, MONO_CONTEXT_GET_IP (&info->thread_context));
-	gboolean running_managed = ji != NULL;
+	gboolean running_managed = mono_jit_info_match (ji, MONO_CONTEXT_GET_IP (&info->suspend_state.ctx));
+
 	if (running_managed) {
 		/*We are in managed code*/
 		/*Set the thread to call */

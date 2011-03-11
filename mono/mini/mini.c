@@ -6200,6 +6200,7 @@ mini_init (const char *filename, const char *runtime_version)
 	mono_install_callbacks (&callbacks);
 
 	ticallbacks.setup_async_callback = mono_setup_async_callback;
+	ticallbacks.thread_state_init_from_sigctx = mono_thread_state_init_from_sigctx;
 	mono_threads_runtime_init (&ticallbacks);
 
 	if (getenv ("MONO_DEBUG") != NULL)
