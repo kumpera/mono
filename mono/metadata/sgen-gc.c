@@ -5303,7 +5303,7 @@ suspend_handler (int sig, siginfo_t *siginfo, void *context)
 #endif
 	gpointer stack_start;
 
-	info = mono_sgen_thread_info_current ();
+	info = mono_thread_info_current ();
 	info->stopped_domain = mono_domain_get ();
 	info->stopped_ip = (gpointer) ARCH_SIGCTX_IP (context);
 	stop_count = global_stop_count;
@@ -5361,7 +5361,7 @@ restart_handler (int sig)
 	SgenThreadInfo *info;
 	int old_errno = errno;
 
-	info = mono_sgen_thread_info_current ();
+	info = mono_thread_info_current ();
 	info->signal = restart_signal_num;
 	DEBUG (4, fprintf (gc_debug_file, "Restart handler in %p %p\n", info, (gpointer)mono_native_thread_id_get ()));
 
@@ -5395,7 +5395,7 @@ stop_world (int generation)
 	update_current_thread_stack (&count);
 
 	global_stop_count++;
-	DEBUG (3, fprintf (gc_debug_file, "stopping world n %d from %p %p\n", global_stop_count, mono_sgen_thread_info_current (), (gpointer)ARCH_GET_THREAD ()));
+	DEBUG (3, fprintf (gc_debug_file, "stopping world n %d from %p %p\n", global_stop_count, mono_thread_info_current (), (gpointer)mono_native_thread_id_get ()));
 	TV_GETTIME (stop_world_time);
 	count = mono_sgen_thread_handshake (suspend_signal_num);
 	count -= restart_threads_until_none_in_managed_allocator ();
@@ -6230,7 +6230,7 @@ mono_gc_wbarrier_set_arrayref (MonoArray *arr, gpointer slot_ptr, MonoObject* va
 		rs = alloc_remset (rs->end_set - rs->data, (void*)1);
 		rs->next = REMEMBERED_SET;
 		REMEMBERED_SET = rs;
-#ifdef HAVE_KW_THREAD
+
 		mono_thread_info_current ()->remset = rs;
 		*(rs->store_next++) = (mword)slot_ptr;
 		*(void**)slot_ptr = value;
@@ -6292,10 +6292,8 @@ mono_gc_wbarrier_arrayref_copy (gpointer dest_ptr, gpointer src_ptr, int count)
 		rs = alloc_remset (rs->end_set - rs->data, (void*)1);
 		rs->next = REMEMBERED_SET;
 		REMEMBERED_SET = rs;
-#ifdef HAVE_KW_THREAD
 
 		mono_thread_info_current ()->remset = rs;
-#endif
 		*(rs->store_next++) = (mword)dest_ptr | REMSET_RANGE;
 		*(rs->store_next++) = count;
 
@@ -6483,7 +6481,7 @@ mono_gc_wbarrier_value_copy (gpointer dest, gpointer src, int count, MonoClass *
 		rs = alloc_remset (rs->end_set - rs->data, (void*)1);
 		rs->next = REMEMBERED_SET;
 		REMEMBERED_SET = rs;
-#ifdef HAVE_KW_THREAD
+
 		mono_thread_info_current ()->remset = rs;
 		*(rs->store_next++) = (mword)dest | REMSET_VTYPE;
 		*(rs->store_next++) = (mword)klass->gc_descr;
@@ -6524,9 +6522,9 @@ mono_gc_wbarrier_object_copy (MonoObject* obj, MonoObject *src)
 	rs = alloc_remset (rs->end_set - rs->data, (void*)1);
 	rs->next = REMEMBERED_SET;
 	REMEMBERED_SET = rs;
-#ifdef HAVE_KW_THREAD
+
 	mono_thread_info_current ()->remset = rs;
-#endif
+
 	*(rs->store_next++) = (mword)obj | REMSET_OBJECT;
 	UNLOCK_GC;
 }
@@ -7748,7 +7746,6 @@ is_ip_in_managed_allocator (MonoDomain *domain, gpointer ip)
 {
 	MonoJitInfo *ji;
 	MonoMethod *method;
-	int i;
 
 	if (!mono_thread_internal_current ())
 		/* Happens during thread attach */
