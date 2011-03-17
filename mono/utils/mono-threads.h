@@ -65,19 +65,25 @@ typedef struct {
 	gboolean (*thread_state_init_from_sigctx) (MonoThreadUnwindState *state, void *sigctx);
 } MonoThreadInfoRuntimeCallbacks;
 
-#define THREAD_HASH_SIZE 11
+static inline gpointer
+list_pointer_unmask (gpointer p)
+{
+	return (gpointer)((uintptr_t)p & ~(uintptr_t)0x3);
+}
+
+static inline uintptr_t
+list_pointer_get_mark (gpointer n)
+{
+	return (uintptr_t)n & 0x1;
+}
 
 /*
-Don't use this struct directly, use the macro below.
-The thread_table struct is protected by the gc lock.
+Requires the world to be stoped
 */
-extern THREAD_INFO_TYPE *thread_table [THREAD_HASH_SIZE] MONO_INTERNAL;
-
-/*Assumes gc lock is held.*/
 #define FOREACH_THREAD(thread) {\
-	int __i;	\
-	for (__i = 0; __i < THREAD_HASH_SIZE; ++__i)	\
-		for ((thread) = thread_table [__i]; (thread); (thread) = ((MonoThreadInfo *)thread)->next) {
+	thread = (typeof(thread))*mono_thread_info_list_head ();	\
+	for (; thread; thread = (typeof(thread)) list_pointer_unmask (((MonoThreadInfo*)(thread))->next))	\
+		if (!list_pointer_get_mark (((MonoThreadInfo*)(thread))->next)) {
 
 #define END_FOREACH_THREAD }}
 
@@ -98,16 +104,6 @@ mono_threads_pthread_create (pthread_t *new_thread, const pthread_attr_t *attr, 
 THREAD_INFO_TYPE *
 mono_thread_info_attach (void *baseptr) MONO_INTERNAL;
 
-
-/*GC lock must NOT to be held*/
-THREAD_INFO_TYPE *
-mono_thread_info_lookup (MonoNativeThreadId id) MONO_INTERNAL;
-
-
-/*GC lock must be held*/
-THREAD_INFO_TYPE *
-mono_thread_info_lookup_unsafe (MonoNativeThreadId id) MONO_INTERNAL;
-
 /*Doesn't care about the GC lock*/
 THREAD_INFO_TYPE *
 mono_thread_info_current (void) MONO_INTERNAL;
@@ -121,4 +117,6 @@ mono_thread_info_resume (MonoNativeThreadId tid) MONO_INTERNAL;
 void
 mono_thread_info_setup_async_call (MonoThreadInfo *info, void (*target_func)(void*), void *user_data) MONO_INTERNAL;
 
+MonoThreadInfo**
+mono_thread_info_list_head (void) MONO_INTERNAL;
 #endif /* _MONO_THREADS_H_ */

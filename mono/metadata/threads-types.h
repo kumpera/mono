@@ -185,8 +185,33 @@ MonoException* mono_thread_get_undeniable_exception (void);
 
 MonoException* mono_thread_get_and_clear_pending_exception (void) MONO_INTERNAL;
 
+typedef struct {
+	gpointer hazard_pointers [3];
+} MonoThreadHazardPointers;
+
+typedef void (*MonoHazardousFreeFunc) (gpointer p);
+
+void mono_thread_hazardous_free_or_queue (gpointer p, MonoHazardousFreeFunc free_func);
+void mono_thread_hazardous_try_free_all (void);
+
+MonoThreadHazardPointers* mono_hazard_pointer_get (void);
+
 void mono_threads_install_notify_pending_exc (MonoThreadNotifyPendingExcFunc func) MONO_INTERNAL;
 
+#define mono_hazard_pointer_set(hp,i,v)	\
+	do { g_assert ((i) == 0 || (i) == 1 || (i) == 2); \
+		(hp)->hazard_pointers [(i)] = (v); \
+		mono_memory_write_barrier (); \
+	} while (0)
+#define mono_hazard_pointer_get_val(hp,i)	\
+		((hp)->hazard_pointers [(i)])
+
+#define mono_hazard_pointer_clear(hp,i)	\
+	do { g_assert ((i) == 0 || (i) == 1 || (i) == 2); \
+		(hp)->hazard_pointers [(i)] = NULL; \
+	} while (0)
+
+>>>>>>> Drop the need for the GC lock. Now we need to move the small_id machinery 2 layers down
 MonoObject* mono_thread_get_execution_context (void) MONO_INTERNAL;
 void mono_thread_set_execution_context (MonoObject *ec) MONO_INTERNAL;
 

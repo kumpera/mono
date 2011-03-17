@@ -5556,7 +5556,7 @@ static gboolean
 ptr_on_stack (void *ptr)
 {
 	gpointer stack_start = &stack_start;
-	SgenThreadInfo *info = mono_thread_info_lookup_unsafe (mono_native_thread_id_get ());
+	SgenThreadInfo *info = mono_thread_info_current ();
 
 	if (ptr >= stack_start && ptr < (gpointer)info->stack_end)
 		return TRUE;
