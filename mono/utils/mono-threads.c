@@ -10,6 +10,7 @@
 #include <mono/utils/mono-compiler.h>
 #include <mono/utils/mono-semaphore.h>
 #include <mono/utils/mono-threads.h>
+#include <mono/utils/hazard-pointer.h>
 #include <mono/metadata/gc-internal.h>
 #include <mono/metadata/appdomain.h>
 #include <mono/metadata/threads-types.h>
@@ -46,32 +47,6 @@ static inline gpointer
 mask (gpointer n, uintptr_t bit)
 {
 	return (gpointer)(((uintptr_t)n) | bit);
-}
-
-static gpointer
-get_hazardous_pointer (gpointer *pp, MonoThreadHazardPointers *hp, int hazard_index)
-{
-	gpointer p;
-
-	for (;;) {
-		/* Get the pointer */
-		p = *pp;
-		/* If we don't have hazard pointers just return the
-		   pointer. */
-		if (!hp)
-			return p;
-		/* Make it hazardous */
-		mono_hazard_pointer_set (hp, hazard_index, p);
-		/* Check that it's still the same.  If not, try
-		   again. */
-		if (*pp != p) {
-			mono_hazard_pointer_clear (hp, hazard_index);
-			continue;
-		}
-		break;
-	}
-
-	return p;
 }
 
 static gpointer
