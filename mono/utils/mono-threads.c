@@ -96,6 +96,8 @@ list_find (MonoThreadInfo **head, MonoThreadHazardPointers *hp, MonoNativeThread
 
 try_again:
 	prev = head;
+	mono_hazard_pointer_set (hp, 2, prev);
+
 	cur = list_pointer_unmask (get_hazardous_pointer ((gpointer*)prev, hp, 1));
 
 	while (1) {
@@ -202,7 +204,9 @@ mono_thread_info_insert (MonoThreadInfo *info)
 static gboolean
 mono_thread_info_remove (MonoThreadInfo *info)
 {
-	MonoThreadHazardPointers *hp = mono_hazard_pointer_get ();
+	/*TLS is gone by now, so we can't rely on it to retrieve hp*/
+	MonoThreadHazardPointers *hp = mono_hazard_pointer_get_by_id (info->small_id);
+	printf ("removing info %p\n", info);
 	gboolean res = list_remove (&thread_list, hp, info);
 	mono_hazard_pointer_clear_all (hp, -1);
 	return res;
@@ -224,6 +228,10 @@ static void*
 register_thread (MonoThreadInfo *info, gpointer baseptr)
 {
 	info->tid = pthread_self ();
+	info->small_id = mono_thread_small_id_alloc ();
+	info->thread_state = STATE_RUNNING;
+
+	printf ("registering info %p tid %p small id %x\n", info, info->tid, info->small_id);
 	pthread_mutex_init (&info->suspend_lock, NULL);
 	MONO_SEM_INIT (&info->suspend_semaphore, 0);
 	MONO_SEM_INIT (&info->resume_semaphore, 0);
@@ -247,9 +255,14 @@ static void
 unregister_thread (void *arg)
 {
 	MonoThreadInfo *info = arg;
+	int small_id = info->small_id;
+	MonoNativeThreadId tid = info->tid;
 	g_assert (info);
+
+	printf ("unregistering info %p\n", info);
+
 	pthread_mutex_lock (&info->suspend_lock);
-	info->tid = NULL;
+	info->thread_state = STATE_SHUTING_DOWN;
 	mono_memory_barrier (); /*signal we began to cleanup.*/
 
 	/* If a delegate is passed to native code and invoked on a thread we dont
@@ -264,6 +277,10 @@ unregister_thread (void *arg)
 	pthread_mutex_unlock (&info->suspend_lock);
 
 	g_assert (mono_thread_info_remove (info));
+	mono_thread_small_id_free (small_id);
+
+	info->thread_state = STATE_DEAD;
+	mono_memory_barrier ();
 }
 
 static void*
@@ -325,6 +342,8 @@ mono_threads_init (MonoThreadInfoCallbacks *callbacks, size_t info_size)
 	pthread_key_create (&thread_info_key, unregister_thread);
 
 	mono_posix_add_signal_handler (SIGUSR2, suspend_signal_handler);
+
+	mono_thread_smr_init ();
 }
 
 void
@@ -402,7 +421,7 @@ mono_thread_info_suspend_sync (MonoNativeThreadId tid)
 	pthread_mutex_lock (&info->suspend_lock);
 
 	/*thread is on the process of detaching*/
-	if (info->tid == NULL) {
+	if (info->thread_state > STATE_RUNNING) {
 		mono_hazard_pointer_clear (hp, 1);
 		return NULL;
 	}

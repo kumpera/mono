@@ -1108,7 +1108,7 @@ finalizer_thread (gpointer unused)
 }
 
 void
-mono_gc_init (void)
+mono_gc_init_before_threads (void)
 {
 	InitializeCriticalSection (&handle_section);
 	InitializeCriticalSection (&allocator_section);
@@ -1119,8 +1119,12 @@ mono_gc_init (void)
 	MONO_GC_REGISTER_ROOT_FIXED (gc_handles [HANDLE_NORMAL].entries);
 	MONO_GC_REGISTER_ROOT_FIXED (gc_handles [HANDLE_PINNED].entries);
 
-	mono_gc_base_init ();
+	mono_gc_base_init ();	
+}
 
+void
+mono_gc_init (void)
+{
 	if (mono_gc_is_disabled ()) {
 		gc_disabled = TRUE;
 		return;

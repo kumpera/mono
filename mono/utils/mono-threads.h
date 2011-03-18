@@ -36,6 +36,7 @@ enum {
 struct _MonoThreadInfo {
 	THREAD_INFO_TYPE *next; /*next thread in the hashtable*/
 	MonoNativeThreadId tid; /*threading kit id  (pthread_t on posix)*/
+	guint32 small_id; /*Used by hazard pointers */
 	int thread_state; /*must only be changed by the owner thread*/
 
 	/* suspend machinery, fields protected by the suspend_lock */

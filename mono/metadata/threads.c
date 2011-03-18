@@ -376,8 +376,9 @@ static void thread_cleanup (MonoInternalThread *thread)
 	if (mono_thread_cleanup_fn)
 		mono_thread_cleanup_fn (thread);
 
-	mono_thread_small_id_free (thread->small_id);
-	thread->small_id = -2;
+	//mono_thread_small_id_free (thread->small_id);
+	//thread->small_id = -2;
+	mono_gchandle_free (thread->pinning_handle);
 }
 
 static gpointer
@@ -717,7 +718,9 @@ MonoInternalThread* mono_thread_create_internal (MonoDomain *domain, gpointer fu
 	internal->handle=thread_handle;
 	internal->tid=tid;
 	internal->apartment_state=ThreadApartmentState_Unknown;
-	mono_thread_small_id_alloc (internal);
+	/*HACK to get around the small_id table been gone*/
+	internal->pinning_handle = mono_gchandle_new ((MonoObject*)internal, TRUE);
+	//mono_thread_small_id_alloc (internal);
 
 	internal->synch_cs = g_new0 (CRITICAL_SECTION, 1);
 	InitializeCriticalSection (internal->synch_cs);
@@ -839,7 +842,9 @@ mono_thread_attach (MonoDomain *domain)
 	thread->android_tid = (gpointer) gettid ();
 #endif
 	thread->apartment_state=ThreadApartmentState_Unknown;
-	mono_thread_small_id_alloc (thread);
+	/*HACK to get around the small_id table been gone*/
+	thread->pinning_handle = mono_gchandle_new ((MonoObject*)thread, TRUE);
+	//mono_thread_small_id_alloc (thread);
 	thread->stack_ptr = &tid;
 
 	thread->synch_cs = g_new0 (CRITICAL_SECTION, 1);
@@ -958,7 +963,7 @@ HANDLE ves_icall_System_Threading_Thread_Thread_internal(MonoThread *this,
 		return NULL;
 	}
 
-	internal->small_id = -1;
+	//internal->small_id = -1;
 
 	if ((internal->state & ThreadState_Aborted) != 0) {
 		LeaveCriticalSection (internal->synch_cs);
@@ -1004,7 +1009,9 @@ HANDLE ves_icall_System_Threading_Thread_Thread_internal(MonoThread *this,
 		
 		internal->handle=thread;
 		internal->tid=tid;
-		mono_thread_small_id_alloc (internal);
+		/*HACK to get around the small_id table been gone*/
+		internal->pinning_handle = mono_gchandle_new ((MonoObject*)internal, TRUE);
+		//mono_thread_small_id_alloc (internal);
 
 		/* Don't call handle_store() here, delay it to Start.
 		 * We can't join a thread (trying to will just block
@@ -2497,8 +2504,6 @@ ves_icall_System_Threading_Thread_VolatileWriteObject (void *ptr, void *value)
 void mono_thread_init (MonoThreadStartCB start_cb,
 		       MonoThreadAttachCB attach_cb)
 {
-	mono_thread_smr_init ();
-
 	InitializeCriticalSection(&threads_mutex);
 	InitializeCriticalSection(&interlocked_mutex);
 	InitializeCriticalSection(&contexts_mutex);

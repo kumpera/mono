@@ -95,7 +95,7 @@ extern void mono_gc_base_init (void) MONO_INTERNAL;
 extern void mono_gc_cleanup (void) MONO_INTERNAL;
 extern void mono_gc_enable (void) MONO_INTERNAL;
 extern void mono_gc_disable (void) MONO_INTERNAL;
-
+extern void mono_gc_init_before_threads (void) MONO_INTERNAL;
 /*
  * Return whenever the current thread is registered with the GC (i.e. started
  * by the GC pthread wrappers on unix.

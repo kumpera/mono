@@ -6,9 +6,11 @@
 
 #include <config.h>
 
-#include <mono/metadata/gc-internal.h>
+#include <mono/metadata/class-internals.h>
 #include <mono/utils/hazard-pointer.h>
+#include <mono/utils/mono-membar.h>
 #include <mono/utils/mono-mmap.h>
+#include <mono/utils/mono-threads.h>
 #include <mono/io-layer/io-layer.h>
 
 typedef struct {
@@ -36,7 +38,7 @@ static CRITICAL_SECTION small_id_mutex;
 static int small_id_table_size = 0;
 static int small_id_next = 0;
 static int highest_small_id = -1;
-static MonoInternalThread **small_id_table = NULL;
+static char *small_id_table = NULL;
 
 /*
  * Allocate a small thread id.
@@ -45,7 +47,7 @@ static MonoInternalThread **small_id_table = NULL;
  * domain_id_alloc() in domain.c and should be merged.
  */
 int
-mono_thread_small_id_alloc (MonoInternalThread *thread)
+mono_thread_small_id_alloc (void)
 {
 	int id = -1, i;
 
@@ -53,12 +55,8 @@ mono_thread_small_id_alloc (MonoInternalThread *thread)
 
 	if (!small_id_table) {
 		small_id_table_size = 2;
-		/* 
-		 * Enabling this causes problems, because SGEN doesn't track/update the TLS slot holding
-		 * the current thread.
-		 */
-		//small_id_table = mono_gc_alloc_fixed (small_id_table_size * sizeof (MonoInternalThread*), mono_gc_make_root_descr_all_refs (small_id_table_size));
-		small_id_table = mono_gc_alloc_fixed (small_id_table_size * sizeof (MonoInternalThread*), NULL);
+
+		small_id_table = g_malloc0 (small_id_table_size * sizeof (char));
 	}
 	for (i = small_id_next; i < small_id_table_size; ++i) {
 		if (!small_id_table [i]) {
@@ -75,21 +73,20 @@ mono_thread_small_id_alloc (MonoInternalThread *thread)
 		}
 	}
 	if (id == -1) {
-		MonoInternalThread **new_table;
+		char *new_table;
 		int new_size = small_id_table_size * 2;
 		if (new_size >= (1 << 16))
 			g_assert_not_reached ();
 		id = small_id_table_size;
 		//new_table = mono_gc_alloc_fixed (new_size * sizeof (MonoInternalThread*), mono_gc_make_root_descr_all_refs (new_size));
-		new_table = mono_gc_alloc_fixed (new_size * sizeof (MonoInternalThread*), NULL);
-		memcpy (new_table, small_id_table, small_id_table_size * sizeof (void*));
-		mono_gc_free_fixed (small_id_table);
+		new_table = g_malloc0 (new_size * sizeof (char));
+		memcpy (new_table, small_id_table, small_id_table_size * sizeof (char));
+		g_free (small_id_table);
 		small_id_table = new_table;
 		small_id_table_size = new_size;
 	}
-	thread->small_id = id;
-	g_assert (small_id_table [id] == NULL);
-	small_id_table [id] = thread;
+	g_assert (small_id_table [id] == 0);
+	small_id_table [id] = 1;
 	small_id_next++;
 	if (small_id_next > small_id_table_size)
 		small_id_next = 0;
@@ -120,8 +117,8 @@ mono_thread_small_id_alloc (MonoInternalThread *thread)
 
 #endif
 		g_assert (id < hazard_table_size);
-		hazard_table [id].hazard_pointers [0] = NULL;
-		hazard_table [id].hazard_pointers [1] = NULL;
+		for (i = 0; i < HAZARD_POINTER_COUNT; ++i)
+			hazard_table [id].hazard_pointers [i] = NULL;
 	}
 
 	if (id > highest_small_id) {
@@ -138,9 +135,9 @@ void
 mono_thread_small_id_free (int id)
 {
 	g_assert (id >= 0 && id < small_id_table_size);
-	g_assert (small_id_table [id] != NULL);
+	g_assert (small_id_table [id] != 0);
 
-	small_id_table [id] = NULL;
+	small_id_table [id] = 0;
 }
 
 static gboolean
@@ -163,7 +160,7 @@ is_pointer_hazardous (gpointer p)
 MonoThreadHazardPointers*
 mono_hazard_pointer_get (void)
 {
-	MonoInternalThread *current_thread = mono_thread_internal_current ();
+	MonoThreadInfo *current_thread = mono_thread_info_current ();
 
 	if (!(current_thread && current_thread->small_id >= 0)) {
 		static MonoThreadHazardPointers emerg_hazard_table;
@@ -172,6 +169,13 @@ mono_hazard_pointer_get (void)
 	}
 
 	return &hazard_table [current_thread->small_id];
+}
+
+MonoThreadHazardPointers*
+mono_hazard_pointer_get_by_id (int small_id)
+{
+	g_assert (small_id >= 0 && small_id <= highest_small_id);
+	return &hazard_table [small_id];
 }
 
 /* Can be called with hp==NULL, in which case it acts as an ordinary
@@ -271,8 +275,6 @@ mono_thread_hazardous_try_free_all (void)
 void
 mono_thread_smr_init (void)
 {
-	MONO_GC_REGISTER_ROOT_FIXED (small_id_table);
-
 	InitializeCriticalSection(&delayed_free_table_mutex);
 	InitializeCriticalSection(&small_id_mutex);	
 
@@ -286,5 +288,4 @@ mono_thread_smr_cleanup (void)
 
 	g_array_free (delayed_free_table, TRUE);
 	delayed_free_table = NULL;
-	
 }

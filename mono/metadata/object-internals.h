@@ -398,7 +398,7 @@ struct _MonoInternalThread {
 	MonoBoolean thread_interrupt_requested;
 	guint8	apartment_state;
 	gint32 critical_region_level;
-	guint32 small_id; /* A small, unique id, used for the hazard pointer table. */
+	guint32 pinning_handle; /*Until we make sgen scan TLS, this has to exist*/
 	MonoThreadManageCallback manage_callback;
 	MonoException *pending_exception;
 	MonoThread *root_domain_thread;

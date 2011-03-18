@@ -222,7 +222,7 @@ mono_runtime_init (MonoDomain *domain, MonoThreadStartCB start_cb,
 
 	mono_portability_helpers_init ();
 	
-	mono_gc_base_init ();
+	mono_gc_init_before_threads ();
 	mono_monitor_init ();
 	mono_thread_pool_init ();
 	mono_marshal_init ();
