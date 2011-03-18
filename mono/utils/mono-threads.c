@@ -27,11 +27,6 @@ typedef struct {
 	MonoSemType registered;
 } ThreadStartInfo;
 
-typedef struct {
-	MonoThreadInfo *info;
-	void *baseptr;
-} RegisterInfo;
-
 static int thread_info_size;
 static MonoThreadInfoCallbacks threads_callbacks;
 static MonoThreadInfoRuntimeCallbacks runtime_callbacks;
@@ -226,19 +221,16 @@ free_thread_info (gpointer mem)
 }
 
 static void*
-register_thread (void *arg)
+register_thread (MonoThreadInfo *info, gpointer baseptr)
 {
-	RegisterInfo *reginfo = arg;
-	MonoThreadInfo *info = reginfo->info;
-
 	info->tid = pthread_self ();
 	pthread_mutex_init (&info->suspend_lock, NULL);
 	MONO_SEM_INIT (&info->suspend_semaphore, 0);
 	MONO_SEM_INIT (&info->resume_semaphore, 0);
 
 	if (threads_callbacks.thread_register) {
-		if (threads_callbacks.thread_register (info, reginfo->baseptr) == NULL) {
-			printf ("register failed'\n");
+		if (threads_callbacks.thread_register (info, baseptr) == NULL) {
+			g_warning ("thread registation failed\n");
 			g_free (info);
 			return NULL;
 		}
@@ -277,7 +269,6 @@ unregister_thread (void *arg)
 static void*
 inner_start_thread (void *arg)
 {
-	RegisterInfo reginfo;
 	ThreadStartInfo *start_info = arg;
 	MonoThreadInfo* info;
 	void *t_arg = start_info->arg;
@@ -285,12 +276,9 @@ inner_start_thread (void *arg)
 	void *result;
 	int post_result;
 
-	info = malloc (thread_info_size);
-	memset (info, 0, thread_info_size);
+	info = g_malloc0 (thread_info_size);
 
-	reginfo.info = info;
-	reginfo.baseptr = &post_result;
-	register_thread (&reginfo);
+	register_thread (info, &post_result);
 
 	post_result = MONO_SEM_POST (&(start_info->registered));
 	g_assert (!post_result);
@@ -304,11 +292,9 @@ MonoThreadInfo*
 mono_thread_info_attach (void *baseptr)
 {
 	MonoThreadInfo *info = pthread_getspecific (thread_info_key);
-	RegisterInfo reginfo = { info, baseptr };
 	if (!info) {
-		reginfo.info = info = malloc (thread_info_size);
-		memset (info, 0, thread_info_size);
-		if (!register_thread (&reginfo))
+		info = g_malloc0 (thread_info_size);
+		if (!register_thread (info, baseptr))
 			return NULL;
 	} else if (threads_callbacks.thread_attach) {
 		threads_callbacks.thread_attach (info);
@@ -353,7 +339,7 @@ mono_threads_pthread_create (pthread_t *new_thread, const pthread_attr_t *attr, 
 	ThreadStartInfo *start_info;
 	int result;
 
-	start_info = malloc (sizeof (ThreadStartInfo));
+	start_info = g_malloc0 (sizeof (ThreadStartInfo));
 	if (!start_info)
 		return ENOMEM;
 	MONO_SEM_INIT (&(start_info->registered), 0);
@@ -367,7 +353,7 @@ mono_threads_pthread_create (pthread_t *new_thread, const pthread_attr_t *attr, 
 		}
 	}
 	MONO_SEM_DESTROY (&(start_info->registered));
-	free (start_info);
+	g_free (start_info);
 	return result;
 }
 
