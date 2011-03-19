@@ -67,6 +67,7 @@ static void restore_stack_protection (void);
 static void mono_walk_stack_full (MonoJitStackWalk func, MonoContext *start_ctx, MonoDomain *domain, MonoJitTlsData *jit_tls, MonoLMF *lmf, MonoUnwindOptions unwind_options, gpointer user_data);
 static void mono_raise_exception_with_ctx (MonoException *exc, MonoContext *ctx);
 static void mono_runtime_walk_stack_with_ctx (MonoJitStackWalk func, MonoContext *start_ctx, MonoUnwindOptions unwind_options, void *user_data);
+static gboolean mono_install_handler_block_guard (MonoThreadUnwindState *unwind_state);
 
 void
 mono_exceptions_init (void)
@@ -113,6 +114,7 @@ mono_exceptions_init (void)
 	cbs.mono_walk_stack_with_state = mono_walk_stack_with_state;
 	cbs.mono_raise_exception = mono_get_throw_exception ();
 	cbs.mono_raise_exception_with_ctx = mono_raise_exception_with_ctx;
+	cbs.mono_install_handler_block_guard = mono_install_handler_block_guard;
 	mono_install_eh_callbacks (&cbs);
 }
 
@@ -2459,13 +2461,18 @@ install_handler_block_guard (MonoJitInfo *ji, MonoContext *ctx)
 
 /*
  * Finds the bottom handler block running and install a block guard if needed.
+ * FIXME add full-aot support.
  */
-gboolean
-mono_install_handler_block_guard (MonoInternalThread *thread, MonoContext *ctx)
+static gboolean
+mono_install_handler_block_guard (MonoThreadUnwindState *unwind_state)
 {
 	FindHandlerBlockData data = { 0 };
-	MonoJitTlsData *jit_tls = TlsGetValue (mono_jit_tls_id);
+	MonoJitTlsData *jit_tls = unwind_state->unwind_data [MONO_UNWIND_DATA_JIT_TLS];
 	gpointer resume_ip;
+
+	/* FIXME */
+	if (mono_aot_only)
+		return FALSE;
 
 	/* Guard against a null MonoJitTlsData. This can happens if the thread receives the
          * interrupt signal before the JIT has time to initialize its TLS data for the given thread.
@@ -2473,7 +2480,7 @@ mono_install_handler_block_guard (MonoInternalThread *thread, MonoContext *ctx)
 	if (!jit_tls || jit_tls->handler_block_return_address)
 		return FALSE;
 
-	mono_walk_stack_with_ctx (find_last_handler_block, ctx, MONO_UNWIND_SIGNAL_SAFE, &data);
+	mono_walk_stack_with_ctx (find_last_handler_block, &unwind_state->ctx, MONO_UNWIND_SIGNAL_SAFE, &data);
 
 	if (!data.ji)
 		return FALSE;
@@ -2487,16 +2494,12 @@ mono_install_handler_block_guard (MonoInternalThread *thread, MonoContext *ctx)
 	jit_tls->handler_block_return_address = resume_ip;
 	jit_tls->handler_block = data.ei;
 
-#ifndef HOST_WIN32
-	/*Clear current thread from been wapi interrupted otherwise things can go south*/
-	wapi_clear_interruption ();
-#endif
 	return TRUE;
 }
 
 #else
-gboolean
-mono_install_handler_block_guard (MonoInternalThread *thread, MonoContext *ctx)
+static gboolean
+mono_install_handler_block_guard (MonoThreadUnwindState *unwind_state)
 {
 	return FALSE;
 }

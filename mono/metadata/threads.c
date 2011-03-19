@@ -2131,7 +2131,7 @@ static void signal_thread_state_change (MonoInternalThread *thread)
 			g_warning ("failed to suspend the target, hoefully it is dead");
 			return;
 		}
-		/*WARNING: We now are in signal context until we resume the thread. */
+		/*WARNING: We now are in interrupt context until we resume the thread. */
 		if (!is_thread_in_critical_region (info, &ji))
 			break;
 		printf ("method in critical region, resuming\n");
@@ -2139,6 +2139,13 @@ static void signal_thread_state_change (MonoInternalThread *thread)
 		Sleep (1);
 	}
 
+	if (mono_get_eh_callbacks ()->mono_install_handler_block_guard (&info->suspend_state)) {
+		printf (">>>>thread needs guard<<<<\n");
+		mono_thread_info_resume (info->tid);
+		return;
+	}
+
+	/*FIXME we need to implement the is_running_protected_wrapper thingy here*/
 	/*Figure out where the thread is*/
 	gboolean running_managed = mono_jit_info_match (ji, MONO_CONTEXT_GET_IP (&info->suspend_state.ctx));
 
