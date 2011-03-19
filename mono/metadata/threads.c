@@ -376,9 +376,8 @@ static void thread_cleanup (MonoInternalThread *thread)
 	if (mono_thread_cleanup_fn)
 		mono_thread_cleanup_fn (thread);
 
-	//mono_thread_small_id_free (thread->small_id);
 	//thread->small_id = -2;
-	mono_gchandle_free (thread->pinning_handle);
+	MONO_GC_UNREGISTER_ROOT (thread->thread_pinning_ref);
 }
 
 static gpointer
@@ -719,8 +718,8 @@ MonoInternalThread* mono_thread_create_internal (MonoDomain *domain, gpointer fu
 	internal->tid=tid;
 	internal->apartment_state=ThreadApartmentState_Unknown;
 	/*HACK to get around the small_id table been gone*/
-	internal->pinning_handle = mono_gchandle_new ((MonoObject*)internal, TRUE);
-	//mono_thread_small_id_alloc (internal);
+	internal->thread_pinning_ref = internal;
+	MONO_GC_REGISTER_ROOT (internal->thread_pinning_ref);
 
 	internal->synch_cs = g_new0 (CRITICAL_SECTION, 1);
 	InitializeCriticalSection (internal->synch_cs);
@@ -843,8 +842,8 @@ mono_thread_attach (MonoDomain *domain)
 #endif
 	thread->apartment_state=ThreadApartmentState_Unknown;
 	/*HACK to get around the small_id table been gone*/
-	thread->pinning_handle = mono_gchandle_new ((MonoObject*)thread, TRUE);
-	//mono_thread_small_id_alloc (thread);
+	thread->thread_pinning_ref = thread;
+	MONO_GC_REGISTER_ROOT (thread->thread_pinning_ref);
 	thread->stack_ptr = &tid;
 
 	thread->synch_cs = g_new0 (CRITICAL_SECTION, 1);
@@ -1010,7 +1009,9 @@ HANDLE ves_icall_System_Threading_Thread_Thread_internal(MonoThread *this,
 		internal->handle=thread;
 		internal->tid=tid;
 		/*HACK to get around the small_id table been gone*/
-		internal->pinning_handle = mono_gchandle_new ((MonoObject*)internal, TRUE);
+		internal->thread_pinning_ref = internal;
+		MONO_GC_REGISTER_ROOT (internal->thread_pinning_ref);
+
 		//mono_thread_small_id_alloc (internal);
 
 		/* Don't call handle_store() here, delay it to Start.

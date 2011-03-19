@@ -398,18 +398,18 @@ struct _MonoInternalThread {
 	MonoBoolean thread_interrupt_requested;
 	guint8	apartment_state;
 	gint32 critical_region_level;
-	guint32 pinning_handle; /*Until we make sgen scan TLS, this has to exist*/
+	guint32 unused0; /*Until we make sgen scan TLS, this has to exist*/
 	MonoThreadManageCallback manage_callback;
 	MonoException *pending_exception;
 	MonoThread *root_domain_thread;
 	gpointer interrupt_on_stop;
 	gsize    flags;
 	gpointer android_tid;
+	gpointer thread_pinning_ref;
 	/* 
 	 * These fields are used to avoid having to increment corlib versions
 	 * when a new field is added to the unmanaged MonoThread structure.
 	 */
-	gpointer unused5;
 	gpointer unused6;
 };
 
