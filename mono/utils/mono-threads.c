@@ -256,7 +256,6 @@ unregister_thread (void *arg)
 {
 	MonoThreadInfo *info = arg;
 	int small_id = info->small_id;
-	MonoNativeThreadId tid = info->tid;
 	g_assert (info);
 
 	printf ("unregistering info %p\n", info);
