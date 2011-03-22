@@ -1849,22 +1849,6 @@ mono_handle_exception (MonoContext *ctx, gpointer obj, gpointer original_ip, gbo
 	return mono_handle_exception_internal (ctx, obj, original_ip, FALSE, NULL);
 }
 
-static void
-mono_handle_exception_with_context (MonoException *obj, void *mctx)
-{
-	MonoContext *ctx = mctx;
-	static void (*restore_context) (MonoContext *);
-
-	if (mono_debugger_handle_exception (ctx, (MonoObject *)obj))
-		return;
-
-	mono_handle_exception (ctx, obj, MONO_CONTEXT_GET_IP (ctx), FALSE);
-	if (!restore_context)
-		restore_context = mono_get_restore_context ();
-
-	restore_context (ctx);
-}
-
 #ifdef MONO_ARCH_SIGSEGV_ON_ALTSTACK
 
 #ifndef MONO_ARCH_USE_SIGACTION
@@ -2480,7 +2464,7 @@ mono_install_handler_block_guard (MonoThreadUnwindState *unwind_state)
 	if (!jit_tls || jit_tls->handler_block_return_address)
 		return FALSE;
 
-	mono_walk_stack_with_ctx (find_last_handler_block, &unwind_state->ctx, MONO_UNWIND_SIGNAL_SAFE, &data);
+	mono_walk_stack_with_state (find_last_handler_block, unwind_state, MONO_UNWIND_SIGNAL_SAFE, &data);
 
 	if (!data.ji)
 		return FALSE;

@@ -2120,11 +2120,6 @@ static void signal_thread_state_change (MonoInternalThread *thread)
 	QueueUserAPC ((PAPCFUNC)interruption_request_apc, thread->handle, NULL);
 #else
 
-	/*someone is already interrupting it*/
-	if (InterlockedCompareExchange (&thread->interruption_requested, 1, 0) == 1)
-		return;
-	
-
 	/*FIXME we need to check 2 conditions here, request to interrupt this thread or if the target died*/
 	for (;;) {
 		if (!(info = mono_thread_info_suspend_sync ((pthread_t)(gpointer)(gsize)thread->tid))) {
