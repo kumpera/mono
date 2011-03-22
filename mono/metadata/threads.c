@@ -2140,6 +2140,12 @@ static void signal_thread_state_change (MonoInternalThread *thread)
 		return;
 	}
 
+	/*someone is already interrupting it*/
+	if (InterlockedCompareExchange (&thread->interruption_requested, 1, 0) == 1) {
+		mono_thread_info_resume (info->tid);
+		return;
+	}
+
 	/*FIXME we need to implement the is_running_protected_wrapper thingy here*/
 	/*Figure out where the thread is*/
 	gboolean running_managed = mono_jit_info_match (ji, MONO_CONTEXT_GET_IP (&info->suspend_state.ctx));
