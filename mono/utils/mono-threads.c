@@ -219,6 +219,7 @@ free_thread_info (gpointer mem)
 
 	MONO_SEM_DESTROY (&info->resume_semaphore);
 	MONO_SEM_DESTROY (&info->suspend_semaphore);
+	MONO_SEM_DESTROY (&info->finish_resume_semaphore);
 	pthread_mutex_destroy (&info->suspend_lock);
 
 	g_free (info);
@@ -235,6 +236,7 @@ register_thread (MonoThreadInfo *info, gpointer baseptr)
 	pthread_mutex_init (&info->suspend_lock, NULL);
 	MONO_SEM_INIT (&info->suspend_semaphore, 0);
 	MONO_SEM_INIT (&info->resume_semaphore, 0);
+	MONO_SEM_INIT (&info->finish_resume_semaphore, 0);
 
 	if (threads_callbacks.thread_register) {
 		if (threads_callbacks.thread_register (info, baseptr) == NULL) {
@@ -394,6 +396,8 @@ suspend_signal_handler (int _dummy, siginfo_t *info, void *context)
 		runtime_callbacks.setup_async_callback (&tmp, current->async_target, current->user_data);
 		mono_monoctx_to_sigctx (&tmp, context);
 	}
+	MONO_SEM_POST (&current->finish_resume_semaphore);
+	printf ("RESUMING %p\n", current->async_target);
 }
 
 void
@@ -472,11 +476,12 @@ mono_thread_info_resume (MonoNativeThreadId tid)
 
 	if (--info->suspend_count == 0) {
 		MONO_SEM_POST (&info->resume_semaphore);
-		/*sync resume*/
-		while (MONO_SEM_WAIT (&info->resume_semaphore) != 0) {
-			/*if (EINTR != errno) ABORT("sem_wait failed"); */
+		while (MONO_SEM_WAIT (&info->finish_resume_semaphore) != 0) {
+			g_assert (errno == EINTR);
 		}
 	}
+
+
 	pthread_mutex_unlock (&info->suspend_lock);
 	mono_hazard_pointer_clear (hp, 1);
 

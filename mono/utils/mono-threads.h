@@ -44,6 +44,7 @@ struct _MonoThreadInfo {
 	int suspend_count;
 	MonoSemType suspend_semaphore;
 	MonoSemType resume_semaphore;
+	MonoSemType finish_resume_semaphore;
 
 	/*Only needed on posix, only valid if the thread finished suspending*/
 	MonoThreadUnwindState suspend_state;
