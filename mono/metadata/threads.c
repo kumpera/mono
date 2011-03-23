@@ -2438,7 +2438,7 @@ mono_thread_resume (MonoInternalThread *thread)
 	/* Awake the thread */
 	mono_thread_info_resume ((pthread_t)(gpointer)(gsize)thread->tid);
 	EnterCriticalSection (thread->synch_cs);
-	thread->state &= ~ThreadState_SuspendRequested;
+	thread->state &= ~ThreadState_Suspended;
 	LeaveCriticalSection (thread->synch_cs);
 
 	/* Wait for the thread to awake */
