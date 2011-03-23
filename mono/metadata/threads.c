@@ -2193,6 +2193,7 @@ abort_thread_internal (MonoInternalThread *thread, gboolean can_raise_exception,
  */
 static void signal_thread_state_change (MonoInternalThread *thread)
 {
+	g_assert (0);
 	/*
 	FIXME this is insanely broken, it doesn't cause interruption to happen
 	synchronously since passing FALSE to mono_thread_request_interruption makes sure it returns NULL
