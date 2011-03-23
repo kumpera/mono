@@ -187,6 +187,7 @@ static guint32 mono_alloc_static_data_slot (StaticDataInfo *static_data, guint32
 static gboolean mono_thread_resume (MonoInternalThread* thread);
 static void mono_thread_start (MonoThread *thread);
 static void signal_thread_state_change (MonoInternalThread *thread);
+static void abort_thread_internal (MonoInternalThread *thread, gboolean can_raise_exception, gboolean install_async_abort);
 
 static MonoException* mono_thread_execute_interruption (MonoInternalThread *thread);
 static void ref_stack_destroy (gpointer rs);
@@ -1966,7 +1967,7 @@ void ves_icall_System_Threading_Thread_Interrupt_internal (MonoInternalThread *t
 	LeaveCriticalSection (this->synch_cs);
 	
 	if (throw) {
-		signal_thread_state_change (this);
+		abort_thread_internal (this, TRUE, FALSE);
 	}
 }
 
@@ -2099,13 +2100,10 @@ mono_jit_info_match (MonoJitInfo *ji, gpointer ip)
 		return FALSE;
 	return ji->code_start <= ip && (char*)ip < (char*)ji->code_start + ji->code_size;
 }
-/*
- * signal_thread_state_change
- *
- * Tells the thread that his state has changed and it has to enter the new
- * state as soon as possible.
- */
-static void signal_thread_state_change (MonoInternalThread *thread)
+
+
+static void 
+abort_thread_internal (MonoInternalThread *thread, gboolean can_raise_exception, gboolean install_async_abort)
 {
 	MonoJitInfo *ji;
 	MonoThreadInfo *info = NULL;
@@ -2116,7 +2114,7 @@ static void signal_thread_state_change (MonoInternalThread *thread)
 	*/
 	if (thread == mono_thread_internal_current ()) {
 		/* Do it synchronously */
-		MonoException *exc = mono_thread_request_interruption (FALSE); 
+		MonoException *exc = mono_thread_request_interruption (can_raise_exception); 
 		if (exc)
 			mono_raise_exception (exc);
 		wapi_interrupt_thread (thread->handle);
@@ -2161,7 +2159,8 @@ static void signal_thread_state_change (MonoInternalThread *thread)
 		/*We are in managed code*/
 		/*Set the thread to call */
 		printf ("in managed land \n");
-		mono_thread_info_setup_async_call (info, self_interrupt_thread, NULL);
+		if (install_async_abort)
+			mono_thread_info_setup_async_call (info, self_interrupt_thread, NULL);
 		mono_thread_info_resume ((pthread_t)(gpointer)(gsize)thread->tid);
 	} else {
 		printf ("not in managed land \n");
@@ -2177,9 +2176,42 @@ static void signal_thread_state_change (MonoInternalThread *thread)
 		wapi_interrupt_thread (thread->handle);
 	}
 	/*FIXME we need to wait for interruption to complete -- figure out how much into interruption we should wait for here*/
+#endif /* HOST_WIN32 */
+}
 
-	//mono_thread_kill (thread, mono_thread_get_abort_signal ());
+/*
+ * signal_thread_state_change
+ *
+ * Tells the thread that his state has changed and it has to enter the new
+ * state as soon as possible.
+ */
+static void signal_thread_state_change (MonoInternalThread *thread)
+{
+	/*
+	FIXME this is insanely broken, it doesn't cause interruption to happen
+	synchronously since passing FALSE to mono_thread_request_interruption makes sure it returns NULL
+	*/
+	if (thread == mono_thread_internal_current ()) {
+		/* Do it synchronously */
+		MonoException *exc = mono_thread_request_interruption (FALSE); 
+		if (exc)
+			mono_raise_exception (exc);
+	}
 
+#ifdef HOST_WIN32
+	QueueUserAPC ((PAPCFUNC)interruption_request_apc, thread->handle, NULL);
+#else
+	/* fixme: store the state somewhere */
+	mono_thread_kill (thread, mono_thread_get_abort_signal ());
+
+	/* 
+	 * This will cause waits to be broken.
+	 * It will also prevent the thread from entering a wait, so if the thread returns
+	 * from the wait before it receives the abort signal, it will just spin in the wait
+	 * functions in the io-layer until the signal handler calls QueueUserAPC which will
+	 * make it return.
+	 */
+	wapi_interrupt_thread (thread->handle);
 #endif /* HOST_WIN32 */
 }
 
@@ -2232,7 +2264,7 @@ ves_icall_System_Threading_Thread_Abort (MonoInternalThread *thread, MonoObject 
 		/* Make sure the thread is awake */
 		mono_thread_resume (thread);
 
-	signal_thread_state_change (thread);
+	abort_thread_internal (thread, TRUE, TRUE);
 }
 
 void
