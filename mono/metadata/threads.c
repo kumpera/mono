@@ -188,6 +188,7 @@ static gboolean mono_thread_resume (MonoInternalThread* thread);
 static void mono_thread_start (MonoThread *thread);
 static void signal_thread_state_change (MonoInternalThread *thread);
 static void abort_thread_internal (MonoInternalThread *thread, gboolean can_raise_exception, gboolean install_async_abort);
+static MonoThreadInfo* suspend_thread_internal (MonoInternalThread *thread, MonoJitInfo **out_ji);
 
 static MonoException* mono_thread_execute_interruption (MonoInternalThread *thread);
 static void ref_stack_destroy (gpointer rs);
@@ -2101,6 +2102,27 @@ mono_jit_info_match (MonoJitInfo *ji, gpointer ip)
 	return ji->code_start <= ip && (char*)ip < (char*)ji->code_start + ji->code_size;
 }
 
+static MonoThreadInfo*
+suspend_thread_internal (MonoInternalThread *thread, MonoJitInfo **out_ji)
+{
+	MonoJitInfo *ji = NULL;
+	MonoThreadInfo *info = NULL;
+	for (;;) {
+		if (!(info = mono_thread_info_suspend_sync ((pthread_t)(gpointer)(gsize)thread->tid))) {
+			g_warning ("failed to suspend the target, hoefully it is dead");
+			return NULL;
+		}
+		/*WARNING: We now are in interrupt context until we resume the thread. */
+		if (!is_thread_in_critical_region (info, &ji))
+			break;
+		printf ("method in critical region, resuming\n");
+		mono_thread_info_resume ((pthread_t)(gpointer)(gsize)thread->tid);
+		Sleep (1);
+	}
+	if (out_ji)
+		*out_ji = ji;
+	return info;
+}
 
 static void 
 abort_thread_internal (MonoInternalThread *thread, gboolean can_raise_exception, gboolean install_async_abort)
@@ -2126,18 +2148,8 @@ abort_thread_internal (MonoInternalThread *thread, gboolean can_raise_exception,
 #else
 
 	/*FIXME we need to check 2 conditions here, request to interrupt this thread or if the target died*/
-	for (;;) {
-		if (!(info = mono_thread_info_suspend_sync ((pthread_t)(gpointer)(gsize)thread->tid))) {
-			g_warning ("failed to suspend the target, hoefully it is dead");
-			return;
-		}
-		/*WARNING: We now are in interrupt context until we resume the thread. */
-		if (!is_thread_in_critical_region (info, &ji))
-			break;
-		printf ("method in critical region, resuming\n");
-		mono_thread_info_resume ((pthread_t)(gpointer)(gsize)thread->tid);
-		Sleep (1);
-	}
+	if (!(info = suspend_thread_internal (thread, &ji)))
+		return;
 
 	if (mono_get_eh_callbacks ()->mono_install_handler_block_guard (&info->suspend_state)) {
 		printf (">>>>thread needs guard<<<<\n");
@@ -2371,7 +2383,18 @@ mono_thread_suspend (MonoInternalThread *thread)
 
 	LeaveCriticalSection (thread->synch_cs);
 
-	signal_thread_state_change (thread);
+	suspend_thread_internal (thread, NULL);
+
+	EnterCriticalSection (thread->synch_cs);
+	if ((thread->state & ThreadState_SuspendRequested) == 0) {
+		/*Make sure we balance the suspend count.*/
+		mono_thread_info_resume ((pthread_t)(gpointer)(gsize)thread->tid);
+	} else {
+		thread->state &= ~ThreadState_SuspendRequested;
+		thread->state |= ThreadState_Suspended;
+	}
+	LeaveCriticalSection (thread->synch_cs);
+
 	return TRUE;
 }
 
@@ -2403,22 +2426,25 @@ mono_thread_resume (MonoInternalThread *thread)
 		LeaveCriticalSection (thread->synch_cs);
 		return FALSE;
 	}
-	
-	thread->resume_event = CreateEvent (NULL, TRUE, FALSE, NULL);
-	if (thread->resume_event == NULL) {
-		LeaveCriticalSection (thread->synch_cs);
-		return(FALSE);
-	}
-	
-	/* Awake the thread */
-	SetEvent (thread->suspend_event);
 
 	LeaveCriticalSection (thread->synch_cs);
 
+//	thread->resume_event = CreateEvent (NULL, TRUE, FALSE, NULL);
+//	if (thread->resume_event == NULL) {
+//		LeaveCriticalSection (thread->synch_cs);
+//		return(FALSE);
+//	}
+	
+	/* Awake the thread */
+	mono_thread_info_resume ((pthread_t)(gpointer)(gsize)thread->tid);
+	EnterCriticalSection (thread->synch_cs);
+	thread->state &= ~ThreadState_SuspendRequested;
+	LeaveCriticalSection (thread->synch_cs);
+
 	/* Wait for the thread to awake */
-	WaitForSingleObject (thread->resume_event, INFINITE);
-	CloseHandle (thread->resume_event);
-	thread->resume_event = NULL;
+//	WaitForSingleObject (thread->resume_event, INFINITE);
+//	CloseHandle (thread->resume_event);
+//	thread->resume_event = NULL;
 
 	return TRUE;
 }
@@ -4016,6 +4042,7 @@ static MonoException* mono_thread_execute_interruption (MonoInternalThread *thre
 		return thread->abort_exc;
 	}
 	else if ((thread->state & ThreadState_SuspendRequested) != 0) {
+		g_assert (0); /*this must happen thru the new machinery*/
 		thread->state &= ~ThreadState_SuspendRequested;
 		thread->state |= ThreadState_Suspended;
 		thread->suspend_event = CreateEvent (NULL, TRUE, FALSE, NULL);

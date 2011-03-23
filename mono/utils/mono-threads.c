@@ -387,6 +387,7 @@ suspend_signal_handler (int _dummy, siginfo_t *info, void *context)
 	while (MONO_SEM_WAIT (&current->resume_semaphore) != 0) {
 		/*if (EINTR != errno) ABORT("sem_wait failed"); */
 	}
+	MONO_SEM_POST (&current->resume_semaphore);
 
 	if (current->async_target) {
 		MonoContext tmp = current->suspend_state.ctx;
@@ -425,6 +426,8 @@ mono_thread_info_suspend_sync (MonoNativeThreadId tid)
 		return NULL;
 	}
 
+	printf ("suspend %x IN COUNT %d\n", tid, info->suspend_count);
+
 	if (info->suspend_count) {
 		++info->suspend_count;
 		mono_hazard_pointer_clear (hp, 1);
@@ -453,6 +456,8 @@ mono_thread_info_resume (MonoNativeThreadId tid)
 
 	pthread_mutex_lock (&info->suspend_lock);
 
+	printf ("resume %x IN COUNT %d\n",tid, info->suspend_count);
+
 	if (info->suspend_count <= 0) {
 		pthread_mutex_unlock (&info->suspend_lock);
 		mono_hazard_pointer_clear (hp, 1);
@@ -465,9 +470,13 @@ mono_thread_info_resume (MonoNativeThreadId tid)
 	*/
 	g_assert (info->tid);
 
-	if (--info->suspend_count == 0)
+	if (--info->suspend_count == 0) {
 		MONO_SEM_POST (&info->resume_semaphore);
-
+		/*sync resume*/
+		while (MONO_SEM_WAIT (&info->resume_semaphore) != 0) {
+			/*if (EINTR != errno) ABORT("sem_wait failed"); */
+		}
+	}
 	pthread_mutex_unlock (&info->suspend_lock);
 	mono_hazard_pointer_clear (hp, 1);
 
