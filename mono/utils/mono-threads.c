@@ -18,7 +18,8 @@
 #include <pthread.h>
 #include <errno.h>
 
-/*FIXME make this possibly larger and allow for some rehashing*/
+#define THREADS_DEBUG(...)
+//#define THREADS_DEBUG(...) g_message(__VA_ARGS__)
 
 typedef struct {
 	void *(*start_routine) (void *);
@@ -206,7 +207,7 @@ mono_thread_info_remove (MonoThreadInfo *info)
 {
 	/*TLS is gone by now, so we can't rely on it to retrieve hp*/
 	MonoThreadHazardPointers *hp = mono_hazard_pointer_get_by_id (info->small_id);
-	printf ("removing info %p\n", info);
+	THREADS_DEBUG ("removing info %p\n", info);
 	gboolean res = list_remove (&thread_list, hp, info);
 	mono_hazard_pointer_clear_all (hp, -1);
 	return res;
@@ -232,7 +233,7 @@ register_thread (MonoThreadInfo *info, gpointer baseptr)
 	info->small_id = mono_thread_small_id_alloc ();
 	info->thread_state = STATE_RUNNING;
 
-	printf ("registering info %p tid %p small id %x\n", info, info->tid, info->small_id);
+	THREADS_DEBUG ("registering info %p tid %p small id %x\n", info, info->tid, info->small_id);
 	pthread_mutex_init (&info->suspend_lock, NULL);
 	MONO_SEM_INIT (&info->suspend_semaphore, 0);
 	MONO_SEM_INIT (&info->resume_semaphore, 0);
@@ -260,7 +261,7 @@ unregister_thread (void *arg)
 	int small_id = info->small_id;
 	g_assert (info);
 
-	printf ("unregistering info %p\n", info);
+	THREADS_DEBUG ("unregistering info %p\n", info);
 
 	pthread_mutex_lock (&info->suspend_lock);
 	info->thread_state = STATE_SHUTING_DOWN;
@@ -382,7 +383,7 @@ suspend_signal_handler (int _dummy, siginfo_t *info, void *context)
 {
 	MonoThreadInfo *current = mono_thread_info_current ();
 
-	printf ("in suspend sighandler\n");
+	THREADS_DEBUG ("in suspend sighandler\n");
 
 	g_assert (runtime_callbacks.thread_state_init_from_sigctx (&current->suspend_state, context));
 	MONO_SEM_POST (&current->suspend_semaphore);
@@ -397,7 +398,7 @@ suspend_signal_handler (int _dummy, siginfo_t *info, void *context)
 		mono_monoctx_to_sigctx (&tmp, context);
 	}
 	MONO_SEM_POST (&current->finish_resume_semaphore);
-	printf ("RESUMING %p\n", current->async_target);
+	THREADS_DEBUG ("RESUMING %p\n", current->async_target);
 }
 
 void
@@ -430,7 +431,7 @@ mono_thread_info_suspend_sync (MonoNativeThreadId tid)
 		return NULL;
 	}
 
-	printf ("suspend %x IN COUNT %d\n", tid, info->suspend_count);
+	THREADS_DEBUG ("suspend %x IN COUNT %d\n", tid, info->suspend_count);
 
 	if (info->suspend_count) {
 		++info->suspend_count;
@@ -460,7 +461,7 @@ mono_thread_info_resume (MonoNativeThreadId tid)
 
 	pthread_mutex_lock (&info->suspend_lock);
 
-	printf ("resume %x IN COUNT %d\n",tid, info->suspend_count);
+	THREADS_DEBUG ("resume %x IN COUNT %d\n",tid, info->suspend_count);
 
 	if (info->suspend_count <= 0) {
 		pthread_mutex_unlock (&info->suspend_lock);

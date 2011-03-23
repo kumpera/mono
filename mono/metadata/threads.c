@@ -2085,9 +2085,7 @@ static void
 self_interrupt_thread (void *_unused)
 {
 	MonoThreadInfo *info = mono_thread_info_current ();
-	printf ("finally reached the interrupt callback!\n");
 	MonoException *exc = mono_thread_execute_interruption (mono_thread_internal_current ()); 
-	printf ("exception is %p\n", exc);
 	if (exc) /*We must use _with_context since we didn't trampoline into the runtime*/
 		mono_raise_exception_with_context (exc, &info->suspend_state.ctx);
 	g_assert_not_reached (); /*this MUST not happen since we can't resume from an async call*/
@@ -2115,7 +2113,6 @@ suspend_thread_internal (MonoInternalThread *thread, MonoJitInfo **out_ji)
 		/*WARNING: We now are in interrupt context until we resume the thread. */
 		if (!is_thread_in_critical_region (info, &ji))
 			break;
-		printf ("method in critical region, resuming\n");
 		mono_thread_info_resume ((pthread_t)(gpointer)(gsize)thread->tid);
 		Sleep (1);
 	}
@@ -2152,7 +2149,6 @@ abort_thread_internal (MonoInternalThread *thread, gboolean can_raise_exception,
 		return;
 
 	if (mono_get_eh_callbacks ()->mono_install_handler_block_guard (&info->suspend_state)) {
-		printf (">>>>thread needs guard<<<<\n");
 		mono_thread_info_resume (info->tid);
 		return;
 	}
@@ -2170,12 +2166,10 @@ abort_thread_internal (MonoInternalThread *thread, gboolean can_raise_exception,
 	if (running_managed) {
 		/*We are in managed code*/
 		/*Set the thread to call */
-		printf ("in managed land \n");
 		if (install_async_abort)
 			mono_thread_info_setup_async_call (info, self_interrupt_thread, NULL);
 		mono_thread_info_resume ((pthread_t)(gpointer)(gsize)thread->tid);
 	} else {
-		printf ("not in managed land \n");
 		/* 
 		 * This will cause waits to be broken.
 		 * It will also prevent the thread from entering a wait, so if the thread returns
