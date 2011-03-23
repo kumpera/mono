@@ -2109,11 +2109,18 @@ static void signal_thread_state_change (MonoInternalThread *thread)
 {
 	MonoJitInfo *ji;
 	MonoThreadInfo *info = NULL;
+
+	/*
+	FIXME this is insanely broken, it doesn't cause interruption to happen
+	synchronously since passing FALSE to mono_thread_request_interruption makes sure it returns NULL
+	*/
 	if (thread == mono_thread_internal_current ()) {
 		/* Do it synchronously */
 		MonoException *exc = mono_thread_request_interruption (FALSE); 
 		if (exc)
 			mono_raise_exception (exc);
+		wapi_interrupt_thread (thread->handle);
+		return;
 	}
 
 #ifdef HOST_WIN32
