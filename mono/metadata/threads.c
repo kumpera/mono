@@ -186,7 +186,6 @@ static void mono_init_static_data_info (StaticDataInfo *static_data);
 static guint32 mono_alloc_static_data_slot (StaticDataInfo *static_data, guint32 size, guint32 align);
 static gboolean mono_thread_resume (MonoInternalThread* thread);
 static void mono_thread_start (MonoThread *thread);
-static void signal_thread_state_change (MonoInternalThread *thread);
 static void abort_thread_internal (MonoInternalThread *thread, gboolean can_raise_exception, gboolean install_async_abort);
 static MonoThreadInfo* park_thread_internal (MonoInternalThread *thread, MonoJitInfo **out_ji);
 static void suspend_thread_internal (MonoInternalThread *thread);
@@ -2183,43 +2182,6 @@ abort_thread_internal (MonoInternalThread *thread, gboolean can_raise_exception,
 		wapi_interrupt_thread (thread->handle);
 	}
 	/*FIXME we need to wait for interruption to complete -- figure out how much into interruption we should wait for here*/
-#endif /* HOST_WIN32 */
-}
-
-/*
- * signal_thread_state_change
- *
- * Tells the thread that his state has changed and it has to enter the new
- * state as soon as possible.
- */
-static void signal_thread_state_change (MonoInternalThread *thread)
-{
-	g_assert (0);
-	/*
-	FIXME this is insanely broken, it doesn't cause interruption to happen
-	synchronously since passing FALSE to mono_thread_request_interruption makes sure it returns NULL
-	*/
-	if (thread == mono_thread_internal_current ()) {
-		/* Do it synchronously */
-		MonoException *exc = mono_thread_request_interruption (FALSE); 
-		if (exc)
-			mono_raise_exception (exc);
-	}
-
-#ifdef HOST_WIN32
-	QueueUserAPC ((PAPCFUNC)interruption_request_apc, thread->handle, NULL);
-#else
-	/* fixme: store the state somewhere */
-	mono_thread_kill (thread, mono_thread_get_abort_signal ());
-
-	/* 
-	 * This will cause waits to be broken.
-	 * It will also prevent the thread from entering a wait, so if the thread returns
-	 * from the wait before it receives the abort signal, it will just spin in the wait
-	 * functions in the io-layer until the signal handler calls QueueUserAPC which will
-	 * make it return.
-	 */
-	wapi_interrupt_thread (thread->handle);
 #endif /* HOST_WIN32 */
 }
 
