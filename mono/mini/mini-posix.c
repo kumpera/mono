@@ -213,12 +213,6 @@ SIG_HANDLER_SIGNATURE (sigusr1_signal_handler)
 		/* FIXME: Specify the synchronization with start_wrapper () in threads.c */
 		return;
 
-	if (thread->thread_dump_requested) {
-		thread->thread_dump_requested = FALSE;
-
-		mono_print_thread_dump (ctx);
-	}
-
 	/*
 	 * This is an async signal, so the code below must not call anything which
 	 * is not async safe. That includes the pthread locking functions. If we
@@ -356,26 +350,12 @@ SIG_HANDLER_SIGNATURE (sigquit_signal_handler)
 {
 	gboolean res;
 
-	GET_CONTEXT;
-
 	/* We use this signal to start the attach agent too */
 	res = mono_attach_start ();
 	if (res)
 		return;
 
-	printf ("Full thread dump:\n");
-
 	mono_threads_request_thread_dump ();
-
-	/*
-	 * print_thread_dump () skips the current thread, since sending a signal
-	 * to it would invoke the signal handler below the sigquit signal handler,
-	 * and signal handlers don't create an lmf, so the stack walk could not
-	 * be performed.
-	 */
-	mono_print_thread_dump (ctx);
-
-	mono_chain_signal (SIG_HANDLER_PARAMS);
 }
 
 static void

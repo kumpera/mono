@@ -3208,6 +3208,8 @@ collect_threads (gpointer key, gpointer value, gpointer user_data)
 	}
 }
 
+static gboolean thread_dump_requested;
+
 /**
  * mono_threads_request_thread_dump:
  *
@@ -3216,33 +3218,109 @@ collect_threads (gpointer key, gpointer value, gpointer user_data)
 void
 mono_threads_request_thread_dump (void)
 {
-	struct wait_data wait_data;
-	struct wait_data *wait = &wait_data;
-	int i;
+	gboolean old_val = thread_dump_requested;
+	printf ("thread dump requested˜˜˜˜˜\n");
+	thread_dump_requested = TRUE;
+	mono_gc_finalize_notify ();
+}
 
-	memset (wait, 0, sizeof (struct wait_data));
+static G_GNUC_UNUSED gboolean
+print_stack_frame_to_string (MonoStackFrameInfo *frame, MonoContext *ctx, gpointer data)
+{
+	GString *p = (GString*)data;
+	MonoMethod *method = NULL;
+	if (frame->ji)
+		method = frame->ji->method;
+
+	if (method) {
+		gchar *location = mono_debug_print_stack_frame (method, frame->native_offset, frame->domain);
+		g_string_append_printf (p, "  %s\n", location);
+		g_free (location);
+	} else
+		g_string_append_printf (p, "  at <unknown> <0x%05x>\n", frame->native_offset);
+
+	return FALSE;
+}
+
+static void
+print_thread_dump (MonoInternalThread *thread, MonoThreadInfo *info)
+{
+	GString* text = g_string_new (0);
+	char *name, *wapi_desc;
+	GError *error = NULL;
+
+	if (thread->name) {
+		name = g_utf16_to_utf8 (thread->name, thread->name_len, NULL, NULL, &error);
+		g_assert (!error);
+		g_string_append_printf (text, "\n\"%s\"", name);
+		g_free (name);
+	}
+	else if (thread->threadpool_thread)
+		g_string_append (text, "\n\"<threadpool thread>\"");
+	else
+		g_string_append (text, "\n\"<unnamed thread>\"");
+
+#if 0
+/* This no longer works with remote unwinding */
+#ifndef HOST_WIN32
+	wapi_desc = wapi_current_thread_desc ();
+	g_string_append_printf (text, " tid=0x%p this=0x%p %s\n", (gpointer)(gsize)thread->tid, thread,  wapi_desc);
+	free (wapi_desc);
+#endif
+#endif
+
+	mono_get_eh_callbacks ()->mono_walk_stack_with_state (print_stack_frame_to_string, &info->suspend_state, MONO_UNWIND_SIGNAL_SAFE, text);
+	mono_thread_info_resume (info->tid);
+
+	fprintf (stdout, "%s", text->str);
+
+#if PLATFORM_WIN32 && TARGET_WIN32 && _DEBUG
+	OutputDebugStringA(text->str);
+#endif
+
+	g_string_free (text, TRUE);
+	fflush (stdout);
+}
+
+static void
+dump_thread (gpointer key, gpointer value, gpointer user)
+{
+	MonoInternalThread *thread = (MonoInternalThread *)value;
+	MonoThreadInfo *info;
+
+	if (thread == mono_thread_internal_current ())
+		return;
+
+	/*
+	FIXME This still can hang if we stop a thread during malloc.
+	We probably should loop a bit around trying to get it to either managed code
+	or WSJ state. 
+	*/
+	info = mono_thread_info_suspend_sync ((pthread_t)(gpointer)(gsize)thread->tid);
+
+	if (!info)
+		return;
+
+	print_thread_dump (thread, info);
+}
+
+void
+mono_threads_perform_thread_dump (void)
+{
+	if (!thread_dump_requested)
+		return;
+
+	printf ("Full thread dump:\n");
 
 	/* 
 	 * Make a copy of the hashtable since we can't do anything with
 	 * threads while threads_mutex is held.
 	 */
 	mono_threads_lock ();
-	mono_g_hash_table_foreach (threads, collect_threads, wait);
+	mono_g_hash_table_foreach (threads, dump_thread, NULL);
 	mono_threads_unlock ();
 
-	for (i = 0; i < wait->num; ++i) {
-		MonoInternalThread *thread = wait->threads [i];
-
-		if (!mono_gc_is_finalizer_internal_thread (thread) &&
-				(thread != mono_thread_internal_current ()) &&
-				!thread->thread_dump_requested) {
-			thread->thread_dump_requested = TRUE;
-
-			signal_thread_state_change (thread);
-		}
-
-		CloseHandle (wait->handles [i]);
-	}
+	thread_dump_requested = FALSE;
 }
 
 struct ref_stack {
