@@ -2496,7 +2496,7 @@ void mono_thread_internal_stop (MonoInternalThread *thread)
 	
 	LeaveCriticalSection (thread->synch_cs);
 	
-	signal_thread_state_change (thread);
+	abort_thread_internal (thread, TRUE, TRUE);
 }
 
 void mono_thread_stop (MonoThread *thread)
