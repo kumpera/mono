@@ -188,7 +188,8 @@ static gboolean mono_thread_resume (MonoInternalThread* thread);
 static void mono_thread_start (MonoThread *thread);
 static void signal_thread_state_change (MonoInternalThread *thread);
 static void abort_thread_internal (MonoInternalThread *thread, gboolean can_raise_exception, gboolean install_async_abort);
-static MonoThreadInfo* suspend_thread_internal (MonoInternalThread *thread, MonoJitInfo **out_ji);
+static MonoThreadInfo* park_thread_internal (MonoInternalThread *thread, MonoJitInfo **out_ji);
+static void suspend_thread_internal (MonoInternalThread *thread);
 
 static MonoException* mono_thread_execute_interruption (MonoInternalThread *thread);
 static void ref_stack_destroy (gpointer rs);
@@ -2101,7 +2102,7 @@ mono_jit_info_match (MonoJitInfo *ji, gpointer ip)
 }
 
 static MonoThreadInfo*
-suspend_thread_internal (MonoInternalThread *thread, MonoJitInfo **out_ji)
+park_thread_internal (MonoInternalThread *thread, MonoJitInfo **out_ji)
 {
 	MonoJitInfo *ji = NULL;
 	MonoThreadInfo *info = NULL;
@@ -2145,7 +2146,7 @@ abort_thread_internal (MonoInternalThread *thread, gboolean can_raise_exception,
 #else
 
 	/*FIXME we need to check 2 conditions here, request to interrupt this thread or if the target died*/
-	if (!(info = suspend_thread_internal (thread, &ji)))
+	if (!(info = park_thread_internal (thread, &ji)))
 		return;
 
 	if (mono_get_eh_callbacks ()->mono_install_handler_block_guard (&info->suspend_state)) {
@@ -2351,6 +2352,23 @@ ves_icall_System_Threading_Thread_GetAbortExceptionState (MonoThread *this)
 	return deserialized;
 }
 
+static void
+suspend_thread_internal (MonoInternalThread *thread)
+{
+	park_thread_internal (thread, NULL);
+
+	EnterCriticalSection (thread->synch_cs);
+	if ((thread->state & ThreadState_SuspendRequested) == 0) {
+		/*Make sure we balance the suspend count.*/
+		mono_thread_info_resume ((pthread_t)(gpointer)(gsize)thread->tid);
+	} else {
+		thread->state &= ~ThreadState_SuspendRequested;
+		thread->state |= ThreadState_Suspended;
+	}
+	LeaveCriticalSection (thread->synch_cs);
+}
+
+
 static gboolean
 mono_thread_suspend (MonoInternalThread *thread)
 {
@@ -2378,17 +2396,7 @@ mono_thread_suspend (MonoInternalThread *thread)
 
 	LeaveCriticalSection (thread->synch_cs);
 
-	suspend_thread_internal (thread, NULL);
-
-	EnterCriticalSection (thread->synch_cs);
-	if ((thread->state & ThreadState_SuspendRequested) == 0) {
-		/*Make sure we balance the suspend count.*/
-		mono_thread_info_resume ((pthread_t)(gpointer)(gsize)thread->tid);
-	} else {
-		thread->state &= ~ThreadState_SuspendRequested;
-		thread->state |= ThreadState_Suspended;
-	}
-	LeaveCriticalSection (thread->synch_cs);
+	suspend_thread_internal (thread);
 
 	return TRUE;
 }
@@ -3105,14 +3113,14 @@ void mono_thread_suspend_all_other_threads (void)
 		
 			EnterCriticalSection (thread->synch_cs);
 
-			if (thread->suspended_event == NULL) {
+			/*if (thread->suspended_event == NULL) {
 				thread->suspended_event = CreateEvent (NULL, TRUE, FALSE, NULL);
 				if (thread->suspended_event == NULL) {
-					/* Forget this one and go on to the next */
+					/* Forget this one and go on to the next * /
 					LeaveCriticalSection (thread->synch_cs);
 					continue;
 				}
-			}
+			}*/
 
 			if ((thread->state & ThreadState_Suspended) != 0 || 
 				(thread->state & ThreadState_StopRequested) != 0 ||
@@ -3138,7 +3146,7 @@ void mono_thread_suspend_all_other_threads (void)
 
 			/* Signal the thread to suspend */
 			if (signal_suspend)
-				signal_thread_state_change (thread);
+				suspend_thread_internal (thread);
 		}
 
 		if (eventidx > 0) {
