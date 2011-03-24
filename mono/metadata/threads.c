@@ -2075,9 +2075,6 @@ is_thread_in_critical_region (MonoThreadInfo *info, MonoJitInfo **out_ji)
 		return TRUE;
 
 	//FIXME handle regions the runtme doesn't want to be interruptible.
-	//same
-	if (method->name [0] == 'X')
-		return TRUE;
 	return FALSE;
 }
 
@@ -3180,8 +3177,6 @@ static gboolean thread_dump_requested;
 void
 mono_threads_request_thread_dump (void)
 {
-	gboolean old_val = thread_dump_requested;
-	printf ("thread dump requested˜˜˜˜˜\n");
 	thread_dump_requested = TRUE;
 	mono_gc_finalize_notify ();
 }
