@@ -79,6 +79,7 @@
 #include "utils/mono-semaphore.h"
 #include "utils/mono-counters.h"
 #include "utils/mono-proclib.h"
+#include "utils/mono-threads.h"
 
 
 typedef struct _Fragment Fragment;
@@ -124,9 +125,20 @@ static long long stat_wasted_fragments_bytes = 0;
 
 #ifdef NALLOC_DEBUG
 
+enum {
+	FIXED_ALLOC = 1,
+	RANGE_ALLOC,
+	PINNING,
+	BLOCK_ZEROING,
+	CLEAR_NURSERY_FRAGS
+};
+
 typedef struct {
 	char *address;
 	size_t size;
+	int reason;
+	int seq;
+	MonoNativeThreadId tid;
 } AllocRecord;
 
 #define ALLOC_RECORD_COUNT 128000
@@ -137,6 +149,18 @@ static volatile int next_record;
 static volatile int alloc_count;
 
 
+static const char*
+get_reason_name (AllocRecord *rec)
+{
+	switch (rec->reason) {
+	case FIXED_ALLOC: return "fixed-alloc";
+	case RANGE_ALLOC: return "range-alloc";
+	case PINNING: return "pinning";
+	case BLOCK_ZEROING: return "block-zeroing";
+	case CLEAR_NURSERY_FRAGS: return "clear-nursery-frag";
+	default: return "invalid";
+	}
+}
 
 static void
 reset_alloc_records (void)
@@ -147,11 +171,14 @@ reset_alloc_records (void)
 
 
 static void
-add_alloc_record (char *addr, size_t size)
+add_alloc_record (char *addr, size_t size, int reason)
 {
 	int idx = InterlockedIncrement (&next_record) - 1;
 	alloc_records [idx].address = addr;
 	alloc_records [idx].size = size;
+	alloc_records [idx].reason = reason;
+	alloc_records [idx].seq = idx;
+	alloc_records [idx].tid = mono_native_thread_id_get ();
 }
 
 static int
@@ -159,6 +186,8 @@ comp_alloc_record (const void *_a, const void *_b)
 {
 	const AllocRecord *a = _a;
 	const AllocRecord *b = _b;
+	if (a->address == b->address)
+		return a->seq - b->seq;
 	return a->address - b->address;
 }
 
@@ -168,11 +197,12 @@ void
 dump_alloc_records (void)
 {
 	int i;
+	qsort (alloc_records, next_record, sizeof (AllocRecord), comp_alloc_record);
 
 	printf ("------------------------------------DUMP RECORDS----------------------------\n");
 	for (i = 0; i < next_record; ++i) {
 		AllocRecord *rec = alloc_records + i;
-		printf ("obj [%p, %p] size %zd\n", rec->address, rec_end (rec), rec->size);
+		printf ("obj [%p, %p] size %zd reason %s seq %d %zx\n", rec->address, rec_end (rec), rec->size, get_reason_name (rec), rec->seq, (gsize)rec->tid);
 	}
 }
 
@@ -323,6 +353,9 @@ alloc_from_fragment (Fragment *frag, size_t size)
 		if (mono_sgen_get_nursery_clear_policy () == CLEAR_AT_TLAB_CREATION) {
 			/* Clear the remaining space, pinning depends on this */
 			memset (frag->fragment_next, 0, frag->fragment_end - frag->fragment_next);
+#ifdef NALLOC_DEBUG
+			add_alloc_record (end, frag->fragment_end - end, BLOCK_ZEROING);
+#endif
 		}
 
 		prev_ptr = find_previous_pointer_fragment (frag);
@@ -382,6 +415,9 @@ mono_sgen_clear_nursery_fragments (void)
 		for (frag = unmask (nursery_fragments); frag; frag = unmask (frag->next)) {
 			DEBUG (4, fprintf (gc_debug_file, "Clear nursery frag %p-%p\n", frag->fragment_next, frag->fragment_end));
 			memset (frag->fragment_next, 0, frag->fragment_end - frag->fragment_next);
+#ifdef NALLOC_DEBUG
+			add_alloc_record (frag->fragment_next, frag->fragment_end - frag->fragment_next, CLEAR_NURSERY_FRAGS);
+#endif
 		}
 	}
 }
@@ -433,7 +469,9 @@ add_nursery_frag (size_t frag_size, char* frag_start, char* frag_end)
 			memset (frag_start, 0, frag_size);
 
 #ifdef NALLOC_DEBUG
-		printf ("\tfragment [%p %p] size %d\n", frag_start, frag_end, frag_size);
+		/* XXX convert this into a flight record entry
+		printf ("\tfragment [%p %p] size %zd\n", frag_start, frag_end, frag_size);
+		*/
 #endif
 		add_fragment (frag_start, frag_end);
 		fragment_total += frag_size;
@@ -477,7 +515,7 @@ mono_sgen_build_nursery_fragments (GCMemSection *nursery_section, void **start, 
 			add_nursery_frag (frag_size, frag_start, frag_end);
 		frag_size = SGEN_ALIGN_UP (mono_sgen_safe_object_get_size ((MonoObject*)start [i]));
 #ifdef NALLOC_DEBUG
-		add_alloc_record (start [i], frag_size);
+		add_alloc_record (start [i], frag_size, PINNING);
 #endif
 		frag_start = (char*)start [i] + frag_size;
 	}
@@ -542,7 +580,7 @@ restart:
 			if (!p)
 				goto restart;
 #ifdef NALLOC_DEBUG
-			add_alloc_record (p, size);
+			add_alloc_record (p, size, FIXED_ALLOC);
 #endif
 			return p;
 		}
@@ -572,7 +610,7 @@ restart:
 			if (!p)
 				goto restart;
 #ifdef NALLOC_DEBUG
-			add_alloc_record (p, desired_size);
+			add_alloc_record (p, desired_size, RANGE_ALLOC);
 #endif
 			return p;
 		}
@@ -603,7 +641,7 @@ restart:
 		if (!p)
 			goto restart;
 #ifdef NALLOC_DEBUG
-		add_alloc_record (p, frag_size);
+		add_alloc_record (p, frag_size, RANGE_ALLOC);
 #endif
 		return p;
 	}
