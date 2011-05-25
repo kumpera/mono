@@ -57,6 +57,13 @@
 #define _XOPEN_SOURCE
 #endif
 
+/*
+TODO:
+cleanup the code that readies the nursery for pinning/collection
+	this means removing all remaining memseting and use phony objects
+	all around. Have a separate fragments head so we can process all
+	of them together.
+*/
 #include "metadata/sgen-gc.h"
 #include "metadata/metadata-internals.h"
 #include "metadata/class-internals.h"
@@ -332,6 +339,17 @@ try_again:
 	return NULL;
 }
 
+static gboolean
+claim_remaining_size (Fragment *frag, char *alloc_end)
+{
+	/* All space used, we have to race to remove. */
+	if (frag->fragment_end <= alloc_end)
+		return TRUE;
+
+	/* Try to alloc all the remaining space. */
+	return InterlockedCompareExchangePointer ((volatile gpointer*)&frag->fragment_next, frag->fragment_end, alloc_end) == alloc_end;
+}
+
 static void*
 alloc_from_fragment (Fragment *frag, size_t size)
 {
@@ -350,9 +368,15 @@ alloc_from_fragment (Fragment *frag, size_t size)
 	if (frag->fragment_end - end < FRAGMENT_MIN_SIZE) {
 		Fragment *next, **prev_ptr;
 		
-		if (mono_sgen_get_nursery_clear_policy () == CLEAR_AT_TLAB_CREATION) {
-			/* Clear the remaining space, pinning depends on this */
-			memset (frag->fragment_next, 0, frag->fragment_end - frag->fragment_next);
+		/*
+		 * Before we clean the remaining nursery, we must claim the remaining space
+		 * as it could end up been used by the range allocator since it can end up
+		 * allocating from this dying fragment as it doesn't respect FRAGMENT_MIN_SIZE
+		 * when doing second chance allocation.
+		 */
+		if (mono_sgen_get_nursery_clear_policy () == CLEAR_AT_TLAB_CREATION && claim_remaining_size (frag, end)) {
+			/* Clear the remaining space, pinning depends on this. FIXME move this to use phony arrays */
+			memset (end, 0, frag->fragment_end - end);
 #ifdef NALLOC_DEBUG
 			add_alloc_record (end, frag->fragment_end - end, BLOCK_ZEROING);
 #endif
