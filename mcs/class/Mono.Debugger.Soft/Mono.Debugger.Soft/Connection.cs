@@ -467,7 +467,12 @@ namespace Mono.Debugger.Soft
 			/* FIXME: Merge into GET_SOURCE_FILES when the major protocol version is increased */
 			GET_SOURCE_FILES_2 = 13,
 			/* FIXME: Merge into GET_VALUES when the major protocol version is increased */
-			GET_VALUES_2 = 14
+			GET_VALUES_2 = 14,
+			CMD_TYPE_GET_METHODS_BY_NAME_FLAGS = 15,
+		}
+
+		enum BindingFlagsExtensions {
+			BINDING_FLAGS_IGNORE_CASE = 0x70000000,
 		}
 
 		enum CmdStackFrame {
@@ -1780,7 +1785,17 @@ namespace Mono.Debugger.Soft
 			PacketReader r = SendReceive (CommandSet.TYPE, (int)CmdType.GET_PROPERTY_CATTRS, new PacketWriter ().WriteId (id).WriteId (field_id).WriteId (attr_type_id));
 			return ReadCattrs (r);
 		}
-			
+
+		public long[] Type_GetMethodsByNameFlags (long id, string name, int flags, bool ignoreCase) {
+			flags |= ignoreCase ? (int)BindingFlagsExtensions.BINDING_FLAGS_IGNORE_CASE : 0;
+			Console.WriteLine ("FFFF {0:X}", flags);
+			PacketReader r = SendReceive (CommandSet.TYPE, (int)CmdType.CMD_TYPE_GET_METHODS_BY_NAME_FLAGS, new PacketWriter ().WriteId (id).WriteString (name).WriteInt (flags));
+			int len = r.ReadInt ();
+			long[] res = new long [len];
+			for (int i = 0; i < len; ++i)
+				res [i] = r.ReadId ();
+			return res;
+		}
 		/*
 		 * EVENTS
 		 */

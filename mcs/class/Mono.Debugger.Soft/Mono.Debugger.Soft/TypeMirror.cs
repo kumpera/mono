@@ -632,6 +632,14 @@ namespace Mono.Debugger.Soft
 			return res.ToArray ();
 		}
 
+		public MethodMirror[] GetMethodsByNameFlags (string name, BindingFlags flags, bool ignoreCase) {
+			long[] ids = vm.conn.Type_GetMethodsByNameFlags (id, name, (int)flags, ignoreCase);
+			MethodMirror[] m = new MethodMirror [ids.Length];
+			for (int i = 0; i < ids.Length; ++i)
+				m [i] = vm.GetMethod (ids [i]);
+			return m;
+		}
+
 		public Value InvokeMethod (ThreadMirror thread, MethodMirror method, IList<Value> arguments) {
 			return ObjectMirror.InvokeMethod (vm, thread, method, null, arguments, InvokeOptions.None);
 		}
