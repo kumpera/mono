@@ -1386,6 +1386,11 @@ decode_string (guint8 *buf, guint8 **endbuf, guint8 *limit)
 	int len = decode_int (buf, &buf, limit);
 	char *s;
 
+	if (len < 0) {
+		*endbuf = buf;
+		return NULL;
+	}
+
 	s = g_malloc (len + 1);
 	g_assert (s);
 
