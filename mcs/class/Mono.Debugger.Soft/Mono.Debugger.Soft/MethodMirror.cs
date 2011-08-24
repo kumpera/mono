@@ -23,6 +23,17 @@ namespace Mono.Debugger.Soft
 		internal MethodMirror (VirtualMachine vm, long id) : base (vm, id) {
 		}
 
+		internal void Init (BulkyMethodInfo minfo) {
+			name = minfo.name;
+			declaring_type = vm.GetType (minfo.declaring_type);
+
+			var mi = new MethodInfo ();
+			mi.attributes = minfo.attributes;
+			mi.iattributes = minfo.iattributes;
+			mi.token = minfo.token;
+			info = mi;			
+		}
+
 		public string Name {
 			get {
 				if (name == null)

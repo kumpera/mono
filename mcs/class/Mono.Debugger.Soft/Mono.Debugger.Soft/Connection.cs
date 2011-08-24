@@ -87,6 +87,13 @@ namespace Mono.Debugger.Soft
 		public int attrs;
 	}
 
+	struct BulkyMethodInfo {
+		public long id;
+		public string name;
+		public long declaring_type;
+		public int attributes, iattributes, token;
+	}
+
 	class CattrNamedArgInfo {
 		public bool is_property;
 		public long id;
@@ -473,7 +480,8 @@ namespace Mono.Debugger.Soft
 			/* FIXME: Merge into GET_SOURCE_FILES when the major protocol version is increased */
 			GET_SOURCE_FILES_2 = 13,
 			/* FIXME: Merge into GET_VALUES when the major protocol version is increased */
-			GET_VALUES_2 = 14
+			GET_VALUES_2 = 14,
+			GET_METHODS_BULKY = 15,
 		}
 
 		enum CmdStackFrame {
@@ -1780,6 +1788,26 @@ namespace Mono.Debugger.Soft
 				res [i] = r.ReadId ();
 			return res;
 		}
+
+		public BulkyMethodInfo[] Type_GetMethods_Bulky (long id) {
+			PacketReader r = SendReceive (CommandSet.TYPE, (int)CmdType.GET_METHODS_BULKY, new PacketWriter ().WriteId (id));
+
+			int n = r.ReadInt ();
+			var res = new BulkyMethodInfo [n];
+			for (int i = 0; i < n; ++i) {
+				var info = new BulkyMethodInfo ();
+				info.id = r.ReadId ();
+				info.declaring_type = r.ReadId ();
+				info.name = r.ReadString ();
+				info.attributes = r.ReadInt ();
+				info.iattributes = r.ReadInt ();
+				info.token = r.ReadInt ();
+				/*FIXME maybe we should load ParameterInfo too?*/
+				res [i] = info;
+			}
+			return res;
+		}
+
 
 		public long[] Type_GetFields (long id, out string[] names, out long[] types, out int[] attrs) {
 			PacketReader r = SendReceive (CommandSet.TYPE, (int)CmdType.GET_FIELDS, new PacketWriter ().WriteId (id));

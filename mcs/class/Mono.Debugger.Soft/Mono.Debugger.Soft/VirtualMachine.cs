@@ -22,6 +22,9 @@ namespace Mono.Debugger.Soft
 
 		VersionInfo version;
 
+		//FIXME make this configurable
+		internal bool use_bulk_operations = true;
+
 		internal VirtualMachine (ITargetProcess process, Connection conn) : base () {
 			SetVirtualMachine (this);
 			queue = new Queue ();

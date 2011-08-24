@@ -338,12 +338,22 @@ namespace Mono.Debugger.Soft
 
 		public MethodMirror[] GetMethods () {
 			if (methods == null) {
-				long[] ids = vm.conn.Type_GetMethods (id);
-				MethodMirror[] m = new MethodMirror [ids.Length];
-				for (int i = 0; i < ids.Length; ++i) {
-					m [i] = vm.GetMethod (ids [i]);
+				if (vm.use_bulk_operations) {
+					var mi = vm.conn.Type_GetMethods_Bulky (id);
+					MethodMirror[] m = new MethodMirror [mi.Length];
+					for (int i = 0; i < mi.Length; ++i) {
+						m [i] = vm.GetMethod (mi [i].id);
+						m [i].Init (mi [i]);
+					}
+					methods = m;
+				} else {
+					long[] ids = vm.conn.Type_GetMethods (id);
+					MethodMirror[] m = new MethodMirror [ids.Length];
+					for (int i = 0; i < ids.Length; ++i) {
+						m [i] = vm.GetMethod (ids [i]);
+					}
+					methods = m;
 				}
-				methods = m;
 			}
 			return methods;
 		}
