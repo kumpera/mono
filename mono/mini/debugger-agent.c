@@ -467,7 +467,8 @@ typedef enum {
 	CMD_OBJECT_REF_IS_COLLECTED = 3,
 	CMD_OBJECT_REF_GET_ADDRESS = 4,
 	CMD_OBJECT_REF_GET_DOMAIN = 5,
-	CMD_OBJECT_REF_SET_VALUES = 6
+	CMD_OBJECT_REF_SET_VALUES = 6,
+	CMD_OBJECT_REF_GET_INFO = 7,
 } CmdObject;
 
 typedef struct {
@@ -7379,6 +7380,10 @@ object_commands (int command, guint8 *p, guint8 *end, Buffer *buf)
 	case CMD_OBJECT_REF_GET_DOMAIN:
 		buffer_add_domainid (buf, obj->vtable->domain);
 		break;
+	case CMD_OBJECT_REF_GET_INFO:
+		buffer_add_typeid (buf, obj->vtable->domain, obj->vtable->klass);
+		buffer_add_domainid (buf, obj->vtable->domain);
+		break;		
 	default:
 		return ERR_NOT_IMPLEMENTED;
 	}
