@@ -441,7 +441,8 @@ typedef enum {
 	CMD_TYPE_GET_FIELD_CATTRS = 11,
 	CMD_TYPE_GET_PROPERTY_CATTRS = 12,
 	CMD_TYPE_GET_SOURCE_FILES_2 = 13,
-	CMD_TYPE_GET_VALUES_2 = 14
+	CMD_TYPE_GET_VALUES_2 = 14,
+	CMD_TYPE_GET_METHODS_BULKY = 15
 } CmdType;
 
 typedef enum {
@@ -6643,6 +6644,30 @@ type_commands_internal (int command, MonoClass *klass, MonoDomain *domain, guint
 			buffer_add_byte (buf, 1);
 		else
 			buffer_add_byte (buf, 0);
+		break;
+	}
+	case CMD_TYPE_GET_METHODS_BULKY: {
+		int nmethods;
+		int i = 0;
+		gpointer iter = NULL;
+		MonoMethod *m;
+
+		mono_class_setup_methods (klass);
+
+		nmethods = mono_class_num_methods (klass);
+
+		buffer_add_int (buf, nmethods);
+
+		while ((m = mono_class_get_methods (klass, &iter))) {
+			buffer_add_methodid (buf, domain, m);
+			buffer_add_typeid (buf, domain, m->klass);
+			buffer_add_string (buf, m->name);
+			buffer_add_int (buf, m->flags);
+			buffer_add_int (buf, m->iflags);
+			buffer_add_int (buf, m->token);
+			i ++;
+		}
+		g_assert (i == nmethods);
 		break;
 	}
 	default:
