@@ -272,6 +272,11 @@ namespace Mono.Debugger.Soft
 
 			long root_domain_id = conn.RootDomain;
 			root_domain = GetDomain (root_domain_id);
+
+			if (use_bulk_operations) {
+				Console.WriteLine ("ENABLING EnableEventPiggyBacking");
+				conn.EnableEventPiggyBacking ();
+			}
 		}
 
 		internal void notify_vm_event (EventType evtype, SuspendPolicy spolicy, int req_id, long thread_id, string vm_uri) {
@@ -619,6 +624,11 @@ namespace Mono.Debugger.Soft
 		public void VMDisconnect (int req_id, long thread_id, string vm_uri) {
 			vm.notify_vm_event (EventType.VMDisconnect, SuspendPolicy.None, req_id, thread_id, vm_uri);
         }
+
+		public void TypeInformation (long type_id, TypeInfo info) {
+			Console.WriteLine ("--PB for id {0:X}", type_id);
+			vm.GetType (type_id).SetInfo (info);
+		}
     }
 
 	internal class CommandException : Exception {

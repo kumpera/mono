@@ -115,6 +115,7 @@ typedef struct {
 	gboolean embedding;
 	gboolean defer;
 	int keepalive;
+	gboolean event_piggy_backing;
 } AgentConfig;
 
 typedef struct
@@ -263,6 +264,11 @@ typedef struct {
 #define MAJOR_VERSION 2
 #define MINOR_VERSION 4
 
+enum {
+	CMD_FLAGS_HAS_TRAILER = 0x40, /*This packet has a trailer */
+	CMD_FLAGS_REPLY = 0x80, /* This packet is a reply to a previous one */
+};
+
 typedef enum {
 	CMD_SET_VM = 1,
 	CMD_SET_OBJECT_REF = 9,
@@ -276,7 +282,8 @@ typedef enum {
 	CMD_SET_METHOD = 22,
 	CMD_SET_TYPE = 23,
 	CMD_SET_MODULE = 24,
-	CMD_SET_EVENT = 64
+	CMD_SET_EVENT = 64,
+	CMD_SET_TRAILER_DATA = 65,
 } CommandSet;
 
 typedef enum {
@@ -371,7 +378,8 @@ typedef enum {
 	CMD_VM_INVOKE_METHOD = 7,
 	CMD_VM_SET_PROTOCOL_VERSION = 8,
 	CMD_VM_ABORT_INVOKE = 9,
-	CMD_VM_SET_KEEPALIVE = 10
+	CMD_VM_SET_KEEPALIVE = 10,
+	CMD_VM_ENABLE_EVENT_PIGGY_BACKING = 11,
 } CmdVM;
 
 typedef enum {
@@ -471,6 +479,10 @@ typedef enum {
 	CMD_OBJECT_REF_GET_INFO = 7,
 } CmdObject;
 
+typedef enum {
+	CMD_TRAILER_TYPE_INFO = 1,
+} CmdTrailerData;
+	
 typedef struct {
 	ModifierKind kind;
 	union {
@@ -621,6 +633,9 @@ static gboolean protocol_version_set;
 
 /* A hash table containing all active domains */
 static GHashTable *domains;
+
+/* A linked-list of buffers to be piggy-backed to client */
+static GSList *trailer_data;
 
 static void transport_connect (const char *host, int port);
 
@@ -1488,52 +1503,71 @@ buffer_free (Buffer *buf)
 	g_free (buf->buf);
 }
 
+/*
+ * Trailer data information
+ */
+typedef struct {
+	int command;
+	Buffer buffer;
+} TrailerData;
+
 static gboolean
-send_packet (int command_set, int command, Buffer *data)
+send_raw_packet (int id, int flags, int b0, int b1, Buffer *data)
 {
 	Buffer buf;
-	int len, id;
+	int len;
 	gboolean res;
-
-	id = InterlockedIncrement (&packet_id);
 
 	len = data->p - data->buf + 11;
 	buffer_init (&buf, len);
 	buffer_add_int (&buf, len);
 	buffer_add_int (&buf, id);
-	buffer_add_byte (&buf, 0); /* flags */
-	buffer_add_byte (&buf, command_set);
-	buffer_add_byte (&buf, command);
+	buffer_add_byte (&buf, flags);
+	buffer_add_byte (&buf, b0);
+	buffer_add_byte (&buf, b1);
 	memcpy (buf.buf + 11, data->buf, data->p - data->buf);
 
 	res = transport_send (buf.buf, len);
 
 	buffer_free (&buf);
 
+	return res;	
+}
+
+static gboolean
+send_packet_with_trailers (int id, int flags, int b0, int b1, Buffer *buff)
+{
+	gboolean res;
+	if (trailer_data)
+		flags |= CMD_FLAGS_HAS_TRAILER;
+	res = send_raw_packet (id, flags, b0, b1, buff);
+
+	while (trailer_data) {
+		GSList *cur = trailer_data;
+		TrailerData *td = cur->data;
+		trailer_data = g_slist_next (trailer_data);
+		g_slist_free_1 (cur);
+
+		id = InterlockedIncrement (&packet_id);
+		res = send_raw_packet (id, trailer_data ? CMD_FLAGS_HAS_TRAILER : 0, CMD_SET_TRAILER_DATA, td->command, &td->buffer);
+
+		buffer_free (&td->buffer);
+		g_free (td);
+	}
 	return res;
+}
+
+static gboolean
+send_packet (int command_set, int command, Buffer *data)
+{
+	int id = InterlockedIncrement (&packet_id);
+	return send_packet_with_trailers (id, 0, command_set, command, data);
 }
 
 static gboolean
 send_reply_packet (int id, int error, Buffer *data)
 {
-	Buffer buf;
-	int len;
-	gboolean res;
-	
-	len = data->p - data->buf + 11;
-	buffer_init (&buf, len);
-	buffer_add_int (&buf, len);
-	buffer_add_int (&buf, id);
-	buffer_add_byte (&buf, 0x80); /* flags */
-	buffer_add_byte (&buf, (error >> 8) & 0xff);
-	buffer_add_byte (&buf, error);
-	memcpy (buf.buf + 11, data->buf, data->p - data->buf);
-
-	res = transport_send (buf.buf, len);
-
-	buffer_free (&buf);
-
-	return res;
+	return send_packet_with_trailers (id, CMD_FLAGS_REPLY, (error >> 8) & 0xff, error, data);
 }
 
 /*
@@ -1990,6 +2024,27 @@ buffer_add_domainid (Buffer *buf, MonoDomain *domain)
 {
 	buffer_add_ptr_id (buf, domain, ID_DOMAIN, domain);
 }
+
+/*TRAILER SUPPORT*/
+
+static void emit_type_info (MonoClass *klass, MonoDomain *domain, Buffer *buf);
+
+
+static void
+add_type_info_trailer (MonoDomain *domain, MonoClass *klass)
+{
+	TrailerData *td = g_new0 (TrailerData, 1);
+	td->command = CMD_TRAILER_TYPE_INFO;
+
+	printf ("sending trailer for %x\n", get_id (domain, ID_TYPE, klass));
+	buffer_init (&td->buffer, 128);
+	buffer_add_typeid (&td->buffer, domain, klass);
+	emit_type_info (klass, domain, &td->buffer);
+
+	trailer_data = g_slist_prepend (trailer_data, td);
+}
+
+
 
 static void invoke_method (void);
 
@@ -3112,6 +3167,8 @@ process_event (EventKind event, gpointer arg, gint32 il_offset, MonoContext *ctx
 			break;
 		case EVENT_KIND_TYPE_LOAD:
 			buffer_add_typeid (&buf, domain, arg);
+			if (agent_config.event_piggy_backing)
+				add_type_info_trailer (domain, arg);
 			break;
 		case EVENT_KIND_BREAKPOINT:
 		case EVENT_KIND_STEP:
@@ -5837,6 +5894,12 @@ vm_commands (int command, int id, guint8 *p, guint8 *end, Buffer *buf)
 		break;
 	}
 
+	case CMD_VM_ENABLE_EVENT_PIGGY_BACKING: {
+		printf ("ENABLING PIGGY BACKING\n");
+		agent_config.event_piggy_backing = TRUE;
+		break;
+	}
+
 	default:
 		return ERR_NOT_IMPLEMENTED;
 	}
@@ -6331,56 +6394,64 @@ buffer_add_cattrs (Buffer *buf, MonoDomain *domain, MonoImage *image, MonoClass 
 	}
 }
 
-static ErrorCode
-type_commands_internal (int command, MonoClass *klass, MonoDomain *domain, guint8 *p, guint8 *end, Buffer *buf)
+static void
+emit_type_info (MonoClass *klass, MonoDomain *domain, Buffer *buf)
 {
 	MonoClass *nested;
 	MonoType *type;
 	gpointer iter;
 	guint8 b;
-	int err, nnested;
+	int nnested;
 	char *name;
+
+	buffer_add_string (buf, klass->name_space);
+	buffer_add_string (buf, klass->name);
+	// FIXME: byref
+	name = mono_type_get_name_full (&klass->byval_arg, MONO_TYPE_NAME_FORMAT_FULL_NAME);
+	buffer_add_string (buf, name);
+	g_free (name);
+	buffer_add_assemblyid (buf, domain, klass->image->assembly);
+	buffer_add_moduleid (buf, domain, klass->image);
+	buffer_add_typeid (buf, domain, klass->parent);
+	if (klass->rank || klass->byval_arg.type == MONO_TYPE_PTR)
+		buffer_add_typeid (buf, domain, klass->element_class);
+	else
+		buffer_add_id (buf, 0);
+	buffer_add_int (buf, klass->type_token);
+	buffer_add_byte (buf, klass->rank);
+	buffer_add_int (buf, klass->flags);
+	b = 0;
+	type = &klass->byval_arg;
+	// FIXME: Can't decide whenever a class represents a byref type
+	if (FALSE)
+		b |= (1 << 0);
+	if (type->type == MONO_TYPE_PTR)
+		b |= (1 << 1);
+	if (!type->byref && (((type->type >= MONO_TYPE_BOOLEAN) && (type->type <= MONO_TYPE_R8)) || (type->type == MONO_TYPE_I) || (type->type == MONO_TYPE_U)))
+		b |= (1 << 2);
+	if (type->type == MONO_TYPE_VALUETYPE)
+		b |= (1 << 3);
+	if (klass->enumtype)
+		b |= (1 << 4);
+	buffer_add_byte (buf, b);
+	nnested = 0;
+	iter = NULL;
+	while ((nested = mono_class_get_nested_types (klass, &iter)))
+		nnested ++;
+	buffer_add_int (buf, nnested);
+	iter = NULL;
+	while ((nested = mono_class_get_nested_types (klass, &iter)))
+		buffer_add_typeid (buf, domain, nested);
+}
+
+static ErrorCode
+type_commands_internal (int command, MonoClass *klass, MonoDomain *domain, guint8 *p, guint8 *end, Buffer *buf)
+{
+	int err;
 
 	switch (command) {
 	case CMD_TYPE_GET_INFO: {
-		buffer_add_string (buf, klass->name_space);
-		buffer_add_string (buf, klass->name);
-		// FIXME: byref
-		name = mono_type_get_name_full (&klass->byval_arg, MONO_TYPE_NAME_FORMAT_FULL_NAME);
-		buffer_add_string (buf, name);
-		g_free (name);
-		buffer_add_assemblyid (buf, domain, klass->image->assembly);
-		buffer_add_moduleid (buf, domain, klass->image);
-		buffer_add_typeid (buf, domain, klass->parent);
-		if (klass->rank || klass->byval_arg.type == MONO_TYPE_PTR)
-			buffer_add_typeid (buf, domain, klass->element_class);
-		else
-			buffer_add_id (buf, 0);
-		buffer_add_int (buf, klass->type_token);
-		buffer_add_byte (buf, klass->rank);
-		buffer_add_int (buf, klass->flags);
-		b = 0;
-		type = &klass->byval_arg;
-		// FIXME: Can't decide whenever a class represents a byref type
-		if (FALSE)
-			b |= (1 << 0);
-		if (type->type == MONO_TYPE_PTR)
-			b |= (1 << 1);
-		if (!type->byref && (((type->type >= MONO_TYPE_BOOLEAN) && (type->type <= MONO_TYPE_R8)) || (type->type == MONO_TYPE_I) || (type->type == MONO_TYPE_U)))
-			b |= (1 << 2);
-		if (type->type == MONO_TYPE_VALUETYPE)
-			b |= (1 << 3);
-		if (klass->enumtype)
-			b |= (1 << 4);
-		buffer_add_byte (buf, b);
-		nnested = 0;
-		iter = NULL;
-		while ((nested = mono_class_get_nested_types (klass, &iter)))
-			nnested ++;
-		buffer_add_int (buf, nnested);
-		iter = NULL;
-		while ((nested = mono_class_get_nested_types (klass, &iter)))
-			buffer_add_typeid (buf, domain, nested);
+		emit_type_info (klass, domain, buf);
 		break;
 	}
 	case CMD_TYPE_GET_METHODS: {

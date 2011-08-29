@@ -111,8 +111,8 @@ namespace Mono.Debugger.Soft
 	}
 
 	struct ObjectRefInfo {
-		long type_id;
-		long domain_id;
+		internal long type_id;
+		internal long domain_id;
 	}
 
 	enum ValueTypeId {
@@ -369,7 +369,8 @@ namespace Mono.Debugger.Soft
 			METHOD = 22,
 			TYPE = 23,
 			MODULE = 24,
-			EVENT = 64
+			EVENT = 64,
+			TRAILER_DATA = 65,
 		}
 
 		enum EventKind {
@@ -411,7 +412,8 @@ namespace Mono.Debugger.Soft
 			INVOKE_METHOD = 7,
 			SET_PROTOCOL_VERSION = 8,
 			ABORT_INVOKE = 9,
-			SET_KEEPALIVE = 10
+			SET_KEEPALIVE = 10,
+			ENABLE_EVENT_PIGGY_BACKING = 11,
 		}
 
 		enum CmdEvent {
@@ -515,6 +517,10 @@ namespace Mono.Debugger.Soft
 			GET_INFO = 7,
 		}
 
+		enum CmdTrailerData {
+			TYPE_INFO = 1,
+		}
+
 		class Header {
 			public int id;
 			public int command_set;
@@ -531,6 +537,12 @@ namespace Mono.Debugger.Soft
 			int offset = 8;
 			return decode_byte (packet, ref offset) == 0x80;
 		}
+
+		public static bool PacketHasTrailer (byte[] packet) {
+			int offset = 8;
+			return decode_byte (packet, ref offset) == 0x40;
+		}
+
 
 		public static int GetPacketId (byte[] packet) {
 			int offset = 4;
@@ -1098,12 +1110,37 @@ namespace Mono.Debugger.Soft
 			EventHandler.VMDisconnect (0, 0, null);
 		}
 
+		void DecodeTrailers (byte[] packet) {
+			while (PacketHasTrailer (packet)) {
+				Console.WriteLine ("Decoding Trailer");
+				packet = ReadPacket ();
+				if (packet.Length == 0)
+					break;
+
+				PacketReader r = new PacketReader (packet);
+				Console.WriteLine ("trailer cmd-set {0} cmd {1}", r.CommandSet, (CmdTrailerData)r.Command);
+				if (r.CommandSet != CommandSet.TRAILER_DATA)
+					continue;
+				switch ((CmdTrailerData)r.Command) {
+				case CmdTrailerData.TYPE_INFO:
+					long type_id = r.ReadId ();
+					TypeInfo info = DecodeTypeInfo (r);
+					EventHandler.TypeInformation (type_id, info);
+					break;
+				default: /*Trailer data is optional, so it's ok to ignore it */
+					break;
+				}
+			}
+			
+		}
 		bool ReceivePacket () {
 				byte[] packet = ReadPacket ();
 
 				if (packet.Length == 0) {
 					return false;
 				}
+
+				DecodeTrailers (packet);
 
 				if (IsReplyPacket (packet)) {
 					int id = GetPacketId (packet);
@@ -1524,6 +1561,11 @@ namespace Mono.Debugger.Soft
 			SendReceive (CommandSet.VM, (int)CmdVM.SET_KEEPALIVE, new PacketWriter ().WriteId (keepalive_interval));
 		}
 
+		public void EnableEventPiggyBacking ()
+		{
+			SendReceive (CommandSet.VM, (int)CmdVM.ENABLE_EVENT_PIGGY_BACKING);
+		}
+
 		/*
 		 * DOMAIN
 		 */
@@ -1755,9 +1797,7 @@ namespace Mono.Debugger.Soft
 		/*
 		 * TYPE
 		 */
-
-		public TypeInfo Type_GetInfo (long id) {
-			PacketReader r = SendReceive (CommandSet.TYPE, (int)CmdType.GET_INFO, new PacketWriter ().WriteId (id));
+		TypeInfo DecodeTypeInfo (PacketReader r) {
 			TypeInfo res = new TypeInfo ();
 
 			res.ns = r.ReadString ();
@@ -1781,8 +1821,12 @@ namespace Mono.Debugger.Soft
 			res.nested = new long [nested_len];
 			for (int i = 0; i < nested_len; ++i)
 				res.nested [i] = r.ReadId ();
-
 			return res;
+		}
+
+		public TypeInfo Type_GetInfo (long id) {
+			PacketReader r = SendReceive (CommandSet.TYPE, (int)CmdType.GET_INFO, new PacketWriter ().WriteId (id));
+			return DecodeTypeInfo (r);
 		}
 
 		public long[] Type_GetMethods (long id) {
@@ -2071,5 +2115,7 @@ namespace Mono.Debugger.Soft
 		void Events (SuspendPolicy suspend_policy, EventInfo[] events);
 
 		void VMDisconnect (int req_id, long thread_id, string vm_uri);
+
+		void TypeInformation (long type_id, TypeInfo info);
 	}
 }

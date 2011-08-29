@@ -566,6 +566,10 @@ namespace Mono.Debugger.Soft
 			return info;
 		}
 
+		internal void SetInfo (TypeInfo info) {
+			this.info = info;
+		}
+
 		protected virtual TypeAttributes GetAttributeFlagsImpl () {
 			return (TypeAttributes)GetInfo ().attributes;
 		}
