@@ -7055,9 +7055,9 @@ create_allocator (int atype)
 		MonoClass *oom_exc_class;
 		MonoMethod *ctor;
 
-		/* n > 	MONO_ARRAY_MAX_INDEX -> OverflowException */
+		/* n > 	MONO_ARRAY_MAX_INDEX_32 -> OverflowException */
 		mono_mb_emit_ldarg (mb, 1);
-		mono_mb_emit_icon (mb, MONO_ARRAY_MAX_INDEX);
+		mono_mb_emit_icon (mb, MONO_ARRAY_MAX_INDEX_32);
 		pos = mono_mb_emit_short_branch (mb, CEE_BLE_UN_S);
 		mono_mb_emit_exception (mb, "OverflowException", NULL);
 		mono_mb_patch_short_branch (mb, pos);

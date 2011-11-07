@@ -152,16 +152,22 @@
 
 #endif
 
+#define MONO_ARRAY_MAX_INDEX_32 G_MAXINT32
+#define MONO_ARRAY_MAX_INDEX_64 G_MAXINT64
+
+#define MONO_ARRAY_MAX_SIZE_32  G_MAXUINT32
+#define MONO_ARRAY_MAX_SIZE_64  G_MAXUINT64
+
 #if SIZEOF_VOID_P == 8
 typedef uint64_t mono_array_size_t;
 typedef int64_t mono_array_lower_bound_t;
-#define MONO_ARRAY_MAX_INDEX G_MAXINT64
-#define MONO_ARRAY_MAX_SIZE  G_MAXUINT64
+#define MONO_ARRAY_MAX_INDEX MONO_ARRAY_MAX_INDEX_64
+#define MONO_ARRAY_MAX_SIZE  MONO_ARRAY_MAX_SIZE_64
 #else
 typedef uint32_t mono_array_size_t;
 typedef int32_t mono_array_lower_bound_t;
-#define MONO_ARRAY_MAX_INDEX ((int32_t) 0x7fffffff)
-#define MONO_ARRAY_MAX_SIZE  ((uint32_t) 0xffffffff)
+#define MONO_ARRAY_MAX_INDEX MONO_ARRAY_MAX_INDEX_32
+#define MONO_ARRAY_MAX_SIZE  MONO_ARRAY_MAX_SIZE_32
 #endif
 
 typedef struct {
