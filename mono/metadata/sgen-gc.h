@@ -324,9 +324,11 @@ typedef struct {
 
 /* set the forwarded address fw_addr for object obj */
 #define SGEN_FORWARD_OBJECT(obj,fw_addr) do {				\
+		g_assert (!mono_sgen_obj_in_mark_nursery (obj));	\
 		((mword*)(obj))[0] = (mword)(fw_addr) | SGEN_FORWARDED_BIT; \
 	} while (0)
 #define SGEN_PIN_OBJECT(obj) do {	\
+		g_assert (!mono_sgen_obj_in_mark_nursery (obj));	\
 		((mword*)(obj))[0] |= SGEN_PINNED_BIT;	\
 	} while (0)
 #define SGEN_UNPIN_OBJECT(obj) do {	\
@@ -732,6 +734,19 @@ void mono_sgen_alloc_init_heavy_stats (void) MONO_INTERNAL;
 char* mono_sgen_nursery_alloc_get_upper_alloc_bound (void) MONO_INTERNAL;
 void* mono_sgen_nursery_alloc (size_t size) MONO_INTERNAL;
 void* mono_sgen_nursery_alloc_range (size_t size, size_t min_size, int *out_alloc_size) MONO_INTERNAL;
+void mono_sgen_nursery_alloc_prepare_for_minor (void) MONO_INTERNAL;
+void mono_sgen_nursery_alloc_prepare_for_major (const char *reason) MONO_INTERNAL;
+
+gboolean mono_sgen_mark_nursery_object (char *obj) MONO_INTERNAL;
+gboolean mono_sgen_par_mark_nursery_object (char *obj) MONO_INTERNAL;
+gboolean mono_sgen_obj_in_mark_nursery (char *obj) MONO_INTERNAL;
+gboolean mono_sgen_obj_in_evacuate_nursery (char *obj) MONO_INTERNAL;
+gboolean mono_sgen_obj_is_nursery_marked (char *obj) MONO_INTERNAL;
+gboolean mono_sgen_obj_is_old_nursery_marked (char *obj) MONO_INTERNAL;
+
+char *mono_sgen_get_nursery_scan_start (void) MONO_INTERNAL;
+char *mono_sgen_get_nursery_scan_end (void) MONO_INTERNAL;
+
 MonoVTable* mono_sgen_get_array_fill_vtable (void) MONO_INTERNAL;
 gboolean mono_sgen_can_alloc_size (size_t size) MONO_INTERNAL;
 void mono_sgen_nursery_retire_region (void *address, ptrdiff_t size) MONO_INTERNAL;

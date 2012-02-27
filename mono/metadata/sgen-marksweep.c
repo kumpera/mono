@@ -1018,6 +1018,11 @@ pin_or_update_par (void **ptr, void *obj, MonoVTable *vt, SgenGrayQueue *queue)
 		gboolean major_pinned = FALSE;
 
 		if (mono_sgen_ptr_in_nursery (obj)) {
+			if (mono_sgen_obj_in_mark_nursery (obj)) {
+				mono_sgen_par_mark_nursery_object (obj);
+				break;
+			}
+
 			if (SGEN_CAS_PTR (obj, (void*)((mword)vt | SGEN_PINNED_BIT), vt) == vt) {
 				mono_sgen_pin_object (obj, queue);
 				break;
@@ -1061,7 +1066,15 @@ major_copy_or_mark_object (void **ptr, SgenGrayQueue *queue)
 		int word, bit;
 		gboolean has_references;
 		void *destination;
-		mword vtable_word = *(mword*)obj;
+		mword vtable_word;
+		
+		if (mono_sgen_obj_in_mark_nursery (obj)) {
+			if (mono_sgen_par_mark_nursery_object (obj))
+				GRAY_OBJECT_ENQUEUE (queue, obj);
+			return;
+		}
+			
+		vtable_word = *(mword*)obj;
 		vt = (MonoVTable*)(vtable_word & ~SGEN_VTABLE_BITS_MASK);
 
 		if (vtable_word & SGEN_FORWARDED_BIT) {
@@ -1209,6 +1222,12 @@ major_copy_or_mark_object (void **ptr, SgenGrayQueue *queue)
 	if (mono_sgen_ptr_in_nursery (obj)) {
 		int word, bit;
 		char *forwarded, *old_obj;
+
+		if (mono_sgen_obj_in_mark_nursery (obj)) {
+			if (mono_sgen_mark_nursery_object (obj) && queue)
+				GRAY_OBJECT_ENQUEUE (queue, obj);
+			return;
+		}
 
 		if ((forwarded = SGEN_OBJECT_IS_FORWARDED (obj))) {
 			*ptr = forwarded;

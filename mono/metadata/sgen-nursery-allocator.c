@@ -98,6 +98,18 @@ cleanup the code that readies the nursery for pinning/collection
 #include "utils/mono-proclib.h"
 #include "utils/mono-threads.h"
 
+typedef struct {
+	char *start;
+	char *end;
+	gboolean active;
+} NurserySemiSpace;
+
+static NurserySemiSpace spaces[2];
+static NurserySemiSpace *evacuate_space, *mark_space;
+static mword *nursery_mark_bitmap;
+static mword *old_nursery_mark_bitmap;
+static int bitmap_size;
+
 
 typedef struct _Fragment Fragment;
 
@@ -464,6 +476,28 @@ mono_sgen_clear_nursery_fragments (void)
 	}
 }
 
+static void
+clear_object_range (char *start, char *end)
+{
+	MonoArray *o;
+	size_t size = end - start;
+
+	if (size < sizeof (MonoArray)) {
+		memset (start, 0, size);
+		return;
+	}
+
+	o = (MonoArray*)start;
+
+	/*FIXME this is not necessary, we fill all fields! */
+	memset (o, 0, sizeof (MonoArray));
+	o->obj.vtable = mono_sgen_get_array_fill_vtable ();
+	/* Mark this as not a real object */
+	o->obj.synchronisation = GINT_TO_POINTER (-1);
+	o->max_length = size - sizeof (MonoArray);
+	g_assert (start + mono_sgen_safe_object_get_size ((MonoObject*)o) == end);
+}
+
 void
 mono_sgen_nursery_allocator_prepare_for_pinning (void)
 {
@@ -479,17 +513,7 @@ mono_sgen_nursery_allocator_prepare_for_pinning (void)
 	 * The third encompasses the first two, since scan_locations [i] can't point inside a nursery fragment.
 	 */
 	for (frag = unmask (nursery_fragments); frag; frag = unmask (frag->next)) {
-		MonoArray *o;
-
-		g_assert (frag->fragment_end - frag->fragment_next >= sizeof (MonoArray));
-		o = (MonoArray*)frag->fragment_next;
-		memset (o, 0, sizeof (MonoArray));
-		g_assert (mono_sgen_get_array_fill_vtable ());
-		o->obj.vtable = mono_sgen_get_array_fill_vtable ();
-		/* Mark this as not a real object */
-		o->obj.synchronisation = GINT_TO_POINTER (-1);
-		o->max_length = (frag->fragment_end - frag->fragment_next) - sizeof (MonoArray);
-		g_assert (frag->fragment_next + mono_sgen_safe_object_get_size ((MonoObject*)o) == frag->fragment_end);
+		clear_object_range (frag->fragment_next, frag->fragment_end);
 	}
 }
 
@@ -515,6 +539,7 @@ add_nursery_frag (size_t frag_size, char* frag_start, char* frag_end)
 		printf ("\tfragment [%p %p] size %zd\n", frag_start, frag_end, frag_size);
 		*/
 #endif
+		//printf ("\tfragment [%p %p] size %zd\n", frag_start, frag_end, frag_size);
 		add_fragment (frag_start, frag_end);
 		fragment_total += frag_size;
 	} else {
@@ -522,6 +547,7 @@ add_nursery_frag (size_t frag_size, char* frag_start, char* frag_end)
 		/*TODO place an int[] here instead of the memset if size justify it*/
 		memset (frag_start, 0, frag_size);
 		HEAVY_STAT (InterlockedExchangeAdd (&stat_wasted_bytes_small_areas, frag_size));
+		//printf ("\tsmall space zeroed [%p %p]\n", frag_start, frag_end);
 	}
 }
 
@@ -544,12 +570,19 @@ mono_sgen_build_nursery_fragments (GCMemSection *nursery_section, void **start, 
 		fragment_freelist = nf;
 		nursery_fragments = next;
 	}
-	frag_start = mono_sgen_nursery_start;
+	frag_start = evacuate_space->start;
 	fragment_total = 0;
 	/* clear scan starts */
 	memset (nursery_section->scan_starts, 0, nursery_section->num_scan_start * sizeof (gpointer));
 	for (i = 0; i < num_entries; ++i) {
 		frag_end = start [i];
+
+		if (frag_end < evacuate_space->start)
+			continue;
+
+		if (frag_end >= evacuate_space->end)
+			break;
+
 		/* remove the pin bit from pinned objects */
 		SGEN_UNPIN_OBJECT (frag_end);
 		nursery_section->scan_starts [((char*)frag_end - (char*)nursery_section->data)/SGEN_SCAN_START_SIZE] = frag_end;
@@ -563,7 +596,7 @@ mono_sgen_build_nursery_fragments (GCMemSection *nursery_section, void **start, 
 		frag_start = (char*)start [i] + frag_size;
 	}
 	nursery_last_pinned_end = frag_start;
-	frag_end = mono_sgen_nursery_end;
+	frag_end = evacuate_space->end;
 	frag_size = frag_end - frag_start;
 	if (frag_size)
 		add_nursery_frag (frag_size, frag_start, frag_end);
@@ -741,13 +774,239 @@ mono_sgen_init_nursery_allocator (void)
 #endif
 }
 
+#define CALC_MARK_BIT(w,b,o) 	do {				\
+		int i = ((char*)(o) - mark_space->start) >> SGEN_ALLOC_ALIGN_BITS; \
+		if (sizeof (mword) == 4) {				\
+			(w) = i >> 5;					\
+			(b) = i & 31;					\
+		} else {						\
+			(w) = i >> 6;					\
+			(b) = i & 63;					\
+		}							\
+	} while (0)
+
+#define GET_MARK_BIT(w,b) (nursery_mark_bitmap [(w)] & (1L << (b)))
+#define SET_MARK_BIT(w,b) (nursery_mark_bitmap [(w)] |= (1L << (b)))
+
+
+#define OLD_CALC_MARK_BIT(w,b,o) 	do {				\
+		int i = ((char*)(o) - evacuate_space->start) >> SGEN_ALLOC_ALIGN_BITS; \
+		if (sizeof (mword) == 4) {				\
+			(w) = i >> 5;					\
+			(b) = i & 31;					\
+		} else {						\
+			(w) = i >> 6;					\
+			(b) = i & 63;					\
+		}							\
+	} while (0)
+
+#define OLD_GET_MARK_BIT(w,b) (old_nursery_mark_bitmap [(w)] & (1L << (b)))
+#define OLD_SET_MARK_BIT(w,b) (old_nursery_mark_bitmap [(w)] |= (1L << (b)))
+
+
+gboolean
+mono_sgen_obj_is_nursery_marked (char *obj)
+{
+	int w, b;
+
+	if (!mono_sgen_obj_in_mark_nursery (obj))
+		return FALSE;
+
+	CALC_MARK_BIT (w, b, obj);
+	return GET_MARK_BIT (w,b);
+}
+
+
+gboolean
+mono_sgen_obj_is_old_nursery_marked (char *obj)
+{
+	int w, b;
+
+	if (!mono_sgen_obj_in_evacuate_nursery (obj))
+		return FALSE;
+
+	OLD_CALC_MARK_BIT (w, b, obj);
+	return OLD_GET_MARK_BIT (w,b);
+}
+
+static inline gboolean
+mono_sgen_obj_in_space (char *obj, const NurserySemiSpace *space)
+{
+	return obj >= space->start && obj < space->end;
+}
+
+gboolean
+mono_sgen_obj_in_mark_nursery (char *obj)
+{
+	return mono_sgen_obj_in_space (obj, mark_space);
+}
+
+gboolean
+mono_sgen_obj_in_evacuate_nursery (char *obj)
+{
+	return mono_sgen_obj_in_space (obj, evacuate_space);
+}
+
+
+gboolean
+mono_sgen_mark_nursery_object (char *obj)
+{
+	int w, b;
+
+	g_assert (mono_sgen_obj_in_mark_nursery (obj));
+	CALC_MARK_BIT (w, b, obj);
+	if (GET_MARK_BIT (w,b))
+		return FALSE;
+
+	SET_MARK_BIT (w, b);
+	return TRUE;
+}
+
+gboolean
+mono_sgen_par_mark_nursery_object (char *obj)
+{
+	int w, b;
+	mword word, bitmask;
+
+	g_assert (mono_sgen_obj_in_mark_nursery (obj));
+
+	CALC_MARK_BIT (w, b, obj);
+	bitmask = 1L << b;
+
+	/* We must loop till the bit gets marked, by us or other thread. */
+	do {
+		word = nursery_mark_bitmap [w];
+		if (word & bitmask)
+			return FALSE;
+	} while (SGEN_CAS_PTR ((gpointer*)&nursery_mark_bitmap [w], (gpointer)(word | bitmask), (gpointer)word) != (gpointer)word);
+
+	return TRUE;
+}
+
+static  void
+report_broken (char *start, size_t size, void *data)
+{
+	int w, b;
+
+	CALC_MARK_BIT (w, b, start);
+
+	if (!GET_MARK_BIT (w, b))
+		printf ("DEAD OBJECT AT %p\n", start);
+}
+
+static void
+flip_spaces (void)
+{
+	//mono_sgen_scan_area_with_callback (mark_space->start, mark_space->end, report_broken, NULL, FALSE);
+
+	if (spaces [0].active) {
+		evacuate_space = &spaces [1];
+		mark_space = &spaces [0];
+	} else {
+		evacuate_space = &spaces [0];
+		mark_space = &spaces [1];
+	}
+
+	spaces [0].active = !spaces [0].active;
+	spaces [1].active = !spaces [1].active;
+}
+
+static void
+clear_dead (char *start, size_t size, void *data)
+{
+	int w, b;
+
+	CALC_MARK_BIT (w, b, start);
+
+	if (!GET_MARK_BIT (w, b))
+		clear_object_range (start, start + size);
+}
+
+void
+mono_sgen_nursery_alloc_finish (void)
+{
+	mono_sgen_scan_area_with_callback (mark_space->start, mark_space->end, clear_dead, NULL, TRUE);
+}
+
+void
+mono_sgen_nursery_alloc_prepare_for_minor (void)
+{
+	void *tmp = old_nursery_mark_bitmap;
+	old_nursery_mark_bitmap = nursery_mark_bitmap;
+	nursery_mark_bitmap = tmp;
+	
+	flip_spaces ();
+
+	/*printf ("EVACUATING [%p - %p] MARKING [%p - %p] NURSERY [%p - %p]\n",
+		evacuate_space->start, evacuate_space->end,
+		mark_space->start, mark_space->end,
+		mono_sgen_nursery_start, mono_sgen_nursery_end);*/
+
+	/*
+	FIXME we can probably do this in the background or, at the very least, with the world started. Merge this task with lazy sweep?
+	*/
+
+	memset (nursery_mark_bitmap, 0, bitmap_size);
+}
+
+void
+mono_sgen_nursery_alloc_prepare_for_major (const char *reason)
+{
+	/* YAY for shitty interfaces. */
+	gboolean minor_overflow = !strcmp (reason, "minor overflow");
+
+	void *tmp = old_nursery_mark_bitmap;
+	old_nursery_mark_bitmap = nursery_mark_bitmap;
+	nursery_mark_bitmap = tmp;
+
+	/*printf ("PREP MAJOR %s [%p - %p] MARKING [%p - %p] NURSERY [%p - %p]\n",
+		reason,
+		evacuate_space->start, evacuate_space->end,
+		mark_space->start, mark_space->end,
+		mono_sgen_nursery_start, mono_sgen_nursery_end);*/
+
+	/*
+	If we minor overflow we should evacuate exactly the same part of the nursery.
+	Besides that, it's a stupid Idea to do the major GC AFTER the minor. We should do
+	a major and that''s it.
+
+	If the user has triggered a major GC we do the regular flip
+	*/
+	if (!minor_overflow)
+		flip_spaces ();
+
+	memset (nursery_mark_bitmap, 0, bitmap_size);
+
+}
+
 void
 mono_sgen_nursery_allocator_set_nursery_bounds (char *start, char *end)
 {
+	char *middle;
 	/* Setup the single first large fragment */
-	add_fragment (start, end);
 	mono_sgen_nursery_start = start;
 	mono_sgen_nursery_end = end;
+
+	middle = start + (end - start) / 2;
+	spaces [0].start = start;
+	spaces [0].end = middle;
+	spaces [0].active = TRUE;
+
+	spaces [1].start = middle;
+	spaces [1].end = end;
+	spaces [1].active = FALSE;
+	evacuate_space = &spaces [1];
+	mark_space = &spaces [0];
+
+	/*
+	We alloc enough bitmap space for half of the nursery, since this is all we need.
+	With a 4Mb nursery we need 32k bits.
+	*/
+	bitmap_size = (end - start) / (SGEN_ALLOC_ALIGN * 8 * 2);
+	nursery_mark_bitmap = mono_sgen_alloc_os_memory (bitmap_size, TRUE);
+	old_nursery_mark_bitmap = mono_sgen_alloc_os_memory (bitmap_size, TRUE);
+
+	add_fragment (start, middle);
 }
 
 #endif

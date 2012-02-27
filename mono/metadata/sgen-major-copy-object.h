@@ -92,6 +92,7 @@ copy_object_no_checks (void *obj, SgenGrayQueue *queue)
 
 	if (G_UNLIKELY (!destination)) {
 		if (mono_sgen_ptr_in_nursery (obj)) {
+			g_assert (!mono_sgen_obj_in_mark_nursery (obj));
 			mono_sgen_pin_object (obj, queue);
 		} else {
 			g_assert (objsize <= SGEN_MAX_SMALL_OBJ_SIZE);
@@ -145,6 +146,13 @@ nopar_copy_object (void **obj_slot, SgenGrayQueue *queue)
 		return;
 	}
 
+	if (mono_sgen_obj_in_mark_nursery (obj)) {
+		if (mono_sgen_mark_nursery_object (obj) && queue) {
+			GRAY_OBJECT_ENQUEUE (queue, obj);
+		}
+		return;
+	}
+
 	DEBUG (9, fprintf (gc_debug_file, "Precise copy of %p from %p", obj, obj_slot));
 
 	/*
@@ -188,6 +196,12 @@ copy_object (void **obj_slot, SgenGrayQueue *queue)
 
 	if (!mono_sgen_ptr_in_nursery (obj)) {
 		HEAVY_STAT (++stat_nursery_copy_object_failed_from_space);
+		return;
+	}
+
+	if (mono_sgen_obj_in_mark_nursery (obj)) {
+		if (mono_sgen_par_mark_nursery_object (obj))
+			GRAY_OBJECT_ENQUEUE (queue, obj);
 		return;
 	}
 

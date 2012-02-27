@@ -1303,12 +1303,21 @@ pin_objects_from_addresses (GCMemSection *section, void **start, void **end, voi
 					if (addr >= search_start && (char*)addr < (char*)last_obj + last_obj_size) {
 						DEBUG (4, fprintf (gc_debug_file, "Pinned object %p, vtable %p (%s), count %d\n", search_start, *(void**)search_start, safe_name (search_start), count));
 						binary_protocol_pin (search_start, (gpointer)LOAD_VTABLE (search_start), safe_object_get_size (search_start));
-						pin_object (search_start);
-						GRAY_OBJECT_ENQUEUE (queue, search_start);
-						if (G_UNLIKELY (do_pin_stats))
-							mono_sgen_pin_stats_register_object (search_start, last_obj_size);
-						definitely_pinned [count] = search_start;
-						count++;
+						if (mono_sgen_obj_in_mark_nursery (search_start)) {
+							if (mono_sgen_mark_nursery_object (search_start))
+								GRAY_OBJECT_ENQUEUE (queue, search_start);
+							if (G_UNLIKELY (do_pin_stats))
+								mono_sgen_pin_stats_register_object (search_start, last_obj_size);
+						} else {
+							if (mono_sgen_obj_is_old_nursery_marked (search_start) || 1) {
+								pin_object (search_start);
+								GRAY_OBJECT_ENQUEUE (queue, search_start);
+								if (G_UNLIKELY (do_pin_stats))
+									mono_sgen_pin_stats_register_object (search_start, last_obj_size);
+								definitely_pinned [count] = search_start;
+								count++;
+							}
+						}
 						break;
 					}
 				}
@@ -1353,6 +1362,8 @@ mono_sgen_pin_objects_in_section (GCMemSection *section, GrayQueue *queue)
 void
 mono_sgen_pin_object (void *object, GrayQueue *queue)
 {
+	g_assert (!mono_sgen_obj_in_mark_nursery (object));
+
 	if (mono_sgen_collection_is_parallel ()) {
 		LOCK_PIN_QUEUE;
 		/*object arrives pinned*/
@@ -2475,6 +2486,21 @@ job_scan_thread_data (WorkerData *worker_data, void *job_data_untyped)
 			mono_sgen_workers_get_job_gray_queue (worker_data));
 }
 
+typedef struct
+{
+	FinalizeReadyEntry *list;
+} ScanFinalizerEntriesJobData;
+
+static void
+job_scan_finalizer_entries (WorkerData *worker_data, void *job_data_untyped)
+{
+	ScanFinalizerEntriesJobData *job_data = job_data_untyped;
+
+	scan_finalizer_entries (mono_sgen_get_copy_object (),
+			job_data->list,
+			mono_sgen_workers_get_job_gray_queue (worker_data));
+}
+
 static void
 verify_scan_starts (char *start, char *end)
 {
@@ -2540,6 +2566,7 @@ collect_nursery (size_t requested_size)
 	char *nursery_next;
 	FinishRememberedSetScanJobData frssjd;
 	ScanFromRegisteredRootsJobData scrrjd_normal, scrrjd_wbarrier;
+	ScanFinalizerEntriesJobData sfejd_fin_ready, sfejd_critical_fin;
 	ScanThreadDataJobData stdjd;
 	mword fragment_total;
 	TV_DECLARE (all_atv);
@@ -2560,6 +2587,8 @@ collect_nursery (size_t requested_size)
 
 	binary_protocol_collection (GENERATION_NURSERY);
 	check_scan_starts ();
+
+	mono_sgen_nursery_alloc_prepare_for_minor ();
 
 	degraded_mode = 0;
 	objects_pinned = 0;
@@ -2685,6 +2714,13 @@ collect_nursery (size_t requested_size)
 	if (mono_sgen_collection_is_parallel ())
 		g_assert (mono_sgen_gray_object_queue_is_empty (&gray_queue));
 
+	/* scan the list of objects ready for finalization */
+	sfejd_fin_ready.list = fin_ready_list;
+	mono_sgen_workers_enqueue_job (job_scan_finalizer_entries, &sfejd_fin_ready);
+
+	sfejd_critical_fin.list = critical_fin_list;
+	mono_sgen_workers_enqueue_job (job_scan_finalizer_entries, &sfejd_critical_fin);
+
 	finish_gray_stack (mono_sgen_get_nursery_start (), nursery_next, GENERATION_NURSERY, &gray_queue);
 	TV_GETTIME (atv);
 	time_minor_finish_gray_stack += TV_ELAPSED (btv, atv);
@@ -2744,6 +2780,8 @@ collect_nursery (size_t requested_size)
 	if (remset.finish_minor_collection)
 		remset.finish_minor_collection ();
 
+	mono_sgen_nursery_alloc_finish ();
+
 	check_scan_starts ();
 
 	binary_protocol_flush_buffers (FALSE);
@@ -2770,21 +2808,6 @@ mono_sgen_collect_nursery_no_lock (size_t requested_size)
 
 	mono_trace_message (MONO_TRACE_GC, "minor gc took %d usecs", (mono_100ns_ticks () - gc_start_time) / 10);
 	mono_profiler_gc_event (MONO_GC_EVENT_END, 0);
-}
-
-typedef struct
-{
-	FinalizeReadyEntry *list;
-} ScanFinalizerEntriesJobData;
-
-static void
-job_scan_finalizer_entries (WorkerData *worker_data, void *job_data_untyped)
-{
-	ScanFinalizerEntriesJobData *job_data = job_data_untyped;
-
-	scan_finalizer_entries (major_collector.copy_or_mark_object,
-			job_data->list,
-			mono_sgen_workers_get_job_gray_queue (worker_data));
 }
 
 static gboolean
@@ -2826,6 +2849,7 @@ major_do_collection (const char *reason)
 	check_scan_starts ();
 	mono_sgen_gray_object_queue_init (&gray_queue);
 	mono_sgen_workers_init_distribute_gray_queue ();
+	mono_sgen_nursery_alloc_prepare_for_major (reason);
 
 	degraded_mode = 0;
 	DEBUG (1, fprintf (gc_debug_file, "Start major collection %d\n", stat_major_gcs));
@@ -3085,6 +3109,8 @@ major_do_collection (const char *reason)
 
 	major_collector.finish_major_collection ();
 
+	mono_sgen_nursery_alloc_finish ();
+
 	check_scan_starts ();
 
 	binary_protocol_flush_buffers (FALSE);
@@ -3215,7 +3241,7 @@ report_internal_mem_usage (void)
  * still refrenced from a root. If it is pinned it's still alive as well.
  * Return TRUE if @obj is ready to be finalized.
  */
-#define object_is_fin_ready(obj) (!object_is_pinned (obj) && !object_is_forwarded (obj))
+#define object_is_fin_ready(obj) (!object_is_pinned (obj) && !object_is_forwarded (obj) && !mono_sgen_obj_is_nursery_marked ((char*)obj))
 
 
 gboolean

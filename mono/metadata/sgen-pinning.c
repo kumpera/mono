@@ -128,6 +128,9 @@ mono_sgen_pin_queue_clear_discarded_entries (GCMemSection *section, int max_pin_
 	void **end = pin_queue + max_pin_slot;
 	void *addr;
 
+	if (!start)
+		return;
+
 	for (; start < end; ++start) {
 		addr = *start;
 		if ((char*)addr < section->data || (char*)addr > section->end_data)
