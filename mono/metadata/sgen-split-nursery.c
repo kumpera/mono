@@ -115,15 +115,6 @@ static char *region_age;
 static int region_age_size;
 static AgeAllocationBuffer age_alloc_buffers [MAX_AGE];
 
-static int last_gc_alloc_size, total_gc_alloc;
-static int per_age_promotion [MAX_AGE];
-static int per_age_failure [MAX_AGE];
-static int per_age_liveset [MAX_AGE];
-static int per_age_previous_promotion [MAX_AGE];
-static int per_age_total_death [MAX_AGE];
-static int per_age_waste [MAX_AGE];
-static int per_age_total_waste [MAX_AGE];
-
 /* The collector allocs from here. */
 static SgenFragmentAllocator collector_allocator;
 
@@ -213,8 +204,7 @@ fragment_list_split (SgenFragmentAllocator *allocator)
 /******************************************Minor Collector API ************************************************/
 
 #define AGE_ALLOC_BUFFER_MIN_SIZE SGEN_TO_SPACE_GRANULE_IN_BYTES
-#define AGE_ALLOC_BUFFER_DESIRED_SIZE (SGEN_TO_SPACE_GRANULE_IN_BYTES * 16)
-
+#define AGE_ALLOC_BUFFER_DESIRED_SIZE (SGEN_TO_SPACE_GRANULE_IN_BYTES * 8)
 
 static inline char*
 alloc_for_promotion (char *obj, size_t objsize, gboolean has_references)
@@ -232,15 +222,10 @@ alloc_for_promotion (char *obj, size_t objsize, gboolean has_references)
 	++age; //promote!
 	g_assert (age < MAX_AGE);
 	
-	per_age_liveset [age] += objsize;
-
 	available = age_alloc_buffers [age].end - age_alloc_buffers [age].next;
 	if (available >= objsize) {
 		p = age_alloc_buffers [age].next;
-		if (!sgen_ptr_in_nursery (p))
-			g_error ("non nursery pointer %p", p);
 		age_alloc_buffers [age].next += objsize;
-		g_assert (age_alloc_buffers [age].next <= age_alloc_buffers [age].end);
 	} else {
 		size_t allocated_size;
 		size_t aligned_objsize = (size_t)align_up (objsize, SGEN_TO_SPACE_GRANULE_BITS);
@@ -251,20 +236,15 @@ alloc_for_promotion (char *obj, size_t objsize, gboolean has_references)
 			MAX (aligned_objsize, AGE_ALLOC_BUFFER_MIN_SIZE),
 			&allocated_size);
 		if (p) {
-			per_age_waste [age] += available;
 			set_age_in_range (p, p + allocated_size, age);
 			sgen_clear_range (age_alloc_buffers [age].next, age_alloc_buffers [age].end);
 			age_alloc_buffers [age].next = p + objsize;
 			age_alloc_buffers [age].end = p + allocated_size;
-			g_assert (age_alloc_buffers [age].next <= age_alloc_buffers [age].end);
 		}
 	}
 
-	if (!p) {
-		per_age_failure [age] += objsize;
+	if (!p)
 		p = major_collector.alloc_object (objsize, has_references);
-	} else
-		per_age_promotion [age] += objsize;
 	
 
 	return p;
@@ -293,10 +273,8 @@ static SgenFragment*
 build_fragments_get_exclude_head (void)
 {
 	int i;
-	for (i = 0; i < MAX_AGE; ++i) {
-		// printf ("age %d [%p %p]\n", i, age_alloc_buffers [i].next, age_alloc_buffers [i].end);
+	for (i = 0; i < MAX_AGE; ++i)
 		sgen_clear_range (age_alloc_buffers [i].next, age_alloc_buffers [i].end);
-	}
 
 	return collector_allocator.region_head;
 }
@@ -307,77 +285,9 @@ build_fragments_release_exclude_head (void)
 	sgen_fragment_allocator_release (&collector_allocator);
 }
 
-static int gcs = 0;
-
 static void
 build_fragments_finish (SgenFragmentAllocator *allocator)
 {
-	int i, total = 0;
-	printf ("\n");
-	printf ("promotion rate: ");
-	for (i = 0; i < MAX_AGE; ++i) {
-		printf ("%7d ", per_age_promotion [i]);
-		total += per_age_promotion [i];
-	}
-	printf (" %d\n", total);
-
-	total = 0;
-	printf ("fail      rate: ");
-	for (i = 0; i < MAX_AGE; ++i) {
-		printf ("%7d ", per_age_failure [i]);
-		total += per_age_failure [i];
-	}
-	printf (" %d\n", total);
-
-	total = 0;
-	printf ("liveset   rate: ");
-	for (i = 0; i < MAX_AGE; ++i) {
-		printf ("%7d ", per_age_liveset [i]);
-		total += per_age_liveset [i];
-	}
-	printf (" %d\n", total);
-
-	total = 0;
-	printf ("waste     rate: ");
-	for (i = 0; i < MAX_AGE; ++i) {
-		printf ("%7d ", per_age_waste [i]);
-		total += per_age_waste [i];
-		per_age_total_waste [i] += per_age_waste [i];
-	}
-	printf (" %d\n", total);
-
-	total = 0;
-	printf ("tot waste  rate: ");
-	for (i = 0; i < MAX_AGE; ++i) {
-		printf ("%7d ", per_age_total_waste [i]);
-		total += per_age_total_waste [i];
-	}
-	printf (" %d\n", total);
-
-	total = 0;
-	printf ("just died     : ");
-	for (i = 0; i < MAX_AGE; ++i) {
-		int dead = 0;
-		if (i == 1) {
-			dead = last_gc_alloc_size - per_age_liveset [1];
-		} else if (i > 1) {
-			if (per_age_previous_promotion [i - 1] >= per_age_liveset [i])
-				dead = per_age_previous_promotion [i - 1] - per_age_liveset [i];
-		}
-		per_age_total_death [i] += dead;
-		printf ("%7d ", dead);
-		total += dead;
-	}
-	printf (" %d\n", total);
-
-	printf ("total dead    : ");
-	for (i = 0; i < MAX_AGE; ++i) {
-		printf ("%7d ", per_age_total_death [i]);
-		total += per_age_total_death [i];
-	}
-	printf (" %d\n", total);
-	total_gc_alloc += last_gc_alloc_size;
-	printf ("total GCs %7d total alloc %7d-------------------------------------------\n", gcs++, total_gc_alloc);
 	/* We split the fragment list based on the promotion barrier. */
 	collector_allocator = *allocator;
 	fragment_list_split (&collector_allocator);
@@ -387,18 +297,8 @@ static void
 prepare_to_space (SgenFragmentAllocator *allocator, char *to_space_bitmap, int space_bitmap_size)
 {
 	SgenFragment **previous, *frag;
-	last_gc_alloc_size = 0;
-
-	for (frag = allocator->region_head; frag; frag = frag->next_in_order)
-	 	last_gc_alloc_size += frag->fragment_next - frag->fragment_start;
-
-	memcpy (per_age_previous_promotion, per_age_promotion, sizeof (per_age_promotion));
 
 	memset (to_space_bitmap, 0, space_bitmap_size);
-	memset (per_age_promotion, 0, sizeof (per_age_promotion));
-	memset (per_age_failure, 0, sizeof (per_age_failure));
-	memset (per_age_liveset, 0, sizeof (per_age_liveset));
-	memset (per_age_waste, 0, sizeof (per_age_waste));
 	memset (age_alloc_buffers, 0, sizeof (age_alloc_buffers));
 
 	previous = &collector_allocator.alloc_head;
@@ -435,6 +335,7 @@ prepare_to_space (SgenFragmentAllocator *allocator, char *to_space_bitmap, int s
 		previous = &frag->next;
 	}
 
+	/* FIXME
 	if (per_age_previous_promotion [1]) {
 		size_t prealloc_size, allocated_size = 0;
 		prealloc_size = (size_t)align_up (per_age_previous_promotion [1], SGEN_TO_SPACE_GRANULE_BITS);
@@ -446,7 +347,7 @@ prepare_to_space (SgenFragmentAllocator *allocator, char *to_space_bitmap, int s
 
 		if (age_alloc_buffers [1].next)
 			age_alloc_buffers [1].end = age_alloc_buffers [1].next + allocated_size;
-	}
+	}*/
 }
 
 static void
