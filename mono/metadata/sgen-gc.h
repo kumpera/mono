@@ -587,7 +587,7 @@ typedef struct {
 	SgenObjectOperations serial_ops;
 	SgenObjectOperations parallel_ops;
 
-	void (*prepare_to_space) (char *to_space_bitmap, int space_bitmap_size);
+	void (*prepare_to_space) (SgenFragmentAllocator *allocator, char *to_space_bitmap, int space_bitmap_size);
 	void (*clear_fragments) (void);
 	SgenFragment* (*build_fragments_get_exclude_head) (void);
 	void (*build_fragments_release_exclude_head) (void);

@@ -510,6 +510,7 @@ sgen_fragment_allocator_serial_alloc (SgenFragmentAllocator *allocator, size_t s
 #ifdef NALLOC_DEBUG
 			add_alloc_record (p, size, FIXED_ALLOC);
 #endif
+			// printf ("-serial alloc %p size %d\n", p, size);
 			return p;
 		}
 		previous = &frag->next;
@@ -549,15 +550,15 @@ sgen_fragment_allocator_serial_range_alloc (SgenFragmentAllocator *allocator, si
 			prev_min_frag = previous;
 			current_minimum = frag_size;
 		}
+		previous = &frag->next;
 	}
+
 
 	if (min_frag) {
 		void *p;
 		size_t frag_size = min_frag->fragment_end - min_frag->fragment_next;
 		*out_alloc_size = frag_size;
-
 		p = serial_alloc_from_fragment (prev_min_frag, min_frag, frag_size);
-
 #ifdef NALLOC_DEBUG
 		add_alloc_record (p, frag_size, RANGE_ALLOC);
 #endif
@@ -710,7 +711,9 @@ add_nursery_frag (SgenFragmentAllocator *allocator, size_t frag_size, char* frag
 		printf ("\tfragment [%p %p] size %zd\n", frag_start, frag_end, frag_size);
 		*/
 #endif
+
 		sgen_fragment_allocator_add (allocator, frag_start, frag_end);
+		// printf ("\tfragment %p -> [%p %p] size %zd\n", allocator->alloc_head, frag_start, frag_end, frag_size);
 		fragment_total += frag_size;
 	} else {
 		/* Clear unused fragments, pinning depends on this */
@@ -757,6 +760,7 @@ sgen_build_nursery_fragments (GCMemSection *nursery_section, void **start, int n
 	/* clear scan starts */
 	memset (nursery_section->scan_starts, 0, nursery_section->num_scan_start * sizeof (gpointer));
 
+	// printf ("build frags [%p %p]\n", sgen_nursery_start, sgen_nursery_end);
 	while (i < num_entries || frags_ranges) {
 		char *addr0, *addr1;
 		size_t size;
@@ -904,13 +908,13 @@ sgen_init_nursery_allocator (void)
 void
 sgen_nursery_alloc_prepare_for_minor (void)
 {
-	sgen_minor_collector.prepare_to_space (sgen_space_bitmap, sgen_space_bitmap_size);
+	sgen_minor_collector.prepare_to_space (&mutator_allocator, sgen_space_bitmap, sgen_space_bitmap_size);
 }
 
 void
 sgen_nursery_alloc_prepare_for_major (const char *reason)
 {
-	sgen_minor_collector.prepare_to_space (sgen_space_bitmap, sgen_space_bitmap_size);
+	sgen_minor_collector.prepare_to_space (&mutator_allocator, sgen_space_bitmap, sgen_space_bitmap_size);
 }
 
 void
