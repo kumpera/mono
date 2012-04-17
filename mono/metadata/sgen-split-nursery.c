@@ -85,6 +85,7 @@ objects from non-stack roots, specially those found in the remembered set;
 -Pre allocate memory for young ages to make sure that on overflow only the older suffer.
 -Explain aging and self-tunning.
 -Avoid the initial nursery check in alloc_for_promotion
+-Get rid of par_alloc_buffer_refill_mutex so to the parallel collection of the nursery doesn't suck.
 */
 
 /*FIXME Move this to a separate header. */
@@ -122,7 +123,7 @@ static AgeAllocationBuffer age_alloc_buffers [MAX_AGE];
 /* The collector allocs from here. */
 static SgenFragmentAllocator collector_allocator;
 
-static LOCK_DECLARE (par_alloc_buffer_refix_mutex);
+static LOCK_DECLARE (par_alloc_buffer_refill_mutex);
 
 static inline int
 get_object_age (char *object)
@@ -264,7 +265,7 @@ par_alloc_for_promotion_slow_path (int age, size_t objsize)
 	size_t allocated_size;
 	size_t aligned_objsize = (size_t)align_up (objsize, SGEN_TO_SPACE_GRANULE_BITS);
 
-	mono_mutex_lock (&par_alloc_buffer_refix_mutex);
+	mono_mutex_lock (&par_alloc_buffer_refill_mutex);
 
 restart:
 	p = age_alloc_buffers [age].next;
@@ -296,7 +297,7 @@ restart:
 		}
 	}
 
-	mono_mutex_unlock (&par_alloc_buffer_refix_mutex);
+	mono_mutex_unlock (&par_alloc_buffer_refill_mutex);
 	return p;
 }
 
@@ -523,7 +524,7 @@ sgen_split_nursery_init (SgenMinorCollector *collector)
 
 	FILL_MINOR_COLLECTOR_COPY_OBJECT (collector);
 	FILL_MINOR_COLLECTOR_SCAN_OBJECT (collector);
-	LOCK_INIT (par_alloc_buffer_refix_mutex);
+	LOCK_INIT (par_alloc_buffer_refill_mutex);
 }
 
 
