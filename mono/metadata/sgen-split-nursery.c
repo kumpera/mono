@@ -441,6 +441,7 @@ sgen_split_nursery_init (SgenMinorCollector *collector)
 
 	FILL_MINOR_COLLECTOR_COPY_OBJECT (collector);
 	FILL_MINOR_COLLECTOR_SCAN_OBJECT (collector);
+	LOCK_INIT (par_alloc_buffer_refix_mutex);
 }
 
 
