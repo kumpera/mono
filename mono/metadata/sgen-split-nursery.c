@@ -61,7 +61,7 @@ of objects from the Allocator Space.
 
 During a collection when the object scan function see a nursery object it must
 determine if the object needs to be evacuated or left in place. Originally, this
-check was done by checking is a forwarding pointer is installed, but now an object
+check was done by checking if a forwarding pointer is installed, but now an object
 can be in the To Space, it won't have a forwarding pointer and it must be left in place.
 
 In order to solve that we classify nursery memory been either in the From Space or in
@@ -75,12 +75,16 @@ are naturally aligned in both ends to that granule to avoid wronly classifying a
 TODO:
 -The promotion barrier is statically defined to 50% of the nursery, it should be dinamically adjusted based
 on survival rates;
--Objects are aged just one collection, we need to implement multiple cycle aging;
 -We apply the same promotion policy to all objects, finalizable ones should age longer in the nursery;
 -We apply the same promotion policy to all stages of a collection, maybe we should promote more aggressively
 objects from non-stack roots, specially those found in the remembered set;
 -Fix our major collection trigger to happen before we do a minor GC and collect the nursery only once.
 -Make the serial fragment allocator fast path inlineable
+-Make aging threshold be based on survival rates and survivor occupancy.
+-Change promotion barrier to be size and not address based.
+-Pre allocate memory for young ages to make sure that on overflow only the older suffer.
+-Explain aging and self-tunning.
+-Avoid the initial nursery check in alloc_for_promotion
 */
 
 /*FIXME Move this to a separate header. */
@@ -118,6 +122,8 @@ static AgeAllocationBuffer age_alloc_buffers [MAX_AGE];
 /* The collector allocs from here. */
 static SgenFragmentAllocator collector_allocator;
 
+static LOCK_DECLARE (par_alloc_buffer_refix_mutex);
+
 static inline int
 get_object_age (char *object)
 {
@@ -135,12 +141,22 @@ set_object_age (char *object, int age)
 static void
 set_age_in_range (char *start, char *end, int age)
 {
+	char *region_start;
+	int region_idx, length;
+
+#if 0
 	start = align_down (start, SGEN_TO_SPACE_GRANULE_BITS);
 	end = align_up (end, SGEN_TO_SPACE_GRANULE_BITS);
 
 	/*FIXME convert this to a memset call.q */
 	for (;start < end; start += SGEN_TO_SPACE_GRANULE_IN_BYTES)
 		set_object_age (start, age);
+#else
+	region_idx = (start - sgen_nursery_start) >> SGEN_TO_SPACE_GRANULE_BITS;
+	region_start = &region_age [region_idx];
+	length = (end - start) >> SGEN_TO_SPACE_GRANULE_BITS;
+	memset (region_start, age, length);
+#endif
 }
 
 static inline void
