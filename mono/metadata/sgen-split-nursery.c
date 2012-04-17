@@ -220,7 +220,7 @@ alloc_for_promotion_slow_path (int age, size_t objsize)
 	size_t aligned_objsize = (size_t)align_up (objsize, SGEN_TO_SPACE_GRANULE_BITS);
 
 	p = sgen_fragment_allocator_serial_range_alloc (
-	&	collector_allocator,
+		&collector_allocator,
 		MAX (aligned_objsize, AGE_ALLOC_BUFFER_DESIRED_SIZE),
 		MAX (aligned_objsize, AGE_ALLOC_BUFFER_MIN_SIZE),
 		&allocated_size);
