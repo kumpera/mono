@@ -212,11 +212,33 @@ fragment_list_split (SgenFragmentAllocator *allocator)
 #define AGE_ALLOC_BUFFER_MIN_SIZE SGEN_TO_SPACE_GRANULE_IN_BYTES
 #define AGE_ALLOC_BUFFER_DESIRED_SIZE (SGEN_TO_SPACE_GRANULE_IN_BYTES * 8)
 
+static char*
+alloc_for_promotion_slow_path (int age, size_t objsize)
+{
+	char *p;
+	size_t allocated_size;
+	size_t aligned_objsize = (size_t)align_up (objsize, SGEN_TO_SPACE_GRANULE_BITS);
+
+	p = sgen_fragment_allocator_serial_range_alloc (
+	&	collector_allocator,
+		MAX (aligned_objsize, AGE_ALLOC_BUFFER_DESIRED_SIZE),
+		MAX (aligned_objsize, AGE_ALLOC_BUFFER_MIN_SIZE),
+		&allocated_size);
+	if (p) {
+		set_age_in_range (p, p + allocated_size, age);
+		sgen_clear_range (age_alloc_buffers [age].next, age_alloc_buffers [age].end);
+		age_alloc_buffers [age].next = p + objsize;
+		age_alloc_buffers [age].end = p + allocated_size;
+	}
+	return p;
+}
+
+
 static inline char*
 alloc_for_promotion (char *obj, size_t objsize, gboolean has_references)
 {
 	char *p = NULL;
-	int age, available;
+	int age;
 
 	if (!sgen_ptr_in_nursery (obj))
 		return major_collector.alloc_object (objsize, has_references);
@@ -225,34 +247,17 @@ alloc_for_promotion (char *obj, size_t objsize, gboolean has_references)
 	if (age >= promote_age)
 		return major_collector.alloc_object (objsize, has_references);
 
-	++age; //promote!
-	g_assert (age < MAX_AGE);
-	
-	available = age_alloc_buffers [age].end - age_alloc_buffers [age].next;
-	if (available >= objsize) {
-		p = age_alloc_buffers [age].next;
-		age_alloc_buffers [age].next += objsize;
+	/* Promote! */
+	++age;
+
+	p = age_alloc_buffers [age].next;
+	if (G_LIKELY (p + objsize <= age_alloc_buffers [age].end)) {
+        age_alloc_buffers [age].next += objsize;
 	} else {
-		size_t allocated_size;
-		size_t aligned_objsize = (size_t)align_up (objsize, SGEN_TO_SPACE_GRANULE_BITS);
-
-		p = sgen_fragment_allocator_serial_range_alloc (
-			&collector_allocator,
-			MAX (aligned_objsize, AGE_ALLOC_BUFFER_DESIRED_SIZE),
-			MAX (aligned_objsize, AGE_ALLOC_BUFFER_MIN_SIZE),
-			&allocated_size);
-		if (p) {
-			set_age_in_range (p, p + allocated_size, age);
-			sgen_clear_range (age_alloc_buffers [age].next, age_alloc_buffers [age].end);
-			age_alloc_buffers [age].next = p + objsize;
-			age_alloc_buffers [age].end = p + allocated_size;
-		}
+		p = alloc_for_promotion_slow_path (age, objsize);
+		if (!p)
+			p = major_collector.alloc_object (objsize, has_references);
 	}
-
-	if (!p)
-		p = major_collector.alloc_object (objsize, has_references);
-	
-
 	return p;
 }
 
