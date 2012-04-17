@@ -65,7 +65,7 @@ build_fragments_finish (SgenFragmentAllocator *allocator)
 }
 
 static void
-prepare_to_space (SgenFragmentAllocator *allocator, char *to_space_bitmap, int space_bitmap_size)
+prepare_to_space (char *to_space_bitmap, int space_bitmap_size)
 {
 }
 
