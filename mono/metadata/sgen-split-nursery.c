@@ -143,20 +143,10 @@ set_age_in_range (char *start, char *end, int age)
 {
 	char *region_start;
 	int region_idx, length;
-
-#if 0
-	start = align_down (start, SGEN_TO_SPACE_GRANULE_BITS);
-	end = align_up (end, SGEN_TO_SPACE_GRANULE_BITS);
-
-	/*FIXME convert this to a memset call.q */
-	for (;start < end; start += SGEN_TO_SPACE_GRANULE_IN_BYTES)
-		set_object_age (start, age);
-#else
 	region_idx = (start - sgen_nursery_start) >> SGEN_TO_SPACE_GRANULE_BITS;
 	region_start = &region_age [region_idx];
 	length = (end - start) >> SGEN_TO_SPACE_GRANULE_BITS;
 	memset (region_start, age, length);
-#endif
 }
 
 static inline void
