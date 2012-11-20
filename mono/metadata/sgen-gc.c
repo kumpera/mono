@@ -1093,14 +1093,14 @@ sgen_add_to_global_remset (gpointer ptr)
 }
 
 /*
- * sgen_drain_gray_stack:
+ * drain_gray_stack_general:
  *
  *   Scan objects in the gray stack until the stack is empty. This should be called
  * frequently after each object is copied, to achieve better locality and cache
  * usage.
  */
-gboolean
-sgen_drain_gray_stack (GrayQueue *queue, int max_objs)
+static gboolean
+drain_gray_stack_general (GrayQueue *queue, int max_objs)
 {
 	char *obj;
 	ScanObjectFunc scan_func = current_object_ops.scan_object;
@@ -1482,7 +1482,7 @@ precisely_scan_objects_from (CopyOrMarkObjectFunc copy_func, void** start_root, 
 			if ((desc & 1) && *start_root) {
 				copy_func (start_root, queue);
 				SGEN_LOG (9, "Overwrote root at %p with %p", start_root, *start_root);
-				sgen_drain_gray_stack (queue, -1);
+				current_object_ops.drain_gray_stack (queue, -1);
 			}
 			desc >>= 1;
 			start_root++;
@@ -1500,7 +1500,7 @@ precisely_scan_objects_from (CopyOrMarkObjectFunc copy_func, void** start_root, 
 				if ((bmap & 1) && *objptr) {
 					copy_func (objptr, queue);
 					SGEN_LOG (9, "Overwrote root at %p with %p", objptr, *objptr);
-					sgen_drain_gray_stack (queue, -1);
+					current_object_ops.drain_gray_stack (queue, -1);
 				}
 				bmap >>= 1;
 				++objptr;
@@ -1787,7 +1787,7 @@ finish_gray_stack (char *start_addr, char *end_addr, int generation, GrayQueue *
 	 *   To achieve better cache locality and cache usage, we drain the gray stack 
 	 * frequently, after each object is copied, and just finish the work here.
 	 */
-	sgen_drain_gray_stack (queue, -1);
+	current_object_ops.drain_gray_stack (queue, -1);
 	TV_GETTIME (atv);
 	SGEN_LOG (2, "%s generation done", generation_name (generation));
 
@@ -1808,7 +1808,7 @@ finish_gray_stack (char *start_addr, char *end_addr, int generation, GrayQueue *
 	done_with_ephemerons = 0;
 	do {
 		done_with_ephemerons = mark_ephemerons_in_range (copy_func, start_addr, end_addr, queue);
-		sgen_drain_gray_stack (queue, -1);
+		current_object_ops.drain_gray_stack (queue, -1);
 		++ephemeron_rounds;
 	} while (!done_with_ephemerons);
 
@@ -1826,7 +1826,7 @@ finish_gray_stack (char *start_addr, char *end_addr, int generation, GrayQueue *
 	Make sure we drain the gray stack before processing disappearing links and finalizers.
 	If we don't make sure it is empty we might wrongly see a live object as dead.
 	*/
-	sgen_drain_gray_stack (queue, -1);
+	current_object_ops.drain_gray_stack (queue, -1);
 
 	/*
 	We must clear weak links that don't track resurrection before processing object ready for
@@ -1847,7 +1847,7 @@ finish_gray_stack (char *start_addr, char *end_addr, int generation, GrayQueue *
 		sgen_finalize_in_range (copy_func, sgen_get_nursery_start (), sgen_get_nursery_end (), GENERATION_NURSERY, queue);
 	/* drain the new stack that might have been created */
 	SGEN_LOG (6, "Precise scan of gray area post fin");
-	sgen_drain_gray_stack (queue, -1);
+	current_object_ops.drain_gray_stack (queue, -1);
 
 	/*
 	 * This must be done again after processing finalizable objects since CWL slots are cleared only after the key is finalized.
@@ -1855,7 +1855,7 @@ finish_gray_stack (char *start_addr, char *end_addr, int generation, GrayQueue *
 	done_with_ephemerons = 0;
 	do {
 		done_with_ephemerons = mark_ephemerons_in_range (copy_func, start_addr, end_addr, queue);
-		sgen_drain_gray_stack (queue, -1);
+		current_object_ops.drain_gray_stack (queue, -1);
 		++ephemeron_rounds;
 	} while (!done_with_ephemerons);
 
@@ -1883,7 +1883,7 @@ finish_gray_stack (char *start_addr, char *end_addr, int generation, GrayQueue *
 			sgen_null_link_in_range (copy_func, start_addr, end_addr, GENERATION_NURSERY, FALSE, queue);
 		if (sgen_gray_object_queue_is_empty (queue))
 			break;
-		sgen_drain_gray_stack (queue, -1);
+		current_object_ops.drain_gray_stack (queue, -1);
 	}
 
 	g_assert (sgen_gray_object_queue_is_empty (queue));
@@ -2395,7 +2395,7 @@ collect_nursery (void)
 	SGEN_LOG (2, "Old generation scan: %d usecs", TV_ELAPSED (atv, btv));
 
 	if (!sgen_collection_is_parallel ())
-		sgen_drain_gray_stack (&gray_queue, -1);
+		current_object_ops.drain_gray_stack (&gray_queue, -1);
 
 	if (mono_profiler_get_events () & MONO_PROFILE_GC_ROOTS)
 		report_registered_roots ();
@@ -4279,6 +4279,13 @@ mono_gc_base_init (void)
 		}
 	}
 
+	if (!sgen_minor_collector.serial_ops.drain_gray_stack)
+		sgen_minor_collector.serial_ops.drain_gray_stack = drain_gray_stack_general; 
+
+	if (!sgen_minor_collector.parallel_ops.drain_gray_stack)
+		sgen_minor_collector.parallel_ops.drain_gray_stack = drain_gray_stack_general; 
+
+
 	if (!major_collector_opt || !strcmp (major_collector_opt, "marksweep")) {
 		sgen_marksweep_init (&major_collector);
 	} else if (!major_collector_opt || !strcmp (major_collector_opt, "marksweep-fixed")) {
@@ -4293,6 +4300,9 @@ mono_gc_base_init (void)
 		fprintf (stderr, "Unknown major collector `%s'.\n", major_collector_opt);
 		exit (1);
 	}
+
+	if (!major_collector.major_ops.drain_gray_stack)
+		major_collector.major_ops.drain_gray_stack = drain_gray_stack_general; 
 
 #ifdef SGEN_HAVE_CARDTABLE
 	use_cardtable = major_collector.supports_cardtable;

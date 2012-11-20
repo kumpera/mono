@@ -295,9 +295,10 @@ workers_thread_func (void *data_untyped)
 		}
 
 		if (workers_marking && (!sgen_gray_object_queue_is_empty (&data->private_gray_queue) || workers_get_work (data))) {
+			DrainGrayStackFunc drain_gray_stack = sgen_get_current_object_ops ()->drain_gray_stack;
 			g_assert (!sgen_gray_object_queue_is_empty (&data->private_gray_queue));
 
-			while (!sgen_drain_gray_stack (&data->private_gray_queue, 32))
+			while (!drain_gray_stack (&data->private_gray_queue, 32))
 				workers_gray_queue_share_redirect (&data->private_gray_queue);
 			g_assert (sgen_gray_object_queue_is_empty (&data->private_gray_queue));
 

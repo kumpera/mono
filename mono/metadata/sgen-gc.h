@@ -543,6 +543,7 @@ void sgen_add_to_global_remset (gpointer ptr) MONO_INTERNAL;
 typedef void (*CopyOrMarkObjectFunc) (void**, SgenGrayQueue*);
 typedef void (*ScanObjectFunc) (char*, SgenGrayQueue*);
 typedef void (*ScanVTypeFunc) (char*, mword desc, SgenGrayQueue*);
+typedef gboolean (*DrainGrayStackFunc) (SgenGrayQueue*, int);
 
 int sgen_get_current_collection_generation (void) MONO_INTERNAL;
 gboolean sgen_collection_is_parallel (void) MONO_INTERNAL;
@@ -551,6 +552,7 @@ typedef struct {
 	CopyOrMarkObjectFunc copy_or_mark_object;
 	ScanObjectFunc scan_object;
 	ScanVTypeFunc scan_vtype;
+	DrainGrayStackFunc drain_gray_stack;
 	/*FIXME add allocation function? */
 } SgenObjectOperations;
 
