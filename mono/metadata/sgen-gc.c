@@ -1092,18 +1092,29 @@ sgen_add_to_global_remset (gpointer ptr)
 	remset.record_pointer (ptr);
 }
 
-/*
- * drain_gray_stack_general:
- *
- *   Scan objects in the gray stack until the stack is empty. This should be called
- * frequently after each object is copied, to achieve better locality and cache
- * usage.
- */
 static gboolean
-drain_gray_stack_general (GrayQueue *queue, int max_objs)
+serial_drain_gray_stack (GrayQueue *queue, int max_objs)
 {
 	char *obj;
 	ScanObjectFunc scan_func = current_object_ops.scan_object;
+	g_assert (max_objs == -1);
+	g_assert (queue == &gray_queue);
+
+	for (;;) {
+		GRAY_OBJECT_DEQUEUE (queue, obj);
+		if (!obj)
+			return TRUE;
+		SGEN_LOG (9, "Precise gray object scan %p (%s)", obj, safe_name (obj));
+		scan_func (obj, queue);
+	}
+}
+
+static gboolean
+par_drain_gray_stack (GrayQueue *queue, int max_objs)
+{
+	char *obj;
+	ScanObjectFunc scan_func = current_object_ops.scan_object;
+	g_assert (queue != &gray_queue);
 
 	if (max_objs == -1) {
 		for (;;) {
@@ -4280,10 +4291,10 @@ mono_gc_base_init (void)
 	}
 
 	if (!sgen_minor_collector.serial_ops.drain_gray_stack)
-		sgen_minor_collector.serial_ops.drain_gray_stack = drain_gray_stack_general; 
+		sgen_minor_collector.serial_ops.drain_gray_stack = serial_drain_gray_stack;
 
 	if (!sgen_minor_collector.parallel_ops.drain_gray_stack)
-		sgen_minor_collector.parallel_ops.drain_gray_stack = drain_gray_stack_general; 
+		sgen_minor_collector.parallel_ops.drain_gray_stack = par_drain_gray_stack; 
 
 
 	if (!major_collector_opt || !strcmp (major_collector_opt, "marksweep")) {
@@ -4302,7 +4313,7 @@ mono_gc_base_init (void)
 	}
 
 	if (!major_collector.major_ops.drain_gray_stack)
-		major_collector.major_ops.drain_gray_stack = drain_gray_stack_general; 
+		major_collector.major_ops.drain_gray_stack = major_collector.is_parallel ? par_drain_gray_stack : serial_drain_gray_stack; 
 
 #ifdef SGEN_HAVE_CARDTABLE
 	use_cardtable = major_collector.supports_cardtable;
