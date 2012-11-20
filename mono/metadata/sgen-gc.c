@@ -566,12 +566,14 @@ static void null_ephemerons_for_domain (MonoDomain *domain);
 SgenObjectOperations current_object_ops;
 SgenMajorCollector major_collector;
 SgenMinorCollector sgen_minor_collector;
-static GrayQueue gray_queue;
+SgenGrayQueue sgen_serial_gray_queue;
 
 static SgenRemeberedSet remset;
 
+int slow_enqueue, slow_dequeue;
+int total_enqueue, total_dequeue;
 
-#define WORKERS_DISTRIBUTE_GRAY_QUEUE (sgen_collection_is_parallel () ? sgen_workers_get_distribute_gray_queue () : &gray_queue)
+#define WORKERS_DISTRIBUTE_GRAY_QUEUE (sgen_collection_is_parallel () ? sgen_workers_get_distribute_gray_queue () : &sgen_serial_gray_queue)
 
 static SgenGrayQueue*
 sgen_workers_get_job_gray_queue (WorkerData *worker_data)
@@ -1098,7 +1100,8 @@ serial_drain_gray_stack (GrayQueue *queue, int max_objs)
 	char *obj;
 	ScanObjectFunc scan_func = current_object_ops.scan_object;
 	g_assert (max_objs == -1);
-	g_assert (queue == &gray_queue);
+	g_assert (queue == &sgen_serial_gray_queue);
+	g_assert (!sgen_collection_is_parallel ());
 
 	for (;;) {
 		GRAY_OBJECT_DEQUEUE (queue, obj);
@@ -1114,7 +1117,8 @@ par_drain_gray_stack (GrayQueue *queue, int max_objs)
 {
 	char *obj;
 	ScanObjectFunc scan_func = current_object_ops.scan_object;
-	g_assert (queue != &gray_queue);
+	g_assert (queue != &sgen_serial_gray_queue);
+	g_assert (sgen_collection_is_parallel ());
 
 	if (max_objs == -1) {
 		for (;;) {
@@ -2103,8 +2107,14 @@ init_stats (void)
 	mono_counters_register ("Major LOS sweep", MONO_COUNTER_GC | MONO_COUNTER_TIME_INTERVAL, &time_major_los_sweep);
 	mono_counters_register ("Major sweep", MONO_COUNTER_GC | MONO_COUNTER_TIME_INTERVAL, &time_major_sweep);
 	mono_counters_register ("Major fragment creation", MONO_COUNTER_GC | MONO_COUNTER_TIME_INTERVAL, &time_major_fragment_creation);
-
 	mono_counters_register ("Number of pinned objects", MONO_COUNTER_GC | MONO_COUNTER_LONG, &stat_pinned_objects);
+
+	mono_counters_register ("Gray enqueue operations", MONO_COUNTER_GC | MONO_COUNTER_INT, &total_enqueue);
+	mono_counters_register ("Slow gray enqueue operations", MONO_COUNTER_GC | MONO_COUNTER_INT, &slow_enqueue);
+
+	mono_counters_register ("Gray dequeue operations", MONO_COUNTER_GC | MONO_COUNTER_INT, &total_dequeue);
+	mono_counters_register ("Slow gray dequeue operations", MONO_COUNTER_GC | MONO_COUNTER_INT, &slow_dequeue);
+
 
 #ifdef HEAVY_STATISTICS
 	mono_counters_register ("WBarrier set field", MONO_COUNTER_GC | MONO_COUNTER_INT, &stat_wbarrier_set_field);
@@ -2353,7 +2363,7 @@ collect_nursery (void)
 
 	sgen_memgov_minor_collection_start ();
 
-	sgen_gray_object_queue_init (&gray_queue);
+	sgen_gray_object_queue_init (&sgen_serial_gray_queue);
 	sgen_workers_init_distribute_gray_queue ();
 
 	stat_minor_gcs++;
@@ -2406,7 +2416,7 @@ collect_nursery (void)
 	SGEN_LOG (2, "Old generation scan: %d usecs", TV_ELAPSED (atv, btv));
 
 	if (!sgen_collection_is_parallel ())
-		current_object_ops.drain_gray_stack (&gray_queue, -1);
+		current_object_ops.drain_gray_stack (&sgen_serial_gray_queue, -1);
 
 	if (mono_profiler_get_events () & MONO_PROFILE_GC_ROOTS)
 		report_registered_roots ();
@@ -2449,7 +2459,7 @@ collect_nursery (void)
 	sgen_workers_join ();
 
 	if (sgen_collection_is_parallel ())
-		g_assert (sgen_gray_object_queue_is_empty (&gray_queue));
+		g_assert (sgen_gray_object_queue_is_empty (&sgen_serial_gray_queue));
 
 	/* Scan the list of objects ready for finalization. If */
 	sfejd_fin_ready.list = fin_ready_list;
@@ -2458,7 +2468,7 @@ collect_nursery (void)
 	sfejd_critical_fin.list = critical_fin_list;
 	sgen_workers_enqueue_job (job_scan_finalizer_entries, &sfejd_critical_fin);
 
-	finish_gray_stack (sgen_get_nursery_start (), nursery_next, GENERATION_NURSERY, &gray_queue);
+	finish_gray_stack (sgen_get_nursery_start (), nursery_next, GENERATION_NURSERY, &sgen_serial_gray_queue);
 	TV_GETTIME (atv);
 	time_minor_finish_gray_stack += TV_ELAPSED (btv, atv);
 	mono_profiler_gc_event (MONO_GC_EVENT_MARK_END, 0);
@@ -2512,7 +2522,7 @@ collect_nursery (void)
 	}
 	sgen_pin_stats_reset ();
 
-	g_assert (sgen_gray_object_queue_is_empty (&gray_queue));
+	g_assert (sgen_gray_object_queue_is_empty (&sgen_serial_gray_queue));
 
 	if (remset.finish_minor_collection)
 		remset.finish_minor_collection ();
@@ -2570,7 +2580,7 @@ major_do_collection (const char *reason)
 	binary_protocol_collection (stat_major_gcs, GENERATION_OLD);
 	check_scan_starts ();
 
-	sgen_gray_object_queue_init (&gray_queue);
+	sgen_gray_object_queue_init (&sgen_serial_gray_queue);
 	sgen_workers_init_distribute_gray_queue ();
 	sgen_nursery_alloc_prepare_for_major ();
 
@@ -2743,10 +2753,10 @@ major_do_collection (const char *reason)
 #endif
 
 	if (major_collector.is_parallel)
-		g_assert (sgen_gray_object_queue_is_empty (&gray_queue));
+		g_assert (sgen_gray_object_queue_is_empty (&sgen_serial_gray_queue));
 
 	/* all the objects in the heap */
-	finish_gray_stack (heap_start, heap_end, GENERATION_OLD, &gray_queue);
+	finish_gray_stack (heap_start, heap_end, GENERATION_OLD, WORKERS_DISTRIBUTE_GRAY_QUEUE);
 	TV_GETTIME (atv);
 	time_major_finish_gray_stack += TV_ELAPSED (btv, atv);
 
@@ -2832,7 +2842,7 @@ major_do_collection (const char *reason)
 	}
 	sgen_pin_stats_reset ();
 
-	g_assert (sgen_gray_object_queue_is_empty (&gray_queue));
+	g_assert (sgen_gray_object_queue_is_empty (&sgen_serial_gray_queue));
 
 	sgen_memgov_major_collection_end ();
 	current_collection_generation = -1;

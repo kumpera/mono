@@ -382,9 +382,9 @@ typedef struct {
  */
 #define SGEN_LOAD_VTABLE(addr) ((*(mword*)(addr)) & ~SGEN_VTABLE_BITS_MASK)
 
-#if SGEN_MAX_DEBUG_LEVEL >= 9
-#define GRAY_OBJECT_ENQUEUE sgen_gray_object_enqueue
-#define GRAY_OBJECT_DEQUEUE(queue,o) ((o) = sgen_gray_object_dequeue ((queue)))
+#if SGEN_MAX_DEBUG_LEVEL >= 0
+#define GRAY_OBJECT_ENQUEUE sgen_slow_enqueue_object
+#define GRAY_OBJECT_DEQUEUE(queue,o) ((o) = sgen_slow_dequeue_object ((queue)))
 #else
 #define GRAY_OBJECT_ENQUEUE(queue,o) do {				\
 		if (G_UNLIKELY (!(queue)->first || (queue)->first->end == SGEN_GRAY_QUEUE_SECTION_SIZE)) \
@@ -402,6 +402,65 @@ typedef struct {
 			(o) = (queue)->first->objects [--(queue)->first->end]; \
 	} while (0)
 #endif
+
+extern SgenGrayQueue sgen_serial_gray_queue MONO_INTERNAL;
+extern int slow_enqueue, slow_dequeue;
+extern int total_enqueue, total_dequeue;
+
+gboolean sgen_collection_is_parallel (void) MONO_INTERNAL;
+
+static inline void __attribute__((always_inline))
+sgen_serial_enqueue_object (SgenGrayQueue *queue, char *object)
+{
+	g_assert (queue == &sgen_serial_gray_queue);
+	g_assert (!sgen_collection_is_parallel ());
+	++total_enqueue;
+	sgen_gray_object_enqueue (&sgen_serial_gray_queue, object);
+}
+
+static inline char* __attribute__((always_inline))
+sgen_serial_dequeue_object (SgenGrayQueue *queue)
+{
+	g_assert (queue == &sgen_serial_gray_queue);
+	g_assert (!sgen_collection_is_parallel ());
+	++total_dequeue;
+	return sgen_gray_object_dequeue (&sgen_serial_gray_queue);
+}
+
+static inline void __attribute__((always_inline))
+sgen_par_enqueue_object (SgenGrayQueue *queue, char *object)
+{
+	g_assert (queue != &sgen_serial_gray_queue);
+	g_assert (sgen_collection_is_parallel ());
+	++total_enqueue;
+	sgen_gray_object_enqueue (queue, object);
+}
+
+static inline char* __attribute__((always_inline))
+sgen_par_dequeue_object (SgenGrayQueue *queue)
+{
+	g_assert (queue != &sgen_serial_gray_queue);
+	g_assert (sgen_collection_is_parallel ());
+	++total_dequeue;
+	return sgen_gray_object_dequeue (queue);
+}
+
+static inline void __attribute__((always_inline))
+sgen_slow_enqueue_object (SgenGrayQueue *queue, char *object)
+{
+	++slow_enqueue;
+	if (sgen_collection_is_parallel ())
+		sgen_par_enqueue_object (queue, object);
+	else
+		sgen_serial_enqueue_object (queue, object);
+}
+
+static inline char* __attribute__((always_inline))
+sgen_slow_dequeue_object (SgenGrayQueue *queue)
+{
+	++slow_dequeue;
+	return sgen_collection_is_parallel () ? sgen_par_dequeue_object (queue) : sgen_serial_dequeue_object (queue);
+}
 
 /*
 List of what each bit on of the vtable gc bits means. 
@@ -546,7 +605,6 @@ typedef void (*ScanVTypeFunc) (char*, mword desc, SgenGrayQueue*);
 typedef gboolean (*DrainGrayStackFunc) (SgenGrayQueue*, int);
 
 int sgen_get_current_collection_generation (void) MONO_INTERNAL;
-gboolean sgen_collection_is_parallel (void) MONO_INTERNAL;
 
 typedef struct {
 	CopyOrMarkObjectFunc copy_or_mark_object;
