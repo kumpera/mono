@@ -396,7 +396,7 @@ major_copy_or_mark_object (void **obj_slot, SgenGrayQueue *queue)
  copy:
 	HEAVY_STAT (++stat_objects_copied_major);
 
-	*obj_slot = copy_object_no_checks (obj, queue);
+	*obj_slot = serial_copy_object_no_checks (obj, queue);
 }
 
 #include "sgen-major-scan-object.h"

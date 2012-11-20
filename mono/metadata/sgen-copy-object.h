@@ -35,7 +35,7 @@ extern long long stat_slots_allocated_in_vain;
  * anymore, which is the case in the parallel collector.
  */
 static inline void
-par_copy_object_no_checks (char *destination, MonoVTable *vt, void *obj, mword objsize, SgenGrayQueue *queue)
+general_copy_object_no_checks (char *destination, MonoVTable *vt, void *obj, mword objsize)
 {
 #ifdef __GNUC__
 	static const void *copy_labels [] = { &&LAB_0, &&LAB_1, &&LAB_2, &&LAB_3, &&LAB_4, &&LAB_5, &&LAB_6, &&LAB_7, &&LAB_8 };
@@ -90,10 +90,15 @@ par_copy_object_no_checks (char *destination, MonoVTable *vt, void *obj, mword o
 	}
 	if (G_UNLIKELY (mono_profiler_events & MONO_PROFILE_GC_MOVES))
 		sgen_register_moved_object (obj, destination);
-	obj = destination;
+}
+
+static inline void
+par_copy_object_no_checks (char *destination, MonoVTable *vt, void *obj, mword objsize, SgenGrayQueue *queue)
+{
+	general_copy_object_no_checks (destination, vt, obj, objsize);
 	if (queue) {
 		SGEN_LOG (9, "Enqueuing gray object %p (%s)", obj, sgen_safe_name (obj));
-		GRAY_OBJECT_ENQUEUE (queue, obj);
+		GRAY_OBJECT_ENQUEUE (queue, destination);
 	}
 }
 
@@ -105,7 +110,7 @@ static __declspec(noinline) void*
 #else
 static G_GNUC_UNUSED void* __attribute__((noinline))
 #endif
-copy_object_no_checks (void *obj, SgenGrayQueue *queue)
+serial_copy_object_no_checks (void *obj, SgenGrayQueue *queue)
 {
 	MonoVTable *vt = ((MonoObject*)obj)->vtable;
 	gboolean has_references = SGEN_VTABLE_HAS_REFERENCES (vt);
@@ -119,7 +124,9 @@ copy_object_no_checks (void *obj, SgenGrayQueue *queue)
 	}
 
 	*(MonoVTable**)destination = vt;
-	par_copy_object_no_checks (destination, vt, obj, objsize, has_references ? queue : NULL);
+	general_copy_object_no_checks (destination, vt, obj, objsize);
+	if (has_references)
+		GRAY_OBJECT_ENQUEUE (queue, destination);
 
 	/* set the forwarding pointer */
 	SGEN_FORWARD_OBJECT (obj, destination);

@@ -1298,7 +1298,7 @@ major_copy_or_mark_object (void **ptr, SgenGrayQueue *queue)
 
 	do_copy_object:
 		old_obj = obj;
-		obj = copy_object_no_checks (obj, queue);
+		obj = serial_copy_object_no_checks (obj, queue);
 		if (G_UNLIKELY (old_obj == obj)) {
 			/*If we fail to evacuate an object we just stop doing it for a given block size as all other will surely fail too.*/
 			if (!sgen_ptr_in_nursery (obj)) {

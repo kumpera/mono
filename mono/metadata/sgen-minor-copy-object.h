@@ -106,7 +106,7 @@ SERIAL_COPY_OBJECT (void **obj_slot, SgenGrayQueue *queue)
 
 	HEAVY_STAT (++stat_objects_copied_nursery);
 
-	*obj_slot = copy_object_no_checks (obj, queue);
+	*obj_slot = serial_copy_object_no_checks (obj, queue);
 }
 
 static void
