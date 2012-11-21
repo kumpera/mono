@@ -1104,7 +1104,7 @@ serial_drain_gray_stack (GrayQueue *queue, int max_objs)
 	g_assert (!sgen_collection_is_parallel ());
 
 	for (;;) {
-		GRAY_OBJECT_DEQUEUE (queue, obj);
+		obj = sgen_serial_dequeue_object (queue);
 		if (!obj)
 			return TRUE;
 		SGEN_LOG (9, "Precise gray object scan %p (%s)", obj, safe_name (obj));
@@ -1122,7 +1122,7 @@ par_drain_gray_stack (GrayQueue *queue, int max_objs)
 
 	if (max_objs == -1) {
 		for (;;) {
-			GRAY_OBJECT_DEQUEUE (queue, obj);
+			obj = sgen_par_dequeue_object (queue);
 			if (!obj)
 				return TRUE;
 			SGEN_LOG (9, "Precise gray object scan %p (%s)", obj, safe_name (obj));
@@ -1133,7 +1133,7 @@ par_drain_gray_stack (GrayQueue *queue, int max_objs)
 
 		do {
 			for (i = 0; i != max_objs; ++i) {
-				GRAY_OBJECT_DEQUEUE (queue, obj);
+				obj = sgen_par_dequeue_object (queue);
 				if (!obj)
 					return TRUE;
 				SGEN_LOG (9, "Precise gray object scan %p (%s)", obj, safe_name (obj));
@@ -1223,7 +1223,7 @@ pin_objects_from_addresses (GCMemSection *section, void **start, void **end, voi
 							MONO_GC_OBJ_PINNED ((mword)search_start, sgen_safe_object_get_size (search_start), vt->klass->name_space, vt->klass->name, gen);
 						}
 						pin_object (search_start);
-						GRAY_OBJECT_ENQUEUE (queue, search_start);
+						sgen_slow_enqueue_object (queue, search_start);
 						if (G_UNLIKELY (do_pin_stats))
 							sgen_pin_stats_register_object (search_start, last_obj_size);
 						definitely_pinned [count] = search_start;
@@ -1278,14 +1278,15 @@ sgen_pin_object (void *object, GrayQueue *queue)
 		sgen_pin_stage_ptr (object);
 		++objects_pinned ;
 		UNLOCK_PIN_QUEUE;
+		sgen_par_enqueue_object (queue, object);
 	} else {
 		SGEN_PIN_OBJECT (object);
 		sgen_pin_stage_ptr (object);
 		++objects_pinned;
 		if (G_UNLIKELY (do_pin_stats))
 			sgen_pin_stats_register_object (object, safe_object_get_size (object));
+		sgen_serial_enqueue_object (queue, object);
 	}
-	GRAY_OBJECT_ENQUEUE (queue, object);
 	binary_protocol_pin (object, (gpointer)LOAD_VTABLE (object), safe_object_get_size (object));
 	if (G_UNLIKELY (MONO_GC_OBJ_PINNED_ENABLED ())) {
 		int gen = sgen_ptr_in_nursery (object) ? GENERATION_NURSERY : GENERATION_OLD;
@@ -2661,7 +2662,7 @@ major_do_collection (const char *reason)
 			}
 			pin_object (bigobj->data);
 			/* FIXME: only enqueue if object has references */
-			GRAY_OBJECT_ENQUEUE (WORKERS_DISTRIBUTE_GRAY_QUEUE, bigobj->data);
+			sgen_slow_enqueue_object (WORKERS_DISTRIBUTE_GRAY_QUEUE, bigobj->data);
 			if (G_UNLIKELY (do_pin_stats))
 				sgen_pin_stats_register_object ((char*) bigobj->data, safe_object_get_size ((MonoObject*) bigobj->data));
 			SGEN_LOG (6, "Marked large object %p (%s) size: %lu from roots", bigobj->data, safe_name (bigobj->data), (unsigned long)bigobj->size);

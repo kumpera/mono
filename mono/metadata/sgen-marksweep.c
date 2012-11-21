@@ -162,6 +162,12 @@ typedef struct {
 
 #define MS_BLOCK_OBJ_SIZE_FACTOR	(sqrt (2.0))
 
+#ifdef SGEN_PARALLEL_MARK
+#define OBJECT_ENQUEUE sgen_par_enqueue_object
+#else
+#define OBJECT_ENQUEUE sgen_serial_enqueue_object
+#endif
+
 /*
  * This way we can lookup block object size indexes for sizes up to
  * 256 bytes with a single load.
@@ -1064,7 +1070,7 @@ major_dump_heap (FILE *heap_dump_file)
 		if (!MS_MARK_BIT ((block), __word, __bit) && MS_OBJ_ALLOCED ((obj), (block))) { \
 			MS_SET_MARK_BIT ((block), __word, __bit);	\
 			if ((block)->has_references)			\
-				GRAY_OBJECT_ENQUEUE ((queue), (obj));	\
+				OBJECT_ENQUEUE ((queue), (obj));	\
 			binary_protocol_mark ((obj), (gpointer)LOAD_VTABLE ((obj)), sgen_safe_object_get_size ((MonoObject*)(obj))); \
 		}							\
 	} while (0)
@@ -1075,7 +1081,7 @@ major_dump_heap (FILE *heap_dump_file)
 		if (!MS_MARK_BIT ((block), __word, __bit)) {		\
 			MS_SET_MARK_BIT ((block), __word, __bit);	\
 			if ((block)->has_references)			\
-				GRAY_OBJECT_ENQUEUE ((queue), (obj));	\
+				OBJECT_ENQUEUE ((queue), (obj));	\
 			binary_protocol_mark ((obj), (gpointer)LOAD_VTABLE ((obj)), sgen_safe_object_get_size ((MonoObject*)(obj))); \
 		}							\
 	} while (0)
@@ -1087,7 +1093,7 @@ major_dump_heap (FILE *heap_dump_file)
 		MS_PAR_SET_MARK_BIT (__was_marked, (block), __word, __bit); \
 		if (!__was_marked) {					\
 			if ((block)->has_references)			\
-				GRAY_OBJECT_ENQUEUE ((queue), (obj));	\
+				OBJECT_ENQUEUE ((queue), (obj));	\
 			binary_protocol_mark ((obj), (gpointer)LOAD_VTABLE ((obj)), sgen_safe_object_get_size ((MonoObject*)(obj))); \
 		}							\
 	} while (0)
@@ -1260,7 +1266,7 @@ major_copy_or_mark_object (void **ptr, SgenGrayQueue *queue)
 			binary_protocol_pin (obj, vt, sgen_safe_object_get_size ((MonoObject*)obj));
 			if (SGEN_CAS_PTR (obj, (void*)(vtable_word | SGEN_PINNED_BIT), (void*)vtable_word) == (void*)vtable_word) {
 				if (SGEN_VTABLE_HAS_REFERENCES (vt))
-					GRAY_OBJECT_ENQUEUE (queue, obj);
+					OBJECT_ENQUEUE (queue, obj);
 			} else {
 				g_assert (SGEN_OBJECT_IS_PINNED (obj));
 			}
@@ -1396,7 +1402,7 @@ major_copy_or_mark_object (void **ptr, SgenGrayQueue *queue)
 			}
 			SGEN_PIN_OBJECT (obj);
 			/* FIXME: only enqueue if object has references */
-			GRAY_OBJECT_ENQUEUE (queue, obj);
+			OBJECT_ENQUEUE (queue, obj);
 		}
 	}
 }

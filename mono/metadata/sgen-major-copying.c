@@ -376,7 +376,7 @@ major_copy_or_mark_object (void **obj_slot, SgenGrayQueue *queue)
 		SGEN_LOG (9, " (marked LOS/Pinned %p (%s), size: %td)", obj, sgen_safe_name (obj), objsize);
 		binary_protocol_pin (obj, (gpointer)SGEN_LOAD_VTABLE (obj), sgen_safe_object_get_size ((MonoObject*)obj));
 		SGEN_PIN_OBJECT (obj);
-		GRAY_OBJECT_ENQUEUE (queue, obj);
+		sgen_serial_enqueue_object (queue, obj);
 		HEAVY_STAT (++stat_major_copy_object_failed_large_pinned);
 		return;
 	}
@@ -485,7 +485,7 @@ pin_pinned_object_callback (void *addr, size_t slot_size, SgenGrayQueue *queue)
 	if (!SGEN_OBJECT_IS_PINNED (addr))
 		sgen_pin_stats_register_object ((char*) addr, sgen_safe_object_get_size ((MonoObject*) addr));
 	SGEN_PIN_OBJECT (addr);
-	GRAY_OBJECT_ENQUEUE (queue, addr);
+	sgen_serial_enqueue_object (queue, addr);
 	SGEN_LOG (6, "Marked pinned object %p (%s) from roots", addr, sgen_safe_name (addr));
 }
 

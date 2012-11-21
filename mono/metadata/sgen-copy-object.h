@@ -98,7 +98,7 @@ par_copy_object_no_checks (char *destination, MonoVTable *vt, void *obj, mword o
 	general_copy_object_no_checks (destination, vt, obj, objsize);
 	if (queue) {
 		SGEN_LOG (9, "Enqueuing gray object %p (%s)", obj, sgen_safe_name (obj));
-		GRAY_OBJECT_ENQUEUE (queue, destination);
+		sgen_par_enqueue_object (queue, destination);
 	}
 }
 
@@ -126,7 +126,7 @@ serial_copy_object_no_checks (void *obj, SgenGrayQueue *queue)
 	*(MonoVTable**)destination = vt;
 	general_copy_object_no_checks (destination, vt, obj, objsize);
 	if (has_references)
-		GRAY_OBJECT_ENQUEUE (queue, destination);
+		sgen_serial_enqueue_object (queue, destination);
 
 	/* set the forwarding pointer */
 	SGEN_FORWARD_OBJECT (obj, destination);
