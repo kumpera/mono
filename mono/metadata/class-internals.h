@@ -319,6 +319,7 @@ struct _MonoClass {
 	/* next byte */
 	guint has_finalize_inited    : 1; /* has_finalize is initialized */
 	guint fields_inited : 1; /* fields is initialized */
+	guint has_parent : 1;
 
 	guint8     exception_type;	/* MONO_EXCEPTION_* */
 
@@ -326,7 +327,7 @@ struct _MonoClass {
 	/* Stored as property MONO_CLASS_PROP_EXCEPTION_DATA */
 	//void       *exception_data;
 
-	MonoClass  *parent;
+	MonoClass  *resolved_parent;
 	MonoClass  *nested_in;
 
 	MonoImage *image;

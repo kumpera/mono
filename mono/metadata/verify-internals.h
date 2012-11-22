@@ -2,6 +2,7 @@
 #define __MONO_METADATA_VERIFY_INTERNAL_H__
 
 #include <mono/metadata/metadata.h>
+#include <mono/utils/mono-error.h>
 
 G_BEGIN_DECLS
 
@@ -24,7 +25,7 @@ gboolean mono_verifier_is_class_full_trust (MonoClass *klass) MONO_INTERNAL;
 gboolean mono_verifier_class_is_valid_generic_instantiation (MonoClass *class) MONO_INTERNAL;
 gboolean mono_verifier_is_method_valid_generic_instantiation (MonoMethod *method) MONO_INTERNAL;
 
-gboolean mono_verifier_verify_class (MonoClass *klass) MONO_INTERNAL;
+gboolean mono_verifier_verify_class (MonoClass *klass, MonoError *error) MONO_INTERNAL;
 
 GSList* mono_method_verify_with_current_settings (MonoMethod *method, gboolean skip_visibility, gboolean is_fulltrust) MONO_INTERNAL;
 

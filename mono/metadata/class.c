@@ -72,6 +72,9 @@ static void mono_class_setup_vtable_full (MonoClass *class, GList *in_setup);
 void (*mono_debugger_class_init_func) (MonoClass *klass) = NULL;
 void (*mono_debugger_class_loaded_methods_func) (MonoClass *klass) = NULL;
 
+
+
+
 /*
  * mono_class_from_typeref:
  * @image: a MonoImage
@@ -1354,6 +1357,7 @@ mono_class_setup_fields (MonoClass *class)
 	MonoClassField *field;
 	MonoGenericContainer *container = NULL;
 	MonoClass *gtd = class->generic_class ? mono_class_get_generic_type_definition (class) : NULL;
+	MonoClass *parent;
 
 	if (class->size_inited)
 		return;
@@ -1383,21 +1387,21 @@ mono_class_setup_fields (MonoClass *class)
 	if (!class->rank)
 		class->sizes.class_size = 0;
 
-	if (class->parent) {
+	if ((parent = mono_class_get_parent (class)) != NULL) {
 		/* For generic instances, class->parent might not have been initialized */
-		mono_class_init (class->parent);
-		if (!class->parent->size_inited) {
-			mono_class_setup_fields (class->parent);
-			if (class->parent->exception_type) {
+		mono_class_init (parent);
+		if (!parent->size_inited) {
+			mono_class_setup_fields (parent);
+			if (parent->exception_type) {
 				mono_class_set_failure (class, MONO_EXCEPTION_TYPE_LOAD, NULL);
 				return;
 			}
 		}
-		class->instance_size += class->parent->instance_size;
-		class->min_align = class->parent->min_align;
+		class->instance_size += parent->instance_size;
+		class->min_align = parent->min_align;
 		/* we use |= since it may have been set already */
-		class->has_references |= class->parent->has_references;
-		blittable = class->parent->blittable;
+		class->has_references |= parent->has_references;
+		blittable = parent->blittable;
 	} else {
 		class->instance_size = sizeof (MonoObject);
 		class->min_align = 1;
@@ -1628,6 +1632,7 @@ mono_class_layout_fields (MonoClass *class)
 	guint32 pass, passes, real_size;
 	gboolean gc_aware_layout = FALSE;
 	MonoClassField *field;
+	MonoClass *parent;
 
 	/*
 	 * When we do generic sharing we need to have layout
@@ -1713,13 +1718,13 @@ mono_class_layout_fields (MonoClass *class)
 		if (layout != TYPE_ATTRIBUTE_AUTO_LAYOUT)
 			passes = 1;
 
-		if (class->parent) {
-			mono_class_setup_fields (class->parent);
-			if (class->parent->exception_type) {
+		if ((parent = mono_class_get_parent (class)) != NULL) {
+			mono_class_setup_fields (parent);
+			if (parent->exception_type) {
 				mono_class_set_failure (class, MONO_EXCEPTION_TYPE_LOAD, NULL);
 				return;
 			}
-			real_size = class->parent->instance_size;
+			real_size = parent->instance_size;
 		} else {
 			real_size = sizeof (MonoObject);
 		}
@@ -2131,13 +2136,14 @@ mono_class_get_vtable_entry (MonoClass *class, int offset)
 	MonoMethod *m;
 
  	if (class->rank == 1) {
+		MonoClass *parent = mono_class_get_parent (class);
 		/* 
 		 * szarrays do not overwrite any methods of Array, so we can avoid
 		 * initializing their vtables in some cases.
 		 */
-		mono_class_setup_vtable (class->parent);
-		if (offset < class->parent->vtable_size)
-			return class->parent->vtable [offset];
+		mono_class_setup_vtable (parent);
+		if (offset < parent->vtable_size)
+			return parent->vtable [offset];
 	}
 
 	if (class->generic_class) {
@@ -2678,7 +2684,7 @@ print_implemented_interfaces (MonoClass *klass) {
 			g_ptr_array_free (ifaces, TRUE);
 		}
 		ancestor_level ++;
-		klass = klass->parent;
+		klass = mono_class_get_parent (klass);
 	}
 }
 
@@ -3963,7 +3969,7 @@ void
 mono_class_setup_vtable_general (MonoClass *class, MonoMethod **overrides, int onum, GList *in_setup)
 {
 	MonoError error;
-	MonoClass *k, *ic;
+	MonoClass *k, *ic, *parent;
 	MonoMethod **vtable;
 	int i, max_vtsize = 0, max_iid, cur_slot = 0;
 	GPtrArray *ifaces = NULL;
@@ -3998,20 +4004,21 @@ mono_class_setup_vtable_general (MonoClass *class, MonoMethod **overrides, int o
 		g_ptr_array_free (ifaces, TRUE);
 		ifaces = NULL;
 	}
-	
-	if (class->parent) {
-		mono_class_init (class->parent);
-		mono_class_setup_vtable_full (class->parent, in_setup);
 
-		if (class->parent->exception_type) {
-			char *name = mono_type_get_full_name (class->parent);
+	parent = mono_class_get_parent (class);
+	if (parent) {
+		mono_class_init (parent);
+		mono_class_setup_vtable_full (parent, in_setup);
+
+		if (parent->exception_type) {
+			char *name = mono_type_get_full_name (parent);
 			mono_class_set_failure (class, MONO_EXCEPTION_TYPE_LOAD, g_strdup_printf ("Parent %s failed to load", name));
 			g_free (name);
 			return;
 		}
 
-		max_vtsize += class->parent->vtable_size;
-		cur_slot = class->parent->vtable_size;
+		max_vtsize += parent->vtable_size;
+		cur_slot = parent->vtable_size;
 	}
 
 	max_vtsize += class->method.count;
@@ -4075,8 +4082,7 @@ mono_class_setup_vtable_general (MonoClass *class, MonoMethod **overrides, int o
 		return;
 	}
 
-	if (class->parent && class->parent->vtable_size) {
-		MonoClass *parent = class->parent;
+	if (parent && parent->vtable_size) {
 		int i;
 		
 		memcpy (vtable, parent->vtable,  sizeof (gpointer) * parent->vtable_size);
@@ -4166,7 +4172,7 @@ mono_class_setup_vtable_general (MonoClass *class, MonoMethod **overrides, int o
 	
 	// Loop on all implemented interfaces...
 	for (i = 0; i < class->interface_offsets_count; i++) {
-		MonoClass *parent = class->parent;
+		MonoClass *parent = mono_class_get_parent (class);
 		int ic_offset;
 		gboolean interface_is_explicitly_implemented_by_class;
 		int im_index;
@@ -4209,6 +4215,7 @@ mono_class_setup_vtable_general (MonoClass *class, MonoMethod **overrides, int o
 				int cm_index;
 				gpointer iter;
 				MonoMethod *cm;
+				MonoClass *parent;
 
 				// First look for a suitable method among the class methods
 				iter = NULL;
@@ -4229,8 +4236,8 @@ mono_class_setup_vtable_general (MonoClass *class, MonoMethod **overrides, int o
 				}
 				
 				// If the slot is still empty, look in all the inherited virtual methods...
-				if ((vtable [im_slot] == NULL) && class->parent != NULL) {
-					MonoClass *parent = class->parent;
+				parent = mono_class_get_parent (class);
+				if ((vtable [im_slot] == NULL) && parent != NULL) {
 					// Reverse order, so that last added methods are preferred
 					for (cm_index = parent->vtable_size - 1; cm_index >= 0; cm_index--) {
 						MonoMethod *cm = parent->vtable [cm_index];
@@ -4296,7 +4303,7 @@ mono_class_setup_vtable_general (MonoClass *class, MonoMethod **overrides, int o
 		 */
 		if (!(cm->flags & METHOD_ATTRIBUTE_NEW_SLOT)) {
 			int slot = -1;
-			for (k = class->parent; k ; k = k->parent) {
+			for (k = mono_class_get_parent (class); k ; k = mono_class_get_parent (k)) {
 				gpointer k_iter;
 				MonoMethod *m1;
 
@@ -4437,9 +4444,9 @@ mono_class_setup_vtable_general (MonoClass *class, MonoMethod **overrides, int o
 	}
 
 	/* Try to share the vtable with our parent. */
-	if (class->parent && (class->parent->vtable_size == class->vtable_size) && (memcmp (class->parent->vtable, vtable, sizeof (gpointer) * class->vtable_size) == 0)) {
+	if (parent && (parent->vtable_size == class->vtable_size) && (memcmp (parent->vtable, vtable, sizeof (gpointer) * class->vtable_size) == 0)) {
 		mono_memory_barrier ();
-		class->vtable = class->parent->vtable;
+		class->vtable = parent->vtable;
 	} else {
 		MonoMethod **tmp = mono_class_alloc0 (class, sizeof (gpointer) * class->vtable_size);
 		memcpy (tmp, vtable,  sizeof (gpointer) * class->vtable_size);
@@ -4482,7 +4489,7 @@ mono_class_setup_vtable_general (MonoClass *class, MonoMethod **overrides, int o
 					count_virtual_methods (ic), ic->interface_id, mono_type_full_name (&ic->byval_arg));
 			}
 
-			for (k = class->parent; k ; k = k->parent) {
+			for (k = mono_class_get_parent (class); k ; k = mono_class_get_parent (k)) {
 				for (i = 0; i < k->interface_count; i++) {
 					ic = k->interfaces [i]; 
 					printf ("  parent slot offset: %03d, method count: %03d, iid: %03d %s\n",  
@@ -4592,12 +4599,15 @@ generic_array_methods (MonoClass *class)
 {
 	int i, count_generic = 0;
 	GList *list = NULL, *tmp;
+	MonoClass *parent;
 	if (generic_array_method_num)
 		return generic_array_method_num;
-	mono_class_setup_methods (class->parent); /*This is setting up System.Array*/
-	g_assert (!class->parent->exception_type); /*So hitting this assert is a huge problem*/
-	for (i = 0; i < class->parent->method.count; i++) {
-		MonoMethod *m = class->parent->methods [i];
+
+	parent = mono_class_get_parent (class);
+	mono_class_setup_methods (parent); /*This is setting up System.Array*/
+	g_assert (!parent->exception_type); /*So hitting this assert is a huge problem*/
+	for (i = 0; i < parent->method.count; i++) {
+		MonoMethod *m = parent->methods [i];
 		if (!strncmp (m->name, "InternalArray__", 15)) {
 			count_generic++;
 			list = g_list_prepend (list, m);
@@ -4740,6 +4750,8 @@ mono_class_init (MonoClass *class)
 	int i;
 	MonoCachedClassInfo cached_info;
 	gboolean has_cached_info;
+	MonoError error;
+	MonoClass *parent;
 	
 	g_assert (class);
 
@@ -4765,8 +4777,9 @@ mono_class_init (MonoClass *class)
 
 	class->init_pending = 1;
 
-	if (mono_verifier_is_enabled_for_class (class) && !mono_verifier_verify_class (class)) {
-		mono_class_set_failure (class, MONO_EXCEPTION_TYPE_LOAD, concat_two_strings_with_zero (class->image, class->name, class->image->assembly_name));
+	if (mono_verifier_is_enabled_for_class (class) && !mono_verifier_verify_class (class, &error)) {
+		mono_class_set_failure (class, MONO_EXCEPTION_TYPE_LOAD, g_strdup (mono_error_get_message (&error)));
+		mono_error_cleanup (&error);
 		goto leave;
 	}
 
@@ -4782,8 +4795,10 @@ mono_class_init (MonoClass *class)
 	}
 
 	/* CAS - SecurityAction.InheritanceDemand */
-	if (mono_is_security_manager_active () && class->parent && (class->parent->flags & TYPE_ATTRIBUTE_HAS_SECURITY)) {
-		mono_secman_inheritancedemand_class (class, class->parent);
+	if (mono_is_security_manager_active ()) {
+		parent = mono_class_get_parent (class);
+		if (parent && (parent->flags & TYPE_ATTRIBUTE_HAS_SECURITY))
+			mono_secman_inheritancedemand_class (class, parent);
 	}
 
 	mono_stats.initialized_class_count++;
@@ -4809,8 +4824,9 @@ mono_class_init (MonoClass *class)
 			class->interface_id = mono_get_unique_iid (class);
 	}
 
-	if (class->parent && !class->parent->inited)
-		mono_class_init (class->parent);
+	parent = mono_class_get_parent (class);
+	if (parent && !parent->inited)
+		mono_class_init (parent);
 
 	has_cached_info = mono_class_get_cached_class_info (class, &cached_info);
 
@@ -5011,11 +5027,12 @@ mono_class_has_finalizer (MonoClass *klass)
 		/* Interfaces and valuetypes are not supposed to have finalizers */
 		if (!(MONO_CLASS_IS_INTERFACE (class) || class->valuetype)) {
 			MonoMethod *cmethod = NULL;
+			MonoClass *parent = mono_class_get_parent (class);
 
-			if (class->parent && class->parent->has_finalize) {
+			if (parent && parent->has_finalize) {
 				class->has_finalize = 1;
 			} else {
-				if (class->parent) {
+				if (parent) {
 					/*
 					 * Can't search in metadata for a method named Finalize, because that
 					 * ignores overrides.
@@ -5384,6 +5401,7 @@ mono_class_create_from_typedef (MonoImage *image, guint32 type_token)
 	nspace = mono_metadata_string_heap (image, cols [MONO_TYPEDEF_NAMESPACE]);
 
 	class = mono_image_alloc0 (image, sizeof (MonoClass));
+	printf ("loading %s:%s -> %p\n", nspace, name, class);
 
 	class->name = name;
 	class->name_space = nspace;
@@ -5420,7 +5438,9 @@ mono_class_create_from_typedef (MonoImage *image, guint32 type_token)
 			class->byval_arg.data.klass = class;
 			class->byval_arg.type = MONO_TYPE_CLASS;
 		}
+		class->has_parent = TRUE;
 		parent = mono_class_get_full (image, parent_token, context);
+		printf ("\tparent of %p is %p\n", class, parent);
 
 		if (parent == NULL){
 			mono_class_set_failure (class, MONO_EXCEPTION_TYPE_LOAD, g_strdup ("Could not load parent type"));
@@ -5636,17 +5656,20 @@ mono_generic_class_get_class (MonoGenericClass *gclass)
 	 * We're not interested in the nested classes of a generic instance.
 	 * We use the generic type definition to look for nested classes.
 	 */
-
-	if (gklass->parent) {
-		MonoError error;
-		klass->parent = mono_class_inflate_generic_class_checked (gklass->parent, mono_generic_class_get_context (gclass), &error);
-		if (!mono_error_ok (&error)) {
-			/*Set parent to something safe as the runtime doesn't handle well this kind of failure.*/
-			klass->parent = mono_defaults.object_class;
-			mono_class_set_failure (klass, MONO_EXCEPTION_TYPE_LOAD, NULL);
-			mono_error_cleanup (&error);
-		}
-	}
+	// printf ("gclass %p [%s:%s / %p] -> has_p %p\n", klass, klass->name_space, klass->name, gklass, gklass->parent);
+	klass->has_parent = gklass->has_parent;
+		
+	// if (gklass->parent) {
+	// 	MonoError error;
+	// 	klass->parent = mono_class_inflate_generic_class_checked (gklass->parent, mono_generic_class_get_context (gclass), &error);
+	// 	printf ("\t gparent of %p is %p\n", klass, klass->parent);
+	// 	if (!mono_error_ok (&error)) {
+	// 		/*Set parent to something safe as the runtime doesn't handle well this kind of failure.*/
+	// 		klass->parent = mono_defaults.object_class;
+	// 		mono_class_set_failure (klass, MONO_EXCEPTION_TYPE_LOAD, NULL);
+	// 		mono_error_cleanup (&error);
+	// 	}
+	// }
 
 	if (klass->parent)
 		mono_class_setup_parent (klass, klass->parent);
@@ -6217,6 +6240,7 @@ mono_bounded_array_class_get (MonoClass *eclass, guint32 rank, gboolean bounded)
 	class->type_token = 0;
 	/* all arrays are marked serializable and sealed, bug #42779 */
 	class->flags = TYPE_ATTRIBUTE_CLASS | TYPE_ATTRIBUTE_SERIALIZABLE | TYPE_ATTRIBUTE_SEALED | TYPE_ATTRIBUTE_PUBLIC;
+	class->has_parent = TRUE;
 	class->parent = parent;
 	class->instance_size = mono_class_instance_size (class->parent);
 
@@ -8132,7 +8156,34 @@ mono_class_enum_basetype (MonoClass *klass)
 MonoClass*
 mono_class_get_parent (MonoClass *klass)
 {
-	return klass->parent;
+	MonoClass *gklass;
+	MonoError error;
+	MonoClass *parent, *gparent;
+
+	if (!klass->has_parent)
+		return NULL;
+ 	if (klass->resolved_parent)
+		return klass->resolved_parent;
+	if (klass->exception_type)
+		return NULL;
+	mono_loader_lock ();
+	if (!klass->generic_class) {
+		mono_class_set_failure (klass, MONO_EXCEPTION_TYPE_LOAD, (char*)"Non generic class with lazily loaded parent");
+		return NULL;
+	}
+
+	gklass = klass->generic_class->container_class;
+	g_assert (gklass->resolved_parent); /* A generic container parent must always be eagerly resolved.*/
+	parent = mono_class_inflate_generic_class_checked (gklass->resolved_parent, mono_generic_class_get_context (klass->generic_class), &error);
+	if (!mono_error_ok (&error)) {
+		/*Set parent to something safe as the runtime doesn't handle well this kind of failure.*/
+		parent = mono_defaults.object_class;
+		mono_class_set_failure (klass, MONO_EXCEPTION_TYPE_LOAD, (char*)"Could not load parent");
+		mono_error_cleanup (&error);
+	}
+	mono_atomic_store_release (&klass->resolved_parent, parent);
+	mono_loader_unlock ();
+	return parent;
 }
 
 /**

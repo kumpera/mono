@@ -28,6 +28,7 @@
 #include <mono/metadata/attrdefs.h>
 #include <mono/utils/mono-counters.h>
 #include <mono/utils/monobitset.h>
+#include <mono/utils/mono-error-internals.h>
 #include <string.h>
 #include <signal.h>
 #include <ctype.h>
@@ -630,8 +631,10 @@ is_valid_generic_instantiation (MonoGenericContainer *gc, MonoGenericContext *co
 			mono_metadata_free_type (inflated);
 
 			/*FIXME maybe we need the same this as verifier_class_is_assignable_from*/
-			if (!mono_class_is_assignable_from_slow (ctr, paramClass))
+			if (!mono_class_is_assignable_from_slow (ctr, paramClass)) {
+				printf ("cannot assign %s to %s\n", mono_type_get_full_name (paramClass), mono_type_get_full_name (ctr));
 				return FALSE;
+			}
 		}
 	}
 	return TRUE;
@@ -6240,41 +6243,66 @@ fail:
  * 
  */
 gboolean
-mono_verifier_verify_class (MonoClass *class)
+mono_verifier_verify_class (MonoClass *class, MonoError *error)
 {
+	mono_error_init (error);
 	/*Neither <Module>, object or ifaces have parent.*/
 	if (!class->parent &&
 		class != mono_defaults.object_class && 
 		!MONO_CLASS_IS_INTERFACE (class) &&
-		(!class->image->dynamic && class->type_token != 0x2000001)) /*<Module> is the first type in the assembly*/
-		return FALSE;
+		(!class->image->dynamic && class->type_token != 0x2000001)) {/*<Module> is the first type in the assembly*/
+			mono_error_set_type_load_class (error, class, "Class has parent but is neither System.Object, an interface or <Module>");
+			return FALSE;
+	}
 	if (class->parent) {
-		if (MONO_CLASS_IS_INTERFACE (class->parent))
+		if (MONO_CLASS_IS_INTERFACE (class->parent)) {
+			char *name = mono_type_get_full_name (class->parent);
+			mono_error_set_type_load_class (error, class, "Class extends interface %s", name);
+			g_free (name);
 			return FALSE;
-		if (!class->generic_class && class->parent->generic_container)
+		}
+		if (!class->generic_class && class->parent->generic_container) {
+			mono_error_set_type_load_class (error, class, "Class has no generic data but parent is a generic definition");
 			return FALSE;
+		}
 		if (class->parent->generic_class && !class->generic_class) {
 			MonoGenericContext *context = mono_class_get_context (class);
 			if (class->generic_container)
 				context = &class->generic_container->context;
-			if (!mono_type_is_valid_type_in_context (&class->parent->byval_arg, context))
+			if (!mono_type_is_valid_type_in_context (&class->parent->byval_arg, context)) {
+				mono_error_set_type_load_class (error, class, "Parent generic instantiation is invalid on the current class context");
 				return FALSE;
+			}
 		}
 	}
-	if (class->generic_container && (class->flags & TYPE_ATTRIBUTE_LAYOUT_MASK) == TYPE_ATTRIBUTE_EXPLICIT_LAYOUT)
+	if (class->generic_container && (class->flags & TYPE_ATTRIBUTE_LAYOUT_MASK) == TYPE_ATTRIBUTE_EXPLICIT_LAYOUT) {
+		mono_error_set_type_load_class (error, class, "Generic class must not use explict layout");
 		return FALSE;
-	if (class->generic_container && !verify_generic_parameters (class))
+	}
+	if (class->generic_container && !verify_generic_parameters (class)) {
+		mono_error_set_type_load_class (error, class, "Class has a bas generic parameter");
 		return FALSE;
-	if (!verify_class_for_overlapping_reference_fields (class))
+	}
+	if (!verify_class_for_overlapping_reference_fields (class)) {
+		mono_error_set_type_load_class (error, class, "Class has an overlapping reference field with a scalar field");
 		return FALSE;
-	if (class->generic_class && !mono_class_is_valid_generic_instantiation (NULL, class))
+	}
+	if (class->generic_class && !mono_class_is_valid_generic_instantiation (NULL, class)) {
+		mono_error_set_type_load_class (error, class, "Class is an invalid generic instantiation");
 		return FALSE;
-	if (class->generic_class == NULL && !verify_class_fields (class))
+	}
+	if (class->generic_class == NULL && !verify_class_fields (class)) {
+		mono_error_set_type_load_class (error, class, "Class has an invalid field");
 		return FALSE;
-	if (class->valuetype && !verify_valuetype_layout (class))
+	}
+	if (class->valuetype && !verify_valuetype_layout (class)) {
+		mono_error_set_type_load_class (error, class, "Invalid valuetype layout");
 		return FALSE;
-	if (!verify_interfaces (class))
+	}
+	if (!verify_interfaces (class)) {
+		mono_error_set_type_load_class (error, class, "Class has an invalid interface");
 		return FALSE;
+	}
 	return TRUE;
 }
 
