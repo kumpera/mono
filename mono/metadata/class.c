@@ -4953,27 +4953,27 @@ mono_class_init (MonoClass *class)
 		}
 	}
 
-	if (class->parent) {
+	if (parent) {
 		int first_iface_slot;
 		/* This will compute class->parent->vtable_size for some classes */
-		mono_class_init (class->parent);
-		if (class->parent->exception_type) {
+		mono_class_init (parent);
+		if (parent->exception_type) {
 			mono_class_set_failure (class, MONO_EXCEPTION_TYPE_LOAD, NULL);
 			goto leave;
 		}
 		if (mono_loader_get_last_error ())
 			goto leave;
-		if (!class->parent->vtable_size) {
+		if (!parent->vtable_size) {
 			/* FIXME: Get rid of this somehow */
-			mono_class_setup_vtable (class->parent);
-			if (class->parent->exception_type) {
+			mono_class_setup_vtable (parent);
+			if (parent->exception_type) {
 				mono_class_set_failure (class, MONO_EXCEPTION_TYPE_LOAD, NULL);
 				goto leave;
 			}
 			if (mono_loader_get_last_error ())
 				goto leave;
 		}
-		first_iface_slot = class->parent->vtable_size;
+		first_iface_slot = parent->vtable_size;
 		if (mono_class_need_stelemref_method (class))
 			++first_iface_slot;
 		setup_interface_offsets (class, first_iface_slot, TRUE);
@@ -5047,7 +5047,7 @@ mono_class_has_finalizer (MonoClass *klass)
 					g_assert (class->vtable_size > finalize_slot);
 
 					class->has_finalize = 0;
-					if (class->parent) { 
+					if (parent) { 
 						if (cmethod->is_inflated)
 							cmethod = ((MonoMethodInflated*)cmethod)->declaring;
 						if (cmethod != default_finalize) {
@@ -5245,12 +5245,14 @@ mono_class_setup_parent (MonoClass *class, MonoClass *parent)
 
 	/* if root of the hierarchy */
 	if (system_namespace && !strcmp (class->name, "Object")) {
-		class->parent = NULL;
+		g_assert (!class->has_parent);
+		class->resolved_parent = NULL;
 		class->instance_size = sizeof (MonoObject);
 		return;
 	}
 	if (!strcmp (class->name, "<Module>")) {
-		class->parent = NULL;
+		g_assert (!class->has_parent);
+		class->resolved_parent = NULL;
 		class->instance_size = 0;
 		return;
 	}
@@ -5269,8 +5271,8 @@ mono_class_setup_parent (MonoClass *class, MonoClass *parent)
 			parent = mono_defaults.object_class;
 			mono_class_set_failure (class, MONO_EXCEPTION_TYPE_LOAD, NULL);
 		}
-
-		class->parent = parent;
+		g_assert (class->has_parent);
+		class->resolved_parent = parent;
 
 		if (parent->generic_class && !parent->name) {
 			/*
@@ -5300,10 +5302,10 @@ mono_class_setup_parent (MonoClass *class, MonoClass *parent)
 				class->delegate  = 1;
 		}
 
-		if (class->parent->enumtype || (mono_is_corlib_image (class->parent->image) && (strcmp (class->parent->name, "ValueType") == 0) && 
-						(strcmp (class->parent->name_space, "System") == 0)))
+		if (parent->enumtype || (mono_is_corlib_image (parent->image) && (strcmp (parent->name, "ValueType") == 0) && 
+						(strcmp (parent->name_space, "System") == 0)))
 			class->valuetype = 1;
-		if (mono_is_corlib_image (class->parent->image) && ((strcmp (class->parent->name, "Enum") == 0) && (strcmp (class->parent->name_space, "System") == 0))) {
+		if (mono_is_corlib_image (parent->image) && ((strcmp (parent->name, "Enum") == 0) && (strcmp (parent->name_space, "System") == 0))) {
 			class->valuetype = class->enumtype = 1;
 		}
 		/*class->enumtype = class->parent->enumtype; */
@@ -5313,7 +5315,8 @@ mono_class_setup_parent (MonoClass *class, MonoClass *parent)
 		if (MONO_CLASS_IS_IMPORT (class))
 			init_com_from_comimport (class);
 #endif
-		class->parent = NULL;
+		g_assert (!class->has_parent);
+		class->resolved_parent = NULL;
 	}
 
 }
