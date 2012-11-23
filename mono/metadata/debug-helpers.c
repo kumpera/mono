@@ -938,7 +938,7 @@ objval_describe (MonoClass *class, const char *addr)
 	if (class->valuetype)
 		type_offset = -sizeof (MonoObject);
 
-	for (p = class; p != NULL; p = p->parent) {
+	for (p = class; p != NULL; p = mono_class_get_parent (p)) {
 		gpointer iter = NULL;
 		int printed_header = FALSE;
 		while ((field = mono_class_get_fields (p, &iter))) {
@@ -1006,7 +1006,7 @@ mono_class_describe_statics (MonoClass* klass)
 	if (!(addr = mono_vtable_get_static_field_data (vtable)))
 		return;
 
-	for (p = klass; p != NULL; p = p->parent) {
+	for (p = klass; p != NULL; p = mono_class_get_parent (p)) {
 		gpointer iter = NULL;
 		while ((field = mono_class_get_fields (p, &iter))) {
 			if (field->type->attrs & FIELD_ATTRIBUTE_LITERAL)

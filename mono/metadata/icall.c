@@ -1681,7 +1681,7 @@ ves_icall_System_Reflection_FieldInfo_internal_from_handle_type (MonoClassField 
 		klass = mono_class_from_mono_type (type);
 
 		/* Check that the field belongs to the class */
-		for (k = klass; k; k = k->parent) {
+		for (k = klass; k; k = mono_class_get_parent (k)) {
 			if (k == handle->parent) {
 				found = TRUE;
 				break;
@@ -2127,7 +2127,7 @@ ves_icall_Type_GetInterfaces (MonoReflectionType* type)
 		class = class->generic_class->container_class;
 	}
 
-	for (parent = class; parent; parent = parent->parent) {
+	for (parent = class; parent; parent = mono_class_get_parent (parent)) {
 		mono_class_setup_interfaces (parent, &error);
 		if (!mono_error_ok (&error))
 			goto fail;
@@ -2241,8 +2241,8 @@ ves_icall_MonoType_GetElementType (MonoReflectionType *type)
 ICALL_EXPORT MonoReflectionType*
 ves_icall_get_type_parent (MonoReflectionType *type)
 {
-	MonoClass *class = mono_class_from_mono_type (type->type);
-	return class->parent ? mono_type_get_object (mono_object_domain (type), &class->parent->byval_arg): NULL;
+	MonoClass *parent = mono_class_get_parent (mono_class_from_mono_type (type->type));
+	return parent ? mono_type_get_object (mono_object_domain (type), &parent->byval_arg): NULL;
 }
 
 ICALL_EXPORT MonoBoolean
@@ -2920,7 +2920,7 @@ ves_icall_InternalExecute (MonoReflectionMethod *method, MonoObject *this, MonoA
 					g_free (str);
 					return NULL;
 				}
-				k = k->parent;
+				k = mono_class_get_parent (k);
 			} while (k);
 
 			g_free (str);
@@ -2965,7 +2965,7 @@ ves_icall_InternalExecute (MonoReflectionMethod *method, MonoObject *this, MonoA
 					return NULL;
 				}
 				
-				k = k->parent;
+				k = mono_class_get_parent (k);
 			} while (k);
 
 			g_free (str);
@@ -3373,7 +3373,7 @@ handle_parent:
 		
 		return mono_field_get_object (domain, klass, field);
 	}
-	if (!(bflags & BFLAGS_DeclaredOnly) && (klass = klass->parent))
+	if (!(bflags & BFLAGS_DeclaredOnly) && (klass = mono_class_get_parent (klass)))
 		goto handle_parent;
 
 	return NULL;
@@ -3438,7 +3438,7 @@ handle_parent:
 		member = (MonoObject*)mono_field_get_object (domain, refklass, field);
 		mono_ptr_array_append (tmp_array, member);
 	}
-	if (!(bflags & BFLAGS_DeclaredOnly) && (klass = klass->parent))
+	if (!(bflags & BFLAGS_DeclaredOnly) && (klass = mono_class_get_parent (klass)))
 		goto handle_parent;
 
 	res = mono_array_new_cached (domain, mono_defaults.field_info_class, mono_ptr_array_size (tmp_array));
@@ -3502,7 +3502,7 @@ mono_class_get_methods_by_name (MonoClass *klass, const char *name, guint32 bfla
 		goto loader_error;
 
 	if (is_generic_parameter (&klass->byval_arg))
-		nslots = mono_class_get_vtable_size (klass->parent);
+		nslots = mono_class_get_vtable_size (mono_class_get_parent (klass));
 	else
 		nslots = MONO_CLASS_IS_INTERFACE (klass) ? mono_class_num_methods (klass) : mono_class_get_vtable_size (klass);
 	if (nslots >= sizeof (method_slots_default) * 8) {
@@ -3558,7 +3558,7 @@ handle_parent:
 		match = 0;
 		g_ptr_array_add (array, method);
 	}
-	if (!(bflags & BFLAGS_DeclaredOnly) && (klass = klass->parent))
+	if (!(bflags & BFLAGS_DeclaredOnly) && (klass = mono_class_get_parent (klass)))
 		goto handle_parent;
 	if (method_slots != method_slots_default)
 		g_free (method_slots);
@@ -3814,7 +3814,7 @@ handle_parent:
 		
 		g_hash_table_insert (properties, prop, prop);
 	}
-	if ((!(bflags & BFLAGS_DeclaredOnly) && (klass = klass->parent)))
+	if ((!(bflags & BFLAGS_DeclaredOnly) && (klass = mono_class_get_parent (klass))))
 		goto handle_parent;
 
 	g_hash_table_destroy (properties);
@@ -3909,7 +3909,7 @@ handle_parent:
 		return mono_event_get_object (domain, startklass, event);
 	}
 
-	if (!(bflags & BFLAGS_DeclaredOnly) && (klass = klass->parent))
+	if (!(bflags & BFLAGS_DeclaredOnly) && (klass = mono_class_get_parent (klass)))
 		goto handle_parent;
 
 	g_free (event_name);
@@ -3989,7 +3989,7 @@ handle_parent:
 			continue;
 		mono_ptr_array_append (tmp_array, mono_event_get_object (domain, startklass, event));
 	}
-	if (!(bflags & BFLAGS_DeclaredOnly) && (klass = klass->parent))
+	if (!(bflags & BFLAGS_DeclaredOnly) && (klass = mono_class_get_parent (klass)))
 		goto handle_parent;
 
 	res = mono_array_new_cached (domain, System_Reflection_EventInfo, mono_ptr_array_size (tmp_array));
@@ -4067,7 +4067,7 @@ ves_icall_Type_GetNestedType (MonoReflectionType *type, MonoString *name, guint3
 			return mono_type_get_object (domain, &nested->byval_arg);
 		}
 	}
-	if (!(bflags & BFLAGS_DeclaredOnly) && (klass = klass->parent))
+	if (!(bflags & BFLAGS_DeclaredOnly) && (klass = mono_class_get_parent (klass)))
 		goto handle_parent;
 	g_free (str);
 	return NULL;
@@ -5889,7 +5889,7 @@ ves_icall_System_Delegate_CreateDelegate_internal (MonoReflectionType *type, Mon
 
 	mono_class_init_or_throw (delegate_class);
 
-	mono_assert (delegate_class->parent == mono_defaults.multicastdelegate_class);
+	mono_assert (mono_class_get_parent (delegate_class) == mono_defaults.multicastdelegate_class);
 
 	if (mono_security_get_mode () == MONO_SECURITY_MODE_CORE_CLR) {
 		if (!mono_security_core_clr_ensure_delegate_creation (method, throwOnBindFailure))
@@ -7165,14 +7165,14 @@ ves_icall_MonoMethod_get_base_method (MonoReflectionMethod *m, gboolean definiti
 
 	if (definition) {
 		/* At the end of the loop, klass points to the eldest class that has this virtual function slot. */
-		for (parent = klass->parent; parent != NULL; parent = parent->parent) {
+		for (parent = mono_class_get_parent (klass); parent != NULL; parent = mono_class_get_parent (parent)) {
 			mono_class_setup_vtable (parent);
 			if (parent->vtable_size <= slot)
 				break;
 			klass = parent;
 		}
 	} else {
-		klass = klass->parent;
+		klass = mono_class_get_parent (klass);
 		if (!klass)
 			return m;
 	}
