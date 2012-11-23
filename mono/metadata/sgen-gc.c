@@ -641,7 +641,8 @@ check_reference_for_xdomain (gpointer *ptr, char *obj, MonoDomain *domain)
 		return;
 
 	field = NULL;
-	for (class = o->vtable->klass; class; class = class->parent) {
+	/* It's ok to use resolved parent here since classes of existing objects must have it initialized. */
+	for (class = o->vtable->klass; class; class = class->resolved_parent) {
 		int i;
 
 		for (i = 0; i < class->field.count; ++i) {

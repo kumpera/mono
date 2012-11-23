@@ -1169,8 +1169,8 @@ emit_class_dwarf_info (MonoDwarfWriter *w, MonoClass *klass, gboolean vtype)
 		guint8 *p;
 		char *parent_die;
 
-		if (klass->parent)
-			parent_die = emit_class_dwarf_info (w, klass->parent, FALSE);
+		if (mono_class_get_parent (klass))
+			parent_die = emit_class_dwarf_info (w, mono_class_get_parent (klass), FALSE);
 		else
 			parent_die = NULL;
 

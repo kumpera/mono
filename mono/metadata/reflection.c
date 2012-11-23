@@ -6614,14 +6614,14 @@ mono_method_clear_object (MonoDomain *domain, MonoMethod *method)
 	klass = method->klass;
 	while (klass) {
 		clear_cached_object (domain, method, klass);
-		klass = klass->parent;
+		klass = mono_class_get_parent (klass);
 	}
 	/* Added by mono_param_get_objects () */
 	clear_cached_object (domain, &(method->signature), NULL);
 	klass = method->klass;
 	while (klass) {
 		clear_cached_object (domain, &(method->signature), klass);
-		klass = klass->parent;
+		klass = mono_class_get_parent (klass);
 	}
 }
 
@@ -9774,7 +9774,7 @@ mono_reflection_setup_internal_class (MonoReflectionTypeBuilder *tb)
 	/* the type has already being created: it means we just have to change the parent */
 	if (tb->type.type) {
 		klass = mono_class_from_mono_type (tb->type.type);
-		klass->parent = NULL;
+		klass->resolved_parent = NULL;
 		/* fool mono_class_setup_parent */
 		klass->supertypes = NULL;
 		mono_class_setup_parent (klass, parent);
@@ -10721,13 +10721,13 @@ fix_partial_generic_class (MonoClass *klass)
 		return;
 
 	dgclass = (MonoDynamicGenericClass *)  klass->generic_class;
-	if (klass->parent != gklass->parent) {
+	if (mono_class_get_parent (klass) != mono_class_get_parent (gklass)) {
 		MonoError error;
-		MonoType *parent_type = mono_class_inflate_generic_type_checked (&gklass->parent->byval_arg, &klass->generic_class->context, &error);
+		MonoType *parent_type = mono_class_inflate_generic_type_checked (&mono_class_get_parent (gklass)->byval_arg, &klass->generic_class->context, &error);
 		if (mono_error_ok (&error)) {
 			MonoClass *parent = mono_class_from_mono_type (parent_type);
 			mono_metadata_free_type (parent_type);
-			if (parent != klass->parent) {
+			if (parent != mono_class_get_parent (klass)) {
 				/*fool mono_class_setup_parent*/
 				klass->supertypes = NULL;
 				mono_class_setup_parent (klass, parent);
@@ -10800,12 +10800,14 @@ static void
 ensure_runtime_vtable (MonoClass *klass)
 {
 	MonoReflectionTypeBuilder *tb = mono_class_get_ref_info (klass);
+	MonoClass *parent;
 	int i, num, j;
 
 	if (!klass->image->dynamic || (!tb && !klass->generic_class) || klass->wastypebuilder)
 		return;
-	if (klass->parent)
-		ensure_runtime_vtable (klass->parent);
+	parent = mono_class_get_parent (parent);
+	if (parent)
+		ensure_runtime_vtable (parent);
 
 	if (tb) {
 		num = tb->ctors? mono_array_length (tb->ctors): 0;
@@ -11206,7 +11208,7 @@ MonoReflectionType*
 mono_reflection_create_runtime_class (MonoReflectionTypeBuilder *tb)
 {
 	MonoError error;
-	MonoClass *klass;
+	MonoClass *klass, *parent;
 	MonoDomain* domain;
 	MonoReflectionType* res;
 	int i, j;
@@ -11289,7 +11291,7 @@ mono_reflection_create_runtime_class (MonoReflectionTypeBuilder *tb)
 
 	/* fool mono_class_setup_parent */
 	klass->supertypes = NULL;
-	mono_class_setup_parent (klass, klass->parent);
+	mono_class_setup_parent (klass, klass->resolved_parent);
 	mono_class_setup_mono_type (klass);
 
 #if 0
@@ -11319,16 +11321,17 @@ mono_reflection_create_runtime_class (MonoReflectionTypeBuilder *tb)
 	klass->nested_classes_inited = TRUE;
 
 	/* fields and object layout */
-	if (klass->parent) {
-		if (!klass->parent->size_inited)
-			mono_class_init (klass->parent);
-		klass->instance_size = klass->parent->instance_size;
+	parent = mono_class_get_parent (klass);
+	if (parent) {
+		if (!parent->size_inited)
+			mono_class_init (parent);
+		klass->instance_size = parent->instance_size;
 		klass->sizes.class_size = 0;
-		klass->min_align = klass->parent->min_align;
+		klass->min_align = parent->min_align;
 		/* if the type has no fields we won't call the field_setup
 		 * routine which sets up klass->has_references.
 		 */
-		klass->has_references |= klass->parent->has_references;
+		klass->has_references |= parent->has_references;
 	} else {
 		klass->instance_size = sizeof (MonoObject);
 		klass->min_align = 1;

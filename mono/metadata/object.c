@@ -1863,6 +1863,9 @@ mono_class_create_runtime_vtable (MonoDomain *domain, MonoClass *class, gboolean
 		}
 	}
 
+	if (class->has_parent)
+		g_assert (class->resolved_parent);
+
 	/* Array types require that their element type be valid*/
 	if (class->byval_arg.type == MONO_TYPE_ARRAY || class->byval_arg.type == MONO_TYPE_SZARRAY) {
 		MonoClass *element_class = class->element_class;

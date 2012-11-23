@@ -511,7 +511,7 @@ get_generic_context_from_stack_frame (MonoJitInfo *ji, gpointer generic_info)
 
 	/* class might refer to a subclass of ji->method's class */
 	while (!(class == ji->method->klass || (class->generic_class && class->generic_class->container_class == method_container_class))) {
-		class = class->parent;
+		class = mono_class_get_parent (class);
 		g_assert (class);
 	}
 

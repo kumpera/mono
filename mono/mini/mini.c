@@ -1488,7 +1488,7 @@ mono_get_array_new_va_icall (int rank)
 gboolean
 mini_class_is_system_array (MonoClass *klass)
 {
-	if (klass->parent == mono_defaults.array_class)
+	if (mono_class_get_parent (klass) == mono_defaults.array_class)
 		return TRUE;
 	else
 		return FALSE;
@@ -5251,7 +5251,7 @@ mono_jit_compile_method_inner (MonoMethod *method, MonoDomain *target_domain, in
 		char *full_name, *msg;
 		MonoMethod *nm;
 
-		if (method->klass->parent == mono_defaults.multicastdelegate_class) {
+		if (mono_class_get_parent (method->klass) == mono_defaults.multicastdelegate_class) {
 			if (*name == '.' && (strcmp (name, ".ctor") == 0)) {
 				MonoJitICallInfo *mi = mono_find_jit_icall_by_name ("mono_delegate_ctor");
 				g_assert (mi);

@@ -240,7 +240,7 @@ class_lookup_rgctx_template (MonoClass *class)
 static void
 register_generic_subclass (MonoClass *class)
 {
-	MonoClass *parent = class->parent;
+	MonoClass *parent = mono_class_get_parent (class);
 	MonoClass *subclass;
 	MonoRuntimeGenericContextTemplate *rgctx_template = class_lookup_rgctx_template (class);
 
@@ -713,6 +713,7 @@ static MonoRuntimeGenericContextTemplate*
 mono_class_get_runtime_generic_context_template (MonoClass *class)
 {
 	MonoRuntimeGenericContextTemplate *parent_template, *template;
+	MonoClass *parent;
 	guint32 i;
 
 	class = get_shared_class (class);
@@ -730,11 +731,12 @@ mono_class_get_runtime_generic_context_template (MonoClass *class)
 
 	mono_loader_lock ();
 
-	if (class->parent) {
+	parent = mono_class_get_parent (class);
+	if (parent) {
 		guint32 num_entries;
 		int max_argc, type_argc;
 
-		parent_template = mono_class_get_runtime_generic_context_template (class->parent);
+		parent_template = mono_class_get_runtime_generic_context_template (parent);
 		max_argc = template_get_max_argc (parent_template);
 
 		for (type_argc = 0; type_argc <= max_argc; ++type_argc) {
@@ -744,7 +746,7 @@ mono_class_get_runtime_generic_context_template (MonoClass *class)
 			for (i = 0; i < num_entries; ++i) {
 				MonoRuntimeGenericContextInfoTemplate oti;
 
-				oti = class_get_rgctx_template_oti (class->parent, type_argc, i, FALSE, FALSE, NULL);
+				oti = class_get_rgctx_template_oti (parent, type_argc, i, FALSE, FALSE, NULL);
 				if (oti.data && oti.data != MONO_RGCTX_SLOT_USED_MARKER) {
 					rgctx_template_set_slot (class->image, template, type_argc, i,
 											 oti.data, oti.info_type);
@@ -759,7 +761,7 @@ mono_class_get_runtime_generic_context_template (MonoClass *class)
 	} else {
 		class_set_rgctx_template (class, template);
 
-		if (class->parent)
+		if (mono_class_get_parent (class))
 			register_generic_subclass (class);
 	}
 
@@ -958,7 +960,7 @@ fill_in_rgctx_template_slot (MonoClass *class, int type_argc, int index, gpointe
 
 		g_assert (subclass_template);
 
-		subclass_oti = class_get_rgctx_template_oti (subclass->parent, type_argc, index, FALSE, FALSE, NULL);
+		subclass_oti = class_get_rgctx_template_oti (mono_class_get_parent (subclass), type_argc, index, FALSE, FALSE, NULL);
 		g_assert (subclass_oti.data);
 
 		fill_in_rgctx_template_slot (subclass, type_argc, index, subclass_oti.data, info_type);
@@ -1020,7 +1022,7 @@ register_info (MonoClass *class, int type_argc, gpointer data, MonoRgctxInfoType
 
 	/* Mark the slot as used in all parent classes (until we find
 	   a parent class which already has it marked used). */
-	parent = class->parent;
+	parent = mono_class_get_parent (class);
 	while (parent != NULL) {
 		MonoRuntimeGenericContextTemplate *parent_template;
 		MonoRuntimeGenericContextInfoTemplate *oti;
@@ -1037,7 +1039,7 @@ register_info (MonoClass *class, int type_argc, gpointer data, MonoRgctxInfoType
 		rgctx_template_set_slot (parent->image, parent_template, type_argc, i,
 								 MONO_RGCTX_SLOT_USED_MARKER, 0);
 
-		parent = parent->parent;
+		parent = mono_class_get_parent (parent);
 	}
 
 	/* Fill in the slot in this class and in all subclasses

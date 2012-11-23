@@ -78,7 +78,7 @@ type_graph (MonoImage *image, const char* cname) {
 	fprintf (output, "%s", graph_properties);
 	child = class;
 	/* go back and print the parents for the node as well: not sure it's a good idea */
-	for (parent = class->parent; parent; parent = parent->parent) {
+	for (parent = mono_class_get_parent (class); parent; parent = mono_class_get_parent (parent)) {
 		output_type_edge (parent, child);
 		child = parent;
 	}
@@ -429,10 +429,10 @@ type_stats (MonoClass *klass) {
 		num_ifaces++;
 		return;
 	}
-	parent = klass->parent;
+	parent = mono_class_get_parent (klass);
 	while (parent) {
 		depth++;
-		parent = parent->parent;
+		parent = mono_class_get_parent (parent);
 	}
 	if (pdepth_array_next >= pdepth_array_size) {
 		pdepth_array_size *= 2;

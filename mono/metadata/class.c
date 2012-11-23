@@ -5237,8 +5237,10 @@ static gboolean mono_class_setup_properties_from (MonoClass *class, MonoClass *p
 void
 mono_class_setup_parent (MonoClass *class, MonoClass *parent)
 {
-	if (mono_class_setup_properties_from (class, parent))
+	if (mono_class_setup_properties_from (class, parent)) {
+		class->has_parent = TRUE;
 		class->resolved_parent = parent;
+	}
 }
 
 /*
@@ -5294,11 +5296,12 @@ mono_class_setup_properties_from (MonoClass *class, MonoClass *parent)
 		class->marshalbyref = parent->marshalbyref;
 		class->contextbound  = parent->contextbound;
 		class->delegate  = parent->delegate;
+#ifndef DISABLE_COM
 		if (MONO_CLASS_IS_IMPORT (class))
 			class->is_com_object = 1;
 		else
 			class->is_com_object = parent->is_com_object;
-		
+#endif		
 		if (system_namespace) {
 			if (*class->name == 'M' && !strcmp (class->name, "MarshalByRefObject"))
 				class->marshalbyref = 1;

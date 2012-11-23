@@ -7209,7 +7209,7 @@ type_commands_internal (int command, MonoClass *klass, MonoDomain *domain, guint
 		g_free (name);
 		buffer_add_assemblyid (buf, domain, klass->image->assembly);
 		buffer_add_moduleid (buf, domain, klass->image);
-		buffer_add_typeid (buf, domain, klass->parent);
+		buffer_add_typeid (buf, domain, mono_class_get_parent (klass));
 		if (klass->rank || klass->byval_arg.type == MONO_TYPE_PTR)
 			buffer_add_typeid (buf, domain, klass->element_class);
 		else
@@ -7424,7 +7424,7 @@ type_commands_internal (int command, MonoClass *klass, MonoDomain *domain, guint
 
 			/* Check that the field belongs to the object */
 			found = FALSE;
-			for (k = klass; k; k = k->parent) {
+			for (k = klass; k; k = mono_class_get_parent (k)) {
 				if (k == f->parent) {
 					found = TRUE;
 					break;
@@ -7462,7 +7462,7 @@ type_commands_internal (int command, MonoClass *klass, MonoDomain *domain, guint
 
 			/* Check that the field belongs to the object */
 			found = FALSE;
-			for (k = klass; k; k = k->parent) {
+			for (k = klass; k; k = mono_class_get_parent (k)) {
 				if (k == f->parent) {
 					found = TRUE;
 					break;
@@ -7554,7 +7554,7 @@ type_commands_internal (int command, MonoClass *klass, MonoDomain *domain, guint
 
 		tclass = klass;
 
-		for (parent = tclass; parent; parent = parent->parent) {
+		for (parent = tclass; parent; parent = mono_class_get_parent (parent)) {
 			mono_class_setup_interfaces (parent, &error);
 			if (!mono_error_ok (&error))
 				return ERR_LOADER_ERROR;
@@ -8397,7 +8397,7 @@ object_commands (int command, guint8 *p, guint8 *end, Buffer *buf)
 
 			/* Check that the field belongs to the object */
 			found = FALSE;
-			for (k = obj->vtable->klass; k; k = k->parent) {
+			for (k = obj->vtable->klass; k; k = mono_class_get_parent (k)) {
 				if (k == f->parent) {
 					found = TRUE;
 					break;
@@ -8434,7 +8434,7 @@ object_commands (int command, guint8 *p, guint8 *end, Buffer *buf)
 
 			/* Check that the field belongs to the object */
 			found = FALSE;
-			for (k = obj->vtable->klass; k; k = k->parent) {
+			for (k = obj->vtable->klass; k; k = mono_class_get_parent (k)) {
 				if (k == f->parent) {
 					found = TRUE;
 					break;

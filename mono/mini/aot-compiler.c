@@ -3124,7 +3124,7 @@ add_wrappers (MonoAotCompile *acfg)
 				g_free (n);
 
 				klass = mono_class_from_mono_type (t);
-				g_assert (klass->parent == mono_defaults.multicastdelegate_class);
+				g_assert (mono_class_get_parent (klass) == mono_defaults.multicastdelegate_class);
 
 				p += slen;
 
@@ -3350,8 +3350,8 @@ add_generic_class_with_depth (MonoAotCompile *acfg, MonoClass *klass, int depth,
 	}
 
 	/* Add superclasses */
-	if (klass->parent)
-		add_generic_class_with_depth (acfg, klass->parent, depth, "parent");
+	if (mono_class_get_parent (klass))
+		add_generic_class_with_depth (acfg, mono_class_get_parent (klass), depth, "parent");
 
 	/* 
 	 * For ICollection<T>, add instances of the helper methods
@@ -3374,7 +3374,7 @@ add_generic_class_with_depth (MonoAotCompile *acfg, MonoClass *klass, int depth,
 			MonoClass *nclass;
 
 			iter = NULL;
-			while ((nclass = mono_class_get_nested_types (array_class->parent, &iter))) {
+			while ((nclass = mono_class_get_nested_types (mono_class_get_parent (array_class), &iter))) {
 				if (!strcmp (nclass->name, "InternalEnumerator`1"))
 					break;
 			}
@@ -3661,7 +3661,7 @@ add_generic_instances (MonoAotCompile *acfg)
 			MonoGenericContext ctx;
 			MonoType *args [16];
 			MonoMethod *get_method;
-			MonoClass *array_klass = mono_array_class_get (mono_defaults.object_class, 1)->parent;
+			MonoClass *array_klass = mono_class_get_parent (mono_array_class_get (mono_defaults.object_class, 1));
 
 			get_method = mono_class_get_method_from_name (array_klass, "GetGenericValueImpl", 2);
 
