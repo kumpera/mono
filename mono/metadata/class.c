@@ -8227,7 +8227,7 @@ mono_class_get_parent (MonoClass *klass)
 			mono_error_cleanup (&error);
 		}
 	} else if (klass->type_token) {
-		MonoGenericContext *context;
+		MonoGenericContext *context = NULL;
 		MonoTableInfo *tt = &klass->image->tables [MONO_TABLE_TYPEDEF];
 		guint tidx = mono_metadata_token_index (klass->type_token);
 		guint32 cols [MONO_TYPEDEF_SIZE];
