@@ -669,7 +669,7 @@ compute_class_bitmap (MonoClass *class, gsize *bitmap, int size, int offset, int
 	}
 #endif
 
-	for (p = class; p != NULL; p = p->parent) {
+	for (p = class; p != NULL; p = mono_class_get_parent (p)) {
 		gpointer iter = NULL;
 		while ((field = mono_class_get_fields (p, &iter))) {
 			MonoType *type;
@@ -2173,8 +2173,8 @@ mono_class_create_runtime_vtable (MonoDomain *domain, MonoClass *class, gboolean
 
 	/* make sure the parent is initialized */
 	/*FIXME shouldn't this fail the current type?*/
-	if (class->parent)
-		mono_class_vtable_full (domain, class->parent, raise_on_error);
+	if (mono_class_get_parent (class))
+		mono_class_vtable_full (domain, mono_class_get_parent (class), raise_on_error);
 
 	return vt;
 }
@@ -2282,7 +2282,7 @@ mono_class_proxy_vtable (MonoDomain *domain, MonoRemoteClass *remote_class, Mono
 
 	if (class->flags & TYPE_ATTRIBUTE_ABSTRACT) {
 		/* create trampolines for abstract methods */
-		for (k = class; k; k = k->parent) {
+		for (k = class; k; k = mono_class_get_parent (k)) {
 			MonoMethod* m;
 			gpointer iter = NULL;
 			while ((m = mono_class_get_methods (k, &iter)))

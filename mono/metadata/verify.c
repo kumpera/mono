@@ -2150,7 +2150,7 @@ verifier_class_is_assignable_from (MonoClass *target, MonoClass *candidate)
 						if (mono_class_is_variant_compatible (target, iface, TRUE))
 							return TRUE;
 					}
-					candidate = candidate->parent;
+					candidate = mono_class_get_parent (candidate);
 				}
 			}
 		} else if (target->delegate) {
@@ -3170,7 +3170,7 @@ do_invoke_method (VerifyContext *ctx, int method_token, gboolean virtual)
 		if (mono_method_is_constructor (method) && !method->klass->valuetype) {
 			if (IS_STRICT_MODE (ctx) && !mono_method_is_constructor (ctx->method))
 				CODE_NOT_VERIFIABLE (ctx, g_strdup_printf ("Cannot call a constructor outside one at 0x%04x", ctx->ip_offset));
-			if (IS_STRICT_MODE (ctx) && method->klass != ctx->method->klass->parent && method->klass != ctx->method->klass)
+			if (IS_STRICT_MODE (ctx) && method->klass != mono_class_get_parent (ctx->method->klass) && method->klass != ctx->method->klass)
 				CODE_NOT_VERIFIABLE (ctx, g_strdup_printf ("Cannot call a constructor of a type different from this or super at 0x%04x", ctx->ip_offset));
 
 			ctx->super_ctor_called = TRUE;
@@ -3788,7 +3788,7 @@ do_newobj (VerifyContext *ctx, int token)
 	if (!check_underflow (ctx, sig->param_count))
 		return;
 
-	is_delegate = method->klass->parent == mono_defaults.multicastdelegate_class;
+	is_delegate = mono_class_get_parent (method->klass) == mono_defaults.multicastdelegate_class;
 
 	if (is_delegate) {
 		ILStackDesc *funptr;
@@ -5906,7 +5906,8 @@ mono_method_verify (MonoMethod *method, int level)
 	if (mono_method_is_constructor (ctx.method) && !ctx.super_ctor_called && !ctx.method->klass->valuetype && ctx.method->klass != mono_defaults.object_class) {
 		char *method_name = mono_method_full_name (ctx.method, TRUE);
 		char *type = mono_type_get_full_name (ctx.method->klass);
-		if (ctx.method->klass->parent && ctx.method->klass->parent->exception_type != MONO_EXCEPTION_NONE)
+		MonoClass *parent = mono_class_get_parent (ctx.method->klass);
+		if (parent && parent->exception_type != MONO_EXCEPTION_NONE)
 			CODE_NOT_VERIFIABLE (&ctx, g_strdup_printf ("Constructor %s for type %s not calling base type ctor due to a TypeLoadException on base type.", method_name, type));
 		else
 			CODE_NOT_VERIFIABLE (&ctx, g_strdup_printf ("Constructor %s for type %s not calling base type ctor.", method_name, type));
@@ -6245,31 +6246,33 @@ fail:
 gboolean
 mono_verifier_verify_class (MonoClass *class, MonoError *error)
 {
+	MonoClass *parent = mono_class_get_parent (class);
+
 	mono_error_init (error);
 	/*Neither <Module>, object or ifaces have parent.*/
-	if (!class->parent &&
+	if (!parent &&
 		class != mono_defaults.object_class && 
 		!MONO_CLASS_IS_INTERFACE (class) &&
 		(!class->image->dynamic && class->type_token != 0x2000001)) {/*<Module> is the first type in the assembly*/
 			mono_error_set_type_load_class (error, class, "Class has parent but is neither System.Object, an interface or <Module>");
 			return FALSE;
 	}
-	if (class->parent) {
-		if (MONO_CLASS_IS_INTERFACE (class->parent)) {
-			char *name = mono_type_get_full_name (class->parent);
+	if (parent) {
+		if (MONO_CLASS_IS_INTERFACE (parent)) {
+			char *name = mono_type_get_full_name (parent);
 			mono_error_set_type_load_class (error, class, "Class extends interface %s", name);
 			g_free (name);
 			return FALSE;
 		}
-		if (!class->generic_class && class->parent->generic_container) {
+		if (!class->generic_class && parent->generic_container) {
 			mono_error_set_type_load_class (error, class, "Class has no generic data but parent is a generic definition");
 			return FALSE;
 		}
-		if (class->parent->generic_class && !class->generic_class) {
+		if (parent->generic_class && !class->generic_class) {
 			MonoGenericContext *context = mono_class_get_context (class);
 			if (class->generic_container)
 				context = &class->generic_container->context;
-			if (!mono_type_is_valid_type_in_context (&class->parent->byval_arg, context)) {
+			if (!mono_type_is_valid_type_in_context (&parent->byval_arg, context)) {
 				mono_error_set_type_load_class (error, class, "Parent generic instantiation is invalid on the current class context");
 				return FALSE;
 			}
