@@ -5232,11 +5232,22 @@ init_com_from_comimport (MonoClass *class)
 }
 #endif /*DISABLE_COM*/
 
-/*
- * LOCKING: this assumes the loader lock is held
- */
+static gboolean mono_class_setup_properties_from (MonoClass *class, MonoClass *parent);
+
 void
 mono_class_setup_parent (MonoClass *class, MonoClass *parent)
+{
+	if (mono_class_setup_properties_from (class, parent))
+		class->resolved_parent = parent;
+}
+
+/*
+ * LOCKING: this assumes the loader lock is held.
+ *
+ * @returns TRUE is @class should use @parent as its parent.
+ */
+static gboolean
+mono_class_setup_properties_from (MonoClass *class, MonoClass *parent)
 {
 	gboolean system_namespace;
 	gboolean is_corlib = mono_is_corlib_image (class->image);
@@ -5246,15 +5257,13 @@ mono_class_setup_parent (MonoClass *class, MonoClass *parent)
 	/* if root of the hierarchy */
 	if (system_namespace && !strcmp (class->name, "Object")) {
 		g_assert (!class->has_parent);
-		class->resolved_parent = NULL;
 		class->instance_size = sizeof (MonoObject);
-		return;
+		return FALSE;
 	}
 	if (!strcmp (class->name, "<Module>")) {
 		g_assert (!class->has_parent);
-		class->resolved_parent = NULL;
 		class->instance_size = 0;
-		return;
+		return FALSE;
 	}
 
 	if (!MONO_CLASS_IS_INTERFACE (class)) {
@@ -5272,7 +5281,6 @@ mono_class_setup_parent (MonoClass *class, MonoClass *parent)
 			mono_class_set_failure (class, MONO_EXCEPTION_TYPE_LOAD, NULL);
 		}
 		g_assert (class->has_parent);
-		class->resolved_parent = parent;
 
 		if (parent->generic_class && !parent->name) {
 			/*
@@ -5280,7 +5288,7 @@ mono_class_setup_parent (MonoClass *class, MonoClass *parent)
 			 * called before it is fully initialized, especially
 			 * before it has its name.
 			 */
-			return;
+			return TRUE;
 		}
 
 		class->marshalbyref = parent->marshalbyref;
@@ -5309,6 +5317,7 @@ mono_class_setup_parent (MonoClass *class, MonoClass *parent)
 			class->valuetype = class->enumtype = 1;
 		}
 		/*class->enumtype = class->parent->enumtype; */
+		return TRUE;
 	} else {
 		/* initialize com types if COM interfaces are present */
 #ifndef DISABLE_COM
@@ -5316,9 +5325,8 @@ mono_class_setup_parent (MonoClass *class, MonoClass *parent)
 			init_com_from_comimport (class);
 #endif
 		g_assert (!class->has_parent);
-		class->resolved_parent = NULL;
+		return FALSE;
 	}
-
 }
 
 /*
@@ -5338,24 +5346,25 @@ void
 mono_class_setup_supertypes (MonoClass *class)
 {
 	int ms;
-	MonoClass **supertypes;
+	MonoClass **supertypes, *parent;
 
 	if (class->supertypes)
 		return;
 
-	if (class->parent && !class->parent->supertypes)
-		mono_class_setup_supertypes (class->parent);
-	if (class->parent)
-		class->idepth = class->parent->idepth + 1;
+	parent = mono_class_get_parent (class);
+	if (parent && !parent->supertypes)
+		mono_class_setup_supertypes (parent);
+	if (parent)
+		class->idepth = parent->idepth + 1;
 	else
 		class->idepth = 1;
 
 	ms = MAX (MONO_DEFAULT_SUPERTABLE_SIZE, class->idepth);
 	supertypes = mono_class_alloc0 (class, sizeof (MonoClass *) * ms);
 
-	if (class->parent) {
+	if (parent) {
 		supertypes [class->idepth - 1] = class;
-		memcpy (supertypes, class->parent->supertypes, class->parent->idepth * sizeof (gpointer));
+		memcpy (supertypes, parent->supertypes, parent->idepth * sizeof (gpointer));
 	} else {
 		supertypes [0] = class;
 	}
@@ -5451,7 +5460,7 @@ mono_class_create_from_typedef (MonoImage *image, guint32 type_token)
 			goto parent_failure;
 		}
 
-		for (tmp = parent; tmp; tmp = tmp->parent) {
+		for (tmp = parent; tmp; tmp = mono_class_get_parent (tmp)) {
 			if (tmp == class) {
 				mono_class_set_failure (class, MONO_EXCEPTION_TYPE_LOAD, g_strdup ("Cycle found while resolving parent"));
 				goto parent_failure;
@@ -5674,8 +5683,10 @@ mono_generic_class_get_class (MonoGenericClass *gclass)
 	// 	}
 	// }
 
-	if (klass->parent)
-		mono_class_setup_parent (klass, klass->parent);
+	if (gklass->has_parent) {
+		g_assert (gklass->resolved_parent);
+		mono_class_setup_properties_from (klass, gklass->resolved_parent);
+	}
 
 	if (klass->enumtype) {
 		klass->cast_class = gklass->cast_class;
@@ -5715,7 +5726,7 @@ mono_generic_class_get_class (MonoGenericClass *gclass)
 static MonoClass*
 make_generic_param_class (MonoGenericParam *param, MonoImage *image, gboolean is_mvar, MonoGenericParamInfo *pinfo)
 {
-	MonoClass *klass, **ptr;
+	MonoClass *klass, **ptr, *parent;
 	int count, pos, i;
 	MonoGenericContainer *container = mono_generic_param_owner (param);
 
@@ -5754,14 +5765,17 @@ make_generic_param_class (MonoGenericParam *param, MonoImage *image, gboolean is
 			;
 
 	pos = 0;
+	
 	if ((count > 0) && !MONO_CLASS_IS_INTERFACE (pinfo->constraints [0])) {
-		klass->parent = pinfo->constraints [0];
+		parent = pinfo->constraints [0];
 		pos++;
 	} else if (pinfo && pinfo->flags & GENERIC_PARAMETER_ATTRIBUTE_VALUE_TYPE_CONSTRAINT)
-		klass->parent = mono_class_from_name (mono_defaults.corlib, "System", "ValueType");
+		parent = mono_class_from_name (mono_defaults.corlib, "System", "ValueType");
 	else
-		klass->parent = mono_defaults.object_class;
+		parent = mono_defaults.object_class;
 
+	klass->has_parent = TRUE;
+	klass->resolved_parent = parent;
 
 	if (count - pos > 0) {
 		klass->interface_count = count - pos;
@@ -5792,11 +5806,11 @@ make_generic_param_class (MonoGenericParam *param, MonoImage *image, gboolean is
 	mono_class_setup_supertypes (klass);
 
 	if (count - pos > 0) {
-		mono_class_setup_vtable (klass->parent);
-		if (klass->parent->exception_type)
+		mono_class_setup_vtable (parent);
+		if (parent->exception_type)
 			mono_class_set_failure (klass, MONO_EXCEPTION_TYPE_LOAD, g_strdup ("Failed to setup parent interfaces"));
 		else
-			setup_interface_offsets (klass, klass->parent->vtable_size, TRUE);
+			setup_interface_offsets (klass, parent->vtable_size, TRUE);
 	}
 
 	return klass;
@@ -5949,7 +5963,7 @@ mono_ptr_class_get (MonoType *type)
 
 	classes_size += sizeof (MonoClass);
 
-	result->parent = NULL; /* no parent for PTR types */
+	//result->parent = NULL; /* no parent for PTR types */
 	result->name_space = el_class->name_space;
 	name = g_strdup_printf ("%s*", el_class->name);
 	result->name = mono_image_strdup (image, name);
@@ -5999,7 +6013,7 @@ mono_fnptr_class_get (MonoMethodSignature *sig)
 	}
 	result = g_new0 (MonoClass, 1);
 
-	result->parent = NULL; /* no parent for PTR types */
+	//result->parent = NULL; /* no parent for PTR types */
 	result->name_space = "System";
 	result->name = "MonoFNPtrFakeClass";
 
@@ -6244,8 +6258,8 @@ mono_bounded_array_class_get (MonoClass *eclass, guint32 rank, gboolean bounded)
 	/* all arrays are marked serializable and sealed, bug #42779 */
 	class->flags = TYPE_ATTRIBUTE_CLASS | TYPE_ATTRIBUTE_SERIALIZABLE | TYPE_ATTRIBUTE_SEALED | TYPE_ATTRIBUTE_PUBLIC;
 	class->has_parent = TRUE;
-	class->parent = parent;
-	class->instance_size = mono_class_instance_size (class->parent);
+	class->resolved_parent = parent;
+	class->instance_size = mono_class_instance_size (parent);
 
 	if (eclass->byval_arg.type == MONO_TYPE_TYPEDBYREF || eclass->byval_arg.type == MONO_TYPE_VOID) {
 		/*Arrays of those two types are invalid.*/
@@ -6469,7 +6483,7 @@ mono_class_get_field_idx (MonoClass *class, int idx)
 				}
 			}
 		}
-		class = class->parent;
+		class = mono_class_get_parent (class);
 	}
 	return NULL;
 }
@@ -6544,7 +6558,7 @@ mono_class_get_field_from_name_full (MonoClass *klass, const char *name, MonoTyp
 			}
 			return field;
 		}
-		klass = klass->parent;
+		klass = mono_class_get_parent (klass);
 	}
 	return NULL;
 }
@@ -6578,7 +6592,7 @@ mono_class_get_field_token (MonoClassField *field)
 				return mono_metadata_make_token (MONO_TABLE_FIELD, idx);
 			}
 		}
-		klass = klass->parent;
+		klass = mono_class_get_parent (klass);
 	}
 
 	g_assert_not_reached ();
@@ -6695,7 +6709,7 @@ mono_class_get_event_token (MonoEvent *event)
 					return mono_metadata_make_token (MONO_TABLE_EVENT, klass->ext->event.first + i + 1);
 			}
 		}
-		klass = klass->parent;
+		klass = mono_class_get_parent (klass);
 	}
 
 	g_assert_not_reached ();
@@ -6712,7 +6726,7 @@ mono_class_get_property_from_name (MonoClass *klass, const char *name)
 			if (! strcmp (name, p->name))
 				return p;
 		}
-		klass = klass->parent;
+		klass = mono_class_get_parent (klass);
 	}
 	return NULL;
 }
@@ -6731,7 +6745,7 @@ mono_class_get_property_token (MonoProperty *prop)
 			
 			i ++;
 		}
-		klass = klass->parent;
+		klass = mono_class_get_parent (klass);
 	}
 
 	g_assert_not_reached ();
@@ -7666,7 +7680,7 @@ mono_class_is_assignable_from (MonoClass *klass, MonoClass *oklass)
 
 		if (eoclass->valuetype) {
 			if ((eclass == mono_defaults.enum_class) || 
-				(eclass == mono_defaults.enum_class->parent) ||
+				(eclass == mono_defaults.enum_class->resolved_parent) ||
 				(eclass == mono_defaults.object_class))
 				return FALSE;
 		}
@@ -7780,7 +7794,7 @@ mono_class_implement_interface_slow (MonoClass *target, MonoClass *candidate)
 					return TRUE;
 			}
 		}
-		candidate = candidate->parent;
+		candidate = mono_class_get_parent (candidate); /*FIXME is this mono_class_init safe?*/
 	} while (candidate);
 
 	return FALSE;
@@ -8161,7 +8175,7 @@ mono_class_get_parent (MonoClass *klass)
 {
 	MonoClass *gklass;
 	MonoError error;
-	MonoClass *parent, *gparent;
+	MonoClass *parent;
 
 	if (!klass->has_parent)
 		return NULL;
@@ -9332,7 +9346,7 @@ get_generic_definition_class (MonoClass *klass)
 	while (klass) {
 		if (klass->generic_class && klass->generic_class->container_class)
 			return klass->generic_class->container_class;
-		klass = klass->parent;
+		klass = mono_class_get_parent (klass);
 	}
 	return NULL;
 }
@@ -9660,13 +9674,15 @@ gboolean mono_type_is_valid_enum_basetype (MonoType * type) {
  * FIXME: TypeBuilder enums can have any kind of static fields, but the spec is very explicit about that (P II 14.3)
  */
 gboolean mono_class_is_valid_enum (MonoClass *klass) {
+	MonoClass *parent;
 	MonoClassField * field;
 	gpointer iter = NULL;
 	gboolean found_base_field = FALSE;
 
 	g_assert (klass->enumtype);
+	parent = mono_class_get_parent (klass);
 	/* we cannot test against mono_defaults.enum_class, or mcs won't be able to compile the System namespace*/
-	if (!klass->parent || strcmp (klass->parent->name, "Enum") || strcmp (klass->parent->name_space, "System") ) {
+	if (!parent || strcmp (parent->name, "Enum") || strcmp (parent->name_space, "System") ) {
 		return FALSE;
 	}
 

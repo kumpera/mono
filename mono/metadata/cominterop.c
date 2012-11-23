@@ -2381,7 +2381,7 @@ cominterop_ccw_queryinterface (MonoCCWInterface* ccwe, guint8* riid, gpointer* p
 		if (itf)
 			break;
 
-		klass_iter = klass_iter->parent;
+		klass_iter = mono_class_get_parent (klass_iter);
 	}
 	if (itf) {
 		*ppv = cominterop_get_ccw (object, itf);
