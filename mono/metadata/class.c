@@ -67,6 +67,7 @@ static char* mono_assembly_name_from_token (MonoImage *image, guint32 type_token
 static void mono_field_resolve_type (MonoClassField *field, MonoError *error);
 static guint32 mono_field_resolve_flags (MonoClassField *field);
 static void mono_class_setup_vtable_full (MonoClass *class, GList *in_setup);
+MonoType * mono_type_get_full2 (MonoImage *image, guint32 type_token, MonoGenericContext *context, gboolean *inflated);
 
 
 void (*mono_debugger_class_init_func) (MonoClass *klass) = NULL;
@@ -5354,6 +5355,10 @@ mono_class_setup_supertypes (MonoClass *class)
 	if (class->supertypes)
 		return;
 
+	// if (!mono_is_corlib_image (class->image)) {
+	// 	printf ("setting up non corlib ST\n");
+	// }
+
 	parent = mono_class_get_parent (class);
 	if (parent && !parent->supertypes)
 		mono_class_setup_supertypes (parent);
@@ -5416,7 +5421,7 @@ mono_class_create_from_typedef (MonoImage *image, guint32 type_token)
 	nspace = mono_metadata_string_heap (image, cols [MONO_TYPEDEF_NAMESPACE]);
 
 	class = mono_image_alloc0 (image, sizeof (MonoClass));
-	printf ("loading %s:%s -> %p\n", nspace, name, class);
+	//printf ("loading %s:%s -> %p\n", nspace, name, class);
 
 	class->name = name;
 	class->name_space = nspace;
@@ -5441,41 +5446,52 @@ mono_class_create_from_typedef (MonoImage *image, guint32 type_token)
 		context = &class->generic_container->context;
 	}
 
+
 	if (cols [MONO_TYPEDEF_EXTENDS]) {
 		MonoClass *tmp;
 		guint32 parent_token = mono_metadata_token_from_dor (cols [MONO_TYPEDEF_EXTENDS]);
 
+		class->has_parent = TRUE;
+
 		if (mono_metadata_token_table (parent_token) == MONO_TABLE_TYPESPEC) {
+			gboolean inflated;
+			MonoType *type;
 			/*WARNING: this must satisfy mono_metadata_type_hash*/
 			class->this_arg.byref = 1;
 			class->this_arg.data.klass = class;
 			class->this_arg.type = MONO_TYPE_CLASS;
 			class->byval_arg.data.klass = class;
 			class->byval_arg.type = MONO_TYPE_CLASS;
-		}
-		class->has_parent = TRUE;
-		parent = mono_class_get_full (image, parent_token, context);
-		printf ("\tparent of %p is %p\n", class, parent);
 
-		if (parent == NULL){
-			mono_class_set_failure (class, MONO_EXCEPTION_TYPE_LOAD, g_strdup ("Could not load parent type"));
-			mono_loader_clear_error ();
-			goto parent_failure;
-		}
+			type = mono_type_get_full2 (image, parent_token, context, &inflated);
 
-		for (tmp = parent; tmp; tmp = mono_class_get_parent (tmp)) {
-			if (tmp == class) {
-				mono_class_set_failure (class, MONO_EXCEPTION_TYPE_LOAD, g_strdup ("Cycle found while resolving parent"));
+			mono_class_setup_parent (class, type->data.generic_class->container_class);
+			if (inflated)
+				mono_metadata_free_type (type);
+			class->resolved_parent = NULL;
+		} else {
+			parent = mono_class_get_full (image, parent_token, context);
+			if (parent == NULL){
+				mono_class_set_failure (class, MONO_EXCEPTION_TYPE_LOAD, g_strdup ("Could not load parent type"));
+				mono_loader_clear_error ();
 				goto parent_failure;
 			}
-			if (class->generic_container && tmp->generic_class && tmp->generic_class->container_class == class) {
-				mono_class_set_failure (class, MONO_EXCEPTION_TYPE_LOAD, g_strdup ("Parent extends generic instance of this type"));
-				goto parent_failure;
+
+			for (tmp = parent; tmp; tmp = mono_class_get_parent (tmp)) {
+				if (tmp == class) {
+					mono_class_set_failure (class, MONO_EXCEPTION_TYPE_LOAD, g_strdup ("Cycle found while resolving parent"));
+					goto parent_failure;
+				}
+				if (class->generic_container && tmp->generic_class && tmp->generic_class->container_class == class) {
+					mono_class_set_failure (class, MONO_EXCEPTION_TYPE_LOAD, g_strdup ("Parent extends generic instance of this type"));
+					goto parent_failure;
+				}
 			}
+			mono_class_setup_parent (class, parent);
 		}
+	} else {
+		mono_class_setup_parent (class, parent);
 	}
-
-	mono_class_setup_parent (class, parent);
 
 	/* uses ->valuetype, which is initialized by mono_class_setup_parent above */
 	mono_class_setup_mono_type (class);
@@ -5687,8 +5703,8 @@ mono_generic_class_get_class (MonoGenericClass *gclass)
 	// }
 
 	if (gklass->has_parent) {
-		g_assert (gklass->resolved_parent);
-		mono_class_setup_properties_from (klass, gklass->resolved_parent);
+		// g_assert (gklass->resolved_parent);
+		mono_class_setup_properties_from (klass, mono_class_get_parent (gklass));
 	}
 
 	if (klass->enumtype) {
@@ -6938,32 +6954,10 @@ mono_class_get_full (MonoImage *image, guint32 type_token, MonoGenericContext *c
 MonoType *
 mono_type_get_full (MonoImage *image, guint32 type_token, MonoGenericContext *context)
 {
-	MonoError error;
-	MonoType *type = NULL;
-	gboolean inflated = FALSE;
-
-	//FIXME: this will not fix the very issue for which mono_type_get_full exists -but how to do it then?
-	if (image->dynamic)
-		return mono_class_get_type (mono_lookup_dynamic_token (image, type_token, context));
-
-	if ((type_token & 0xff000000) != MONO_TOKEN_TYPE_SPEC) {
-		MonoClass *class = mono_class_get_full (image, type_token, context);
-		return class ? mono_class_get_type (class) : NULL;
-	}
-
-	type = mono_type_retrieve_from_typespec (image, type_token, context, &inflated, &error);
-
-	if (!mono_error_ok (&error)) {
-		/*FIXME don't swalloc the error message.*/
-		char *name = mono_class_name_from_token (image, type_token);
-		char *assembly = mono_assembly_name_from_token (image, type_token);
-
-		g_warning ("Error loading type %s from %s due to %s", name, assembly, mono_error_get_message (&error));
-
-		mono_error_cleanup (&error);
-		mono_loader_set_error_type_load (name, assembly);
+	gboolean inflated;
+	MonoType *type = mono_type_get_full2 (image, type_token, context, &inflated);
+	if (!type)
 		return NULL;
-	}
 
 	if (inflated) {
 		MonoType *tmp = type;
@@ -6979,6 +6973,40 @@ mono_type_get_full (MonoImage *image, guint32 type_token, MonoGenericContext *co
 		else
 			mono_metadata_free_type (tmp);
 	}
+	return type;
+}
+
+MonoType *
+mono_type_get_full2 (MonoImage *image, guint32 type_token, MonoGenericContext *context, gboolean *inflated)
+{
+	MonoError error;
+	MonoType *type = NULL;
+	*inflated = FALSE;
+
+	//FIXME: this will not fix the very issue for which mono_type_get_full exists -but how to do it then?
+	if (image->dynamic)
+		return mono_class_get_type (mono_lookup_dynamic_token (image, type_token, context));
+
+	if ((type_token & 0xff000000) != MONO_TOKEN_TYPE_SPEC) {
+		MonoClass *class = mono_class_get_full (image, type_token, context);
+		return class ? mono_class_get_type (class) : NULL;
+	}
+
+	type = mono_type_retrieve_from_typespec (image, type_token, context, inflated, &error);
+
+	if (!mono_error_ok (&error)) {
+		/*FIXME don't swalloc the error message.*/
+		char *name = mono_class_name_from_token (image, type_token);
+		char *assembly = mono_assembly_name_from_token (image, type_token);
+
+		g_warning ("Error loading type %s from %s due to %s", name, assembly, mono_error_get_message (&error));
+
+		mono_error_cleanup (&error);
+		mono_loader_set_error_type_load (name, assembly);
+		return NULL;
+	}
+
+
 	return type;
 }
 
@@ -8187,20 +8215,39 @@ mono_class_get_parent (MonoClass *klass)
 	if (klass->exception_type)
 		return NULL;
 	mono_loader_lock ();
-	if (!klass->generic_class) {
+
+	if (klass->generic_class) {
+		gklass = klass->generic_class->container_class;
+		g_assert (gklass->resolved_parent); /* A generic container parent must always be eagerly resolved.*/
+		parent = mono_class_inflate_generic_class_checked (gklass->resolved_parent, mono_generic_class_get_context (klass->generic_class), &error);
+		if (!mono_error_ok (&error)) {
+			/*Set parent to something safe as the runtime doesn't handle well this kind of failure.*/
+			parent = mono_defaults.object_class;
+			mono_class_set_failure (klass, MONO_EXCEPTION_TYPE_LOAD, (char*)"Could not load parent");
+			mono_error_cleanup (&error);
+		}
+	} else if (klass->type_token) {
+		MonoGenericContext *context;
+		MonoTableInfo *tt = &klass->image->tables [MONO_TABLE_TYPEDEF];
+		guint tidx = mono_metadata_token_index (klass->type_token);
+		guint32 cols [MONO_TYPEDEF_SIZE];
+		guint32 parent_token;
+		
+		if (klass->generic_container)
+			context = &klass->generic_container->context;
+
+		mono_metadata_decode_row (tt, tidx - 1, cols, MONO_TYPEDEF_SIZE);
+		g_assert (cols [MONO_TYPEDEF_EXTENDS]);
+		parent_token = mono_metadata_token_from_dor (cols [MONO_TYPEDEF_EXTENDS]);
+
+		parent = mono_class_get_full (klass->image, parent_token, context);
+	} else {
 		mono_class_set_failure (klass, MONO_EXCEPTION_TYPE_LOAD, (char*)"Non generic class with lazily loaded parent");
 		return NULL;
 	}
 
-	gklass = klass->generic_class->container_class;
-	g_assert (gklass->resolved_parent); /* A generic container parent must always be eagerly resolved.*/
-	parent = mono_class_inflate_generic_class_checked (gklass->resolved_parent, mono_generic_class_get_context (klass->generic_class), &error);
-	if (!mono_error_ok (&error)) {
-		/*Set parent to something safe as the runtime doesn't handle well this kind of failure.*/
-		parent = mono_defaults.object_class;
-		mono_class_set_failure (klass, MONO_EXCEPTION_TYPE_LOAD, (char*)"Could not load parent");
-		mono_error_cleanup (&error);
-	}
+
+	//FIXME do the whole checking dance here
 	mono_atomic_store_release (&klass->resolved_parent, parent);
 	mono_loader_unlock ();
 	return parent;
