@@ -67,7 +67,7 @@ static void
 set_type_load_exception_type (const char *format, MonoClass *class)
 {
 	char *type_name = mono_type_get_full_name (class);
-	char *parent_name = mono_type_get_full_name (class->parent);
+	char *parent_name = mono_type_get_full_name (mono_class_get_parent (class));
 	char *message = g_strdup_printf (format, type_name, parent_name);
 
 	g_free (parent_name);
@@ -158,7 +158,7 @@ void
 mono_security_core_clr_check_inheritance (MonoClass *class)
 {
 	MonoSecurityCoreCLRLevel class_level, parent_level;
-	MonoClass *parent = class->parent;
+	MonoClass *parent = mono_class_get_parent (class);
 
 	if (!parent)
 		return;

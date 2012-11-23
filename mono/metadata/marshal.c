@@ -1820,10 +1820,11 @@ emit_struct_conv_full (MonoMethodBuilder *mb, MonoClass *klass, gboolean to_obje
 					   MonoMarshalNative string_encoding)
 {
 	MonoMarshalType *info;
+	MonoClass *parent = mono_class_get_parent (klass);
 	int i;
 
-	if (klass->parent)
-		emit_struct_conv(mb, klass->parent, to_object);
+	if (parent)
+		emit_struct_conv(mb, parent, to_object);
 
 	info = mono_marshal_load_type_info (klass);
 
@@ -2656,7 +2657,7 @@ mono_marshal_get_delegate_begin_invoke (MonoMethod *method)
 	int params_var;
 	char *name;
 
-	g_assert (method && method->klass->parent == mono_defaults.multicastdelegate_class &&
+	g_assert (method && mono_class_get_parent (method->klass) == mono_defaults.multicastdelegate_class &&
 		  !strcmp (method->name, "BeginInvoke"));
 
 	sig = mono_signature_no_pinvoke (method);
@@ -2820,7 +2821,7 @@ mono_marshal_get_delegate_end_invoke (MonoMethod *method)
 	int params_var;
 	char *name;
 
-	g_assert (method && method->klass->parent == mono_defaults.multicastdelegate_class &&
+	g_assert (method && mono_class_get_parent (method->klass) == mono_defaults.multicastdelegate_class &&
 		  !strcmp (method->name, "EndInvoke"));
 
 	sig = mono_signature_no_pinvoke (method);
@@ -3934,7 +3935,7 @@ mono_marshal_get_delegate_invoke (MonoMethod *method, MonoDelegate *del)
 		}
 	}
 
-	g_assert (method && method->klass->parent == mono_defaults.multicastdelegate_class &&
+	g_assert (method && mono_class_get_parent (method->klass) == mono_defaults.multicastdelegate_class &&
 		  !strcmp (method->name, "Invoke"));
 		
 	invoke_sig = sig = mono_signature_no_pinvoke (method);
@@ -9858,7 +9859,7 @@ mono_marshal_get_synchronized_wrapper (MonoMethod *method)
 		mono_method_desc_free (desc);
 
 		desc = mono_method_desc_new ("Type:GetTypeFromHandle", FALSE);
-		gettypefromhandle_method = mono_method_desc_search_in_class (desc, mono_defaults.monotype_class->parent);
+		gettypefromhandle_method = mono_method_desc_search_in_class (desc, mono_class_get_parent (mono_defaults.monotype_class));
 		g_assert (gettypefromhandle_method);
 		mono_method_desc_free (desc);
 	}
@@ -11234,7 +11235,7 @@ ves_icall_System_Runtime_InteropServices_Marshal_OffsetOf (MonoReflectionType *t
 		}
 
 		if (match_index == -1)
-			klass = klass->parent;
+			klass = mono_class_get_parent (klass);
         }
 
 	g_free (fname);
@@ -11549,8 +11550,8 @@ mono_marshal_load_type_info (MonoClass* klass)
 	/* Try to find a size for this type in metadata */
 	mono_metadata_packing_from_typedef (klass->image, klass->type_token, NULL, &native_size);
 
-	if (klass->parent) {
-		int parent_size = mono_class_native_size (klass->parent, NULL);
+	if (mono_class_get_parent (klass)) {
+		int parent_size = mono_class_native_size (mono_class_get_parent (klass), NULL);
 
 		/* Add parent size to real size */
 		native_size += parent_size;

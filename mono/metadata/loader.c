@@ -693,8 +693,8 @@ find_method (MonoClass *in_class, MonoClass *ic, const char* name, MonoMethodSig
 		 * On such case we can't just bail out since user code depends on us trying harder.
 		 */
 		if (from_class->interface_offsets_count != in_class->interface_offsets_count) {
-			in_class = in_class->parent;
-			from_class = from_class->parent;
+			in_class = mono_class_get_parent (in_class);
+			from_class = mono_class_get_parent (from_class);
 			continue;
 		}
 
@@ -718,8 +718,8 @@ find_method (MonoClass *in_class, MonoClass *ic, const char* name, MonoMethodSig
 				goto out;
 		}
 
-		in_class = in_class->parent;
-		from_class = from_class->parent;
+		in_class = mono_class_get_parent (in_class);
+		from_class = mono_class_get_parent (from_class);
 	}
 	g_assert (!in_class == !from_class);
 

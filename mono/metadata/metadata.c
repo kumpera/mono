@@ -5539,7 +5539,7 @@ handle_enum:
 			case MONO_NATIVE_FUNC:
 				if (t == MONO_TYPE_CLASS && (type->data.klass == mono_defaults.multicastdelegate_class ||
 											 type->data.klass == mono_defaults.delegate_class || 
-											 type->data.klass->parent == mono_defaults.multicastdelegate_class)) {
+											 mono_class_get_parent (type->data.klass) == mono_defaults.multicastdelegate_class)) {
 					*conv = MONO_MARSHAL_CONV_DEL_FTN;
 					return MONO_NATIVE_FUNC;
 				}
@@ -5550,7 +5550,7 @@ handle_enum:
 		}
 		if (t == MONO_TYPE_CLASS && (type->data.klass == mono_defaults.multicastdelegate_class ||
 					     type->data.klass == mono_defaults.delegate_class || 
-					     type->data.klass->parent == mono_defaults.multicastdelegate_class)) {
+					     mono_class_get_parent (type->data.klass) == mono_defaults.multicastdelegate_class)) {
 			*conv = MONO_MARSHAL_CONV_DEL_FTN;
 			return MONO_NATIVE_FUNC;
 		}
