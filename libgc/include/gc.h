@@ -598,8 +598,8 @@ GC_API GC_PTR GC_debug_realloc_replacement
 #   define GC_MALLOC_STUBBORN(sz) GC_debug_malloc_stubborn(sz, GC_EXTRAS);
 #   define GC_CHANGE_STUBBORN(p) GC_debug_change_stubborn(p)
 #   define GC_END_STUBBORN_CHANGE(p) GC_debug_end_stubborn_change(p)
-#   define GC_GENERAL_REGISTER_DISAPPEARING_LINK(link, obj) \
-	GC_general_register_disappearing_link(link, GC_base(obj))
+#   define GC_GENERAL_REGISTER_DISAPPEARING_LINK(link, obj,track) \
+	GC_general_register_disappearing_link(link, GC_base(obj),track)
 #   define GC_REGISTER_DISPLACEMENT(n) GC_debug_register_displacement(n)
 # else
 #   define GC_MALLOC(sz) GC_malloc(sz)
@@ -620,8 +620,8 @@ GC_API GC_PTR GC_debug_realloc_replacement
 #   define GC_MALLOC_STUBBORN(sz) GC_malloc_stubborn(sz)
 #   define GC_CHANGE_STUBBORN(p) GC_change_stubborn(p)
 #   define GC_END_STUBBORN_CHANGE(p) GC_end_stubborn_change(p)
-#   define GC_GENERAL_REGISTER_DISAPPEARING_LINK(link, obj) \
-	GC_general_register_disappearing_link(link, obj)
+#   define GC_GENERAL_REGISTER_DISAPPEARING_LINK(link, obj,track) \
+	GC_general_register_disappearing_link(link, obj, track)
 #   define GC_REGISTER_DISPLACEMENT(n) GC_register_displacement(n)
 # endif
 /* The following are included because they are often convenient, and	*/
@@ -717,7 +717,7 @@ GC_API void GC_debug_register_finalizer_no_order
 /* where p is a pointer that is not followed by finalization	*/
 /* code, and should not be considered in determining 		*/
 /* finalization order.						*/
-GC_API int GC_register_disappearing_link GC_PROTO((GC_PTR * /* link */));
+GC_API int GC_register_disappearing_link GC_PROTO((GC_PTR * /* link */, int track));
 	/* Link should point to a field of a heap allocated 	*/
 	/* object obj.  *link will be cleared when obj is	*/
 	/* found to be inaccessible.  This happens BEFORE any	*/
@@ -738,7 +738,7 @@ GC_API int GC_register_disappearing_link GC_PROTO((GC_PTR * /* link */));
 	/* Only exists for backward compatibility.  See below:	*/
 	
 GC_API int GC_general_register_disappearing_link
-	GC_PROTO((GC_PTR * /* link */, GC_PTR obj));
+	GC_PROTO((GC_PTR * /* link */, GC_PTR obj, int track));
 	/* A slight generalization of the above. *link is	*/
 	/* cleared when obj first becomes inaccessible.  This	*/
 	/* can be used to implement weak pointers easily and	*/

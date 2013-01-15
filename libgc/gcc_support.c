@@ -351,7 +351,7 @@ void* _WeakPointer_New( t )
 
         wp->pointer = t;
         desc->has_weak_pointers = 1;
-        GC_general_register_disappearing_link( &wp->pointer, base );
+        GC_general_register_disappearing_link( &wp->pointer, base, 0 );
         return wp;}}
 
 

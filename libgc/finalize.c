@@ -54,6 +54,7 @@ static struct disappearing_link {
 #   define dl_set_next(x,y) (x) -> prolog.next = (struct hash_chain_entry *)(y)
 
     word dl_hidden_obj;		/* Pointer to object base	*/
+    int dl_track_res; /* Track resurrection and not finalization. */
 } **dl_head = 0;
 
 static signed_word log_dl_table_size = -1;
@@ -136,10 +137,11 @@ signed_word * log_size_ptr;
 }
 
 # if defined(__STDC__) || defined(__cplusplus)
-    int GC_register_disappearing_link(GC_PTR * link)
+    int GC_register_disappearing_link(GC_PTR * link, int track)
 # else
-    int GC_register_disappearing_link(link)
+    int GC_register_disappearing_link(link, track)
     GC_PTR * link;
+	int track;
 # endif
 {
     ptr_t base;
@@ -147,14 +149,14 @@ signed_word * log_size_ptr;
     base = (ptr_t)GC_base((GC_PTR)link);
     if (base == 0)
     	ABORT("Bad arg to GC_register_disappearing_link");
-    return(GC_general_register_disappearing_link(link, base));
+    return(GC_general_register_disappearing_link(link, base, track));
 }
 
 # if defined(__STDC__) || defined(__cplusplus)
     int GC_general_register_disappearing_link(GC_PTR * link,
-    					      GC_PTR obj)
+    					      GC_PTR obj, int track)
 # else
-    int GC_general_register_disappearing_link(link, obj)
+    int GC_general_register_disappearing_link(link, obj, int track)
     GC_PTR * link;
     GC_PTR obj;
 # endif
@@ -193,6 +195,7 @@ signed_word * log_size_ptr;
     for (curr_dl = dl_head[index]; curr_dl != 0; curr_dl = dl_next(curr_dl)) {
         if (curr_dl -> dl_hidden_link == HIDE_POINTER(link)) {
             curr_dl -> dl_hidden_obj = HIDE_POINTER(obj);
+            curr_dl -> dl_track_res = track;
 #	    ifdef THREADS
                 UNLOCK();
     	        ENABLE_SIGNALS();
@@ -221,6 +224,7 @@ signed_word * log_size_ptr;
     }
     new_dl -> dl_hidden_obj = HIDE_POINTER(obj);
     new_dl -> dl_hidden_link = HIDE_POINTER(link);
+    new_dl -> dl_track_res = track;
     dl_set_next(new_dl, dl_head[index]);
     dl_head[index] = new_dl;
     GC_dl_entries++;
@@ -550,14 +554,15 @@ void GC_finalize()
     int dl_size = (log_dl_table_size == -1 ) ? 0 : (1 << log_dl_table_size);
     int fo_size = (log_fo_table_size == -1 ) ? 0 : (1 << log_fo_table_size);
     
-  /* Make disappearing links disappear */
+  /* Make non-tracking disappearing links disappear */
     for (i = 0; i < dl_size; i++) {
       curr_dl = dl_head[i];
       prev_dl = 0;
       while (curr_dl != 0) {
         real_ptr = (ptr_t)REVEAL_POINTER(curr_dl -> dl_hidden_obj);
         real_link = (ptr_t)REVEAL_POINTER(curr_dl -> dl_hidden_link);
-        if (!GC_is_marked(real_ptr)) {
+        if (!curr_dl->dl_track_res && !GC_is_marked(real_ptr)) {
+		// if (!GC_is_marked(real_ptr)) {
             *(word *)real_link = 0;
             next_dl = dl_next(curr_dl);
             if (prev_dl == 0) {
@@ -642,6 +647,33 @@ void GC_finalize()
   	}
       }
   }
+
+  /* Make tracking disappearing links disappear */
+  for (i = 0; i < dl_size; i++) {
+    curr_dl = dl_head[i];
+    prev_dl = 0;
+    while (curr_dl != 0) {
+      real_ptr = (ptr_t)REVEAL_POINTER(curr_dl -> dl_hidden_obj);
+      real_link = (ptr_t)REVEAL_POINTER(curr_dl -> dl_hidden_link);
+      if (curr_dl->dl_track_res && !GC_is_marked(real_ptr)) {
+		// if (!GC_is_marked(real_ptr)) {
+          *(word *)real_link = 0;
+          next_dl = dl_next(curr_dl);
+          if (prev_dl == 0) {
+              dl_head[i] = next_dl;
+          } else {
+              dl_set_next(prev_dl, next_dl);
+          }
+          GC_clear_mark_bit((ptr_t)curr_dl);
+          GC_dl_entries--;
+          curr_dl = next_dl;
+      } else {
+          prev_dl = curr_dl;
+          curr_dl = dl_next(curr_dl);
+      }
+    }
+  }
+
 
   /* Remove dangling disappearing links. */
     for (i = 0; i < dl_size; i++) {

@@ -797,7 +797,7 @@ DCL_LOCK_STATE;
        (void)
          GC_general_register_disappearing_link((GC_PTR *)
          					  ((word *)op+lw-1),
-       					          (GC_PTR) op);
+       					          (GC_PTR) op, 0);
        if (ff != GC_finalization_failures) {
 	   /* Couldn't register it due to lack of memory.  Punt.	*/
 	   /* This will probably fail too, but gives the recovery code  */
