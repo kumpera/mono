@@ -107,7 +107,6 @@ mono_gc_run_finalize (void *obj, void *data)
 	MonoDomain *caller_domain = mono_domain_get ();
 	MonoDomain *domain;
 	RuntimeInvokeFunction runtime_invoke;
-	GSList *l, *refs = NULL;
 
 	o = (MonoObject*)((char*)obj + GPOINTER_TO_UINT (data));
 
@@ -121,8 +120,6 @@ mono_gc_run_finalize (void *obj, void *data)
 
 	o2 = g_hash_table_lookup (domain->finalizable_objects_hash, o);
 
-	refs = mono_gc_remove_weak_track_object (domain, o);
-
 	mono_domain_finalizers_unlock (domain);
 
 	if (!o2)
@@ -130,23 +127,6 @@ mono_gc_run_finalize (void *obj, void *data)
 		return;
 #endif
 
-	if (refs) {
-		/*
-		 * Support for GCHandles of type WeakTrackResurrection:
-		 *
-		 *   Its not exactly clear how these are supposed to work, or how their
-		 * semantics can be implemented. We only implement one crucial thing:
-		 * these handles are only cleared after the finalizer has ran.
-		 */
-		for (l = refs; l; l = l->next) {
-			guint32 gchandle = GPOINTER_TO_UINT (l->data);
-
-			mono_gchandle_set_target (gchandle, o);
-		}
-
-		g_slist_free (refs);
-	}
-		
 	/* make sure the finalizer is not called again if the object is resurrected */
 	object_register_finalizer (obj, NULL);
 
@@ -798,11 +778,6 @@ mono_gchandle_new_weakref (MonoObject *obj, gboolean track_resurrection)
 {
 	guint32 handle = alloc_handle (&gc_handles [track_resurrection? HANDLE_WEAK_TRACK: HANDLE_WEAK], obj, track_resurrection);
 
-#ifndef HAVE_SGEN_GC
-	if (track_resurrection)
-		mono_gc_add_weak_track_handle (obj, handle);
-#endif
-
 	return handle;
 }
 
@@ -876,11 +851,6 @@ mono_gchandle_set_target (guint32 gchandle, MonoObject *obj)
 	}
 	/*g_print ("changed entry %d of type %d to object %p (in slot: %p)\n", slot, handles->type, obj, handles->entries [slot]);*/
 	unlock_handles (handles);
-
-#ifndef HAVE_SGEN_GC
-	if (type == HANDLE_WEAK_TRACK)
-		mono_gc_change_weak_track_handle (old_obj, obj, gchandle);
-#endif
 }
 
 /**
@@ -934,10 +904,6 @@ mono_gchandle_free (guint32 gchandle)
 	HandleData *handles = &gc_handles [type];
 	if (type > 3)
 		return;
-#ifndef HAVE_SGEN_GC
-	if (type == HANDLE_WEAK_TRACK)
-		mono_gc_remove_weak_track_handle (gchandle);
-#endif
 
 	lock_handles (handles);
 	if (slot < handles->size && (handles->bitmap [slot / 32] & (1 << (slot % 32)))) {
