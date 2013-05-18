@@ -428,6 +428,7 @@ static MonoClassField*
 field_from_memberref (MonoImage *image, guint32 token, MonoClass **retklass,
 		      MonoGenericContext *context)
 {
+	MonoError error;
 	MonoClass *klass;
 	MonoClassField *field;
 	MonoTableInfo *tables = image->tables;
@@ -456,7 +457,9 @@ field_from_memberref (MonoImage *image, guint32 token, MonoClass **retklass,
 		break;
 	case MONO_MEMBERREF_PARENT_TYPEREF:
 		class_table = MONO_TOKEN_TYPE_REF;
-		klass = mono_class_from_typeref (image, MONO_TOKEN_TYPE_REF | nindex);
+		klass = mono_class_from_typeref_checked (image, MONO_TOKEN_TYPE_REF | nindex, &error);
+		if (!mono_error_ok (&error))
+			mono_error_cleanup (&error); /*FIXME don't swallow the error message*/
 		break;
 	case MONO_MEMBERREF_PARENT_TYPESPEC:
 		class_table = MONO_TOKEN_TYPE_SPEC;
@@ -942,6 +945,7 @@ static MonoMethod *
 method_from_memberref (MonoImage *image, guint32 idx, MonoGenericContext *typespec_context,
 		       gboolean *used_context)
 {
+	MonoError error;
 	MonoClass *klass = NULL;
 	MonoMethod *method = NULL;
 	MonoTableInfo *tables = image->tables;
@@ -969,12 +973,12 @@ method_from_memberref (MonoImage *image, guint32 idx, MonoGenericContext *typesp
 
 	switch (class) {
 	case MONO_MEMBERREF_PARENT_TYPEREF:
-		klass = mono_class_from_typeref (image, MONO_TOKEN_TYPE_REF | nindex);
+		klass = mono_class_from_typeref_checked (image, MONO_TOKEN_TYPE_REF | nindex, &error);
+		if (!mono_error_ok (&error))
 		if (!klass) {
-			char *name = mono_class_name_from_token (image, MONO_TOKEN_TYPE_REF | nindex);
-			g_warning ("Missing method %s in assembly %s, type %s", mname, image->name, name);
-			mono_loader_set_error_type_load (name, image->assembly_name);
-			g_free (name);
+			mono_loader_set_error_from_mono_error (&error);
+			/*FIXME don't swallow the error message*/
+			mono_error_cleanup (&error);
 			return NULL;
 		}
 		break;
