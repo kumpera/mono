@@ -7095,57 +7095,61 @@ MonoClass *
 mono_class_get_full (MonoImage *image, guint32 type_token, MonoGenericContext *context)
 {
 	MonoError error;
+	MonoClass *res = mono_class_get_checked (image, type_token, context, &error);
+	if (!mono_error_ok (&error)) {
+		mono_loader_set_error_from_mono_error (&error);
+		mono_error_cleanup (&error); /*FIXME don't swallow error message.*/
+		return NULL;
+	}
+	return res;
+}
+
+/**
+ * mono_class_get_full:
+ * @image: the image where the class resides
+ * @type_token: the token for the class
+ * @context: the generic context used to evaluate generic instantiations in
+ *
+ * Returns: the MonoClass that represents @type_token in @image
+ */
+MonoClass *
+mono_class_get_checked (MonoImage *image, guint32 type_token, MonoGenericContext *context, MonoError *error)
+{
 	MonoClass *class = NULL;
+
+	mono_error_init (error);
 
 	if (image->dynamic) {
 		int table = mono_metadata_token_table (type_token);
 
 		if (table != MONO_TABLE_TYPEDEF && table != MONO_TABLE_TYPEREF && table != MONO_TABLE_TYPESPEC) {
-			mono_loader_set_error_bad_image (g_strdup ("Bad type token."));
+			mono_error_set_bad_image (error, image, "Bad type token %x.", table);
+			g_assert (!mono_loader_get_last_error ());
 			return NULL;
 		}
-		return mono_lookup_dynamic_token (image, type_token, context);
+		class = mono_lookup_dynamic_token (image, type_token, context);
+		if (!class)
+			mono_error_set_type_load_name (error, "<dynamic_type>", image->name, "Could not resolve dynamic token %x", type_token);
+
+		g_assert (!mono_loader_get_last_error ());
+		return class;
 	}
 
-	switch (type_token & 0xff000000){
+	switch (type_token & 0xff000000) {
 	case MONO_TOKEN_TYPE_DEF:
-		class = mono_class_create_from_typedef (image, type_token, &error);
-		if (!mono_error_ok (&error)) {
-			mono_loader_set_error_from_mono_error (&error);
-			/*FIXME don't swallow the error message*/
-			mono_error_cleanup (&error);
-			return NULL;
-		}
+		class = mono_class_create_from_typedef (image, type_token, error);
 		break;		
 	case MONO_TOKEN_TYPE_REF:
-		class = mono_class_from_typeref_checked (image, type_token, &error);
-		if (!mono_error_ok (&error)) {
-			mono_loader_set_error_from_mono_error (&error);
-			/*FIXME don't swallow the error message*/
-			mono_error_cleanup (&error);
-			return NULL;
-		}
+		class = mono_class_from_typeref_checked (image, type_token, error);
 		break;
 	case MONO_TOKEN_TYPE_SPEC:
-		class = mono_class_create_from_typespec (image, type_token, context, &error);
-		if (!mono_error_ok (&error)) {
-			/*FIXME don't swallow the error message*/
-			mono_error_cleanup (&error);
-		}
+		class = mono_class_create_from_typespec (image, type_token, context, error);
 		break;
 	default:
-		g_warning ("unknown token type %x", type_token & 0xff000000);
-		g_assert_not_reached ();
+		mono_error_set_bad_image (error, image, "Unknown token type %x.", type_token & 0xff000000);
 	}
 
-	if (!class){
-		char *name = mono_class_name_from_token (image, type_token);
-		char *assembly = mono_assembly_name_from_token (image, type_token);
-		mono_loader_set_error_type_load (name, assembly);
-		g_free (name);
-		g_free (assembly);
-	}
-
+	g_assert (!mono_loader_get_last_error ());
 	return class;
 }
 
