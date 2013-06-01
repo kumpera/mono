@@ -287,8 +287,18 @@ mono_runtime_class_init_full (MonoVTable *vtable, gboolean raise_exception)
 	if (!klass->image->checked_module_cctor) {
 		mono_image_check_for_module_cctor (klass->image);
 		if (klass->image->has_module_cctor) {
-			MonoClass *module_klass = mono_class_get (klass->image, MONO_TOKEN_TYPE_DEF | 1);
-			MonoVTable *module_vtable = mono_class_vtable_full (vtable->domain, module_klass, raise_exception);
+			MonoError error;
+			MonoClass *module_klass;
+			MonoVTable *module_vtable;
+			
+			module_klass = mono_class_get_checked (klass->image, MONO_TOKEN_TYPE_DEF | 1, NULL, &error);
+			if (!mono_error_ok (&error)) {
+				if (raise_exception)
+					mono_error_raise_exception (&error);
+				mono_error_cleanup (&error); /*FIXME don't swallow the error message*/
+				return NULL;
+			}
+			module_vtable = mono_class_vtable_full (vtable->domain, module_klass, raise_exception);
 			if (!module_vtable)
 				return NULL;
 			exc = mono_runtime_class_init_full (module_vtable, raise_exception);
@@ -3131,9 +3141,7 @@ mono_field_get_value_object (MonoDomain *domain, MonoClassField *field, MonoObje
 	gboolean is_ptr = FALSE;
 	MonoError error;
 	MonoType *type = mono_field_get_type_checked (field, &error);
-
-	if (!mono_error_ok (&error))
-		mono_error_raise_exception (&error);
+	mono_error_raise_exception (&error);
 
 	switch (type->type) {
 	case MONO_TYPE_STRING:
@@ -4593,9 +4601,11 @@ mono_class_get_allocation_ftn (MonoVTable *vtable, gboolean for_box, gboolean *p
 MonoObject *
 mono_object_new_from_token  (MonoDomain *domain, MonoImage *image, guint32 token)
 {
+	MonoError error;
 	MonoClass *class;
 
-	class = mono_class_get (image, token);
+	class = mono_class_get_checked (image, token, NULL, &error);
+	mono_error_raise_exception (&error);
 
 	return mono_object_new (domain, class);
 }
@@ -5548,9 +5558,8 @@ mono_string_to_utf8 (MonoString *s)
 {
 	MonoError error;
 	char *result = mono_string_to_utf8_checked (s, &error);
-	
-	if (!mono_error_ok (&error))
-		mono_error_raise_exception (&error);
+	mono_error_raise_exception (&error);
+
 	return result;
 }
 

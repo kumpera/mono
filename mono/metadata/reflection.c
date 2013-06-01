@@ -1702,8 +1702,12 @@ fieldref_encode_signature (MonoDynamicImage *assembly, MonoImage *field_image, M
 	if (type->num_mods) {
 		for (i = 0; i < type->num_mods; ++i) {
 			if (field_image) {
-				MonoClass *class = mono_class_get (field_image, type->modifiers [i].token);
-				g_assert (class);
+				MonoError error;
+				MonoClass *class = mono_class_get_checked (field_image, type->modifiers [i].token, NULL, &error);
+				if (!mono_error_ok (&error)) {
+					g_error ("Could not encode field modifier due to: %s", mono_error_get_message (&error));
+					mono_error_cleanup (&error);
+				}
 				token = mono_image_typedef_or_ref (assembly, &class->byval_arg);
 			} else {
 				token = type->modifiers [i].token;
@@ -3798,7 +3802,12 @@ mono_image_fill_export_table_from_module (MonoDomain *domain, MonoReflectionModu
 	t = &image->tables [MONO_TABLE_TYPEDEF];
 
 	for (i = 0; i < t->rows; ++i) {
-		MonoClass *klass = mono_class_get (image, mono_metadata_make_token (MONO_TABLE_TYPEDEF, i + 1));
+		MonoError error;
+		MonoClass *klass = mono_class_get_checked (image, mono_metadata_make_token (MONO_TABLE_TYPEDEF, i + 1), NULL, &error);
+		if (!mono_error_ok (&error)) {
+			g_error ("Could not fill export table due to: %s", mono_error_get_message (&error));
+			mono_error_cleanup (&error);
+		}
 
 		if (klass->flags & TYPE_ATTRIBUTE_PUBLIC)
 			mono_image_fill_export_table_from_class (domain, klass, module_index, 0, assembly);
@@ -6807,8 +6816,7 @@ mono_param_get_objects_internal (MonoDomain *domain, MonoMethod *method, MonoCla
 	}
 
 	sig = mono_method_signature_checked (method, &error);
-	if (!mono_error_ok (&error))
-		mono_error_raise_exception (&error);
+	mono_error_raise_exception (&error);
 
 	if (!sig->param_count)
 		return mono_array_new_specific (mono_class_vtable (domain, System_Reflection_ParameterInfo_array), 0);

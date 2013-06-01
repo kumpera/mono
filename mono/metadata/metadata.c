@@ -3163,13 +3163,16 @@ do_mono_metadata_parse_type (MonoType *type, MonoImage *m, MonoGenericContainer 
 		break;
 	case MONO_TYPE_VALUETYPE:
 	case MONO_TYPE_CLASS: {
+		MonoError error;
 		guint32 token;
 		MonoClass *class;
 		token = mono_metadata_parse_typedef_or_ref (m, ptr, &ptr);
-		class = mono_class_get (m, token);
+		class = mono_class_get_checked (m, token, NULL, &error);
 		type->data.klass = class;
-		if (!class)
+		if (!mono_error_ok (&error)) {
+			mono_error_cleanup (&error); /*FIXME don't swallow the error message*/
 			return FALSE;
+		}
 		if (!compare_type_literals (class->byval_arg.type, type->type))
 			return FALSE;
 		break;
@@ -3342,7 +3345,14 @@ parse_section_data (MonoImage *m, int *num_clauses, const unsigned char *ptr)
 				if (ec->flags == MONO_EXCEPTION_CLAUSE_FILTER) {
 					ec->data.filter_offset = tof_value;
 				} else if (ec->flags == MONO_EXCEPTION_CLAUSE_NONE) {
-					ec->data.catch_class = tof_value? mono_class_get (m, tof_value): 0;
+					if (tof_value) {
+						MonoError error;
+						ec->data.catch_class = mono_class_get_checked (m, tof_value, NULL, &error);
+						if (!mono_error_ok (&error)) {
+							g_error ("Could not lookup exception table due to: %s", mono_error_get_message (&error));
+							mono_error_cleanup (&error); /*FIXME don't swallow the error message*/
+						}
+					}
 				} else {
 					ec->data.catch_class = NULL;
 				}
@@ -4017,15 +4027,18 @@ mono_metadata_interfaces_from_typedef_full (MonoImage *meta, guint32 index, Mono
 
 	pos = start;
 	while (pos < tdef->rows) {
+		MonoError error;
 		MonoClass *iface;
 		
 		mono_metadata_decode_row (tdef, pos, cols, MONO_INTERFACEIMPL_SIZE);
 		if (cols [MONO_INTERFACEIMPL_CLASS] != loc.idx)
 			break;
-		iface = mono_class_get_full (
-			meta, mono_metadata_token_from_dor (cols [MONO_INTERFACEIMPL_INTERFACE]), context);
-		if (iface == NULL)
+		iface = mono_class_get_checked (
+			meta, mono_metadata_token_from_dor (cols [MONO_INTERFACEIMPL_INTERFACE]), context, &error);
+		if (!mono_error_ok (&error)) {
+			mono_error_cleanup (&error); /*FIXME don't swallow error message.*/
 			return FALSE;
+		}
 		result [pos - start] = iface;
 		++pos;
 	}
@@ -5727,10 +5740,12 @@ get_constraints (MonoImage *image, int owner, MonoClass ***constraints, MonoGene
 	for (i = 0; i < tdef->rows; ++i) {
 		mono_metadata_decode_row (tdef, i, cols, MONO_GENPARCONSTRAINT_SIZE);
 		if (cols [MONO_GENPARCONSTRAINT_GENERICPAR] == owner) {
+			MonoError error;
 			token = mono_metadata_token_from_dor (cols [MONO_GENPARCONSTRAINT_CONSTRAINT]);
-			klass = mono_class_get_full (image, token, context);
-			if (!klass) {
+			klass = mono_class_get_checked (image, token, context, &error);
+			if (!mono_error_ok (&error)) {
 				g_slist_free (cons);
+				mono_error_cleanup (&error); /*FIXME don't swallow error message.*/
 				return FALSE;
 			}
 			cons = g_slist_append (cons, klass);

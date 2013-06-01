@@ -2688,10 +2688,16 @@ get_wrapper_target_class (MonoImage *image)
 	 * To avoid these problems, we put the wrappers into the <Module> class of 
 	 * the image.
 	 */
-	if (image->dynamic)
+	if (image->dynamic) {
 		klass = ((MonoDynamicImage*)image)->wrappers_type;
-	else
-		klass = mono_class_get (image, mono_metadata_make_token (MONO_TABLE_TYPEDEF, 1));
+	} else {
+		MonoError error;
+		klass = mono_class_get_checked (image, mono_metadata_make_token (MONO_TABLE_TYPEDEF, 1), NULL, &error);
+		if (!mono_error_ok (&error)) {
+			g_error ("Could not lookup wrapper target class due to: %s", mono_error_get_message (&error));
+			mono_error_cleanup (&error); /*FIXME don't swallow the error message*/
+		}
+	}
 	g_assert (klass);
 
 	return klass;
@@ -9418,8 +9424,13 @@ mono_marshal_set_callconv_from_modopt (MonoMethod *method, MonoMethodSignature *
 	/* Why is this a modopt ? */
 	if (sig->ret && sig->ret->num_mods) {
 		for (i = 0; i < sig->ret->num_mods; ++i) {
-			MonoClass *cmod_class = mono_class_get (method->klass->image, sig->ret->modifiers [i].token);
-			g_assert (cmod_class);
+			MonoError error;
+			MonoClass *cmod_class = mono_class_get_checked (method->klass->image, sig->ret->modifiers [i].token, NULL, &error);
+			if (!mono_error_ok (&error)) {
+				g_error ("Could not lookup return type modifier due to: %s", mono_error_get_message (&error));
+				mono_error_cleanup (&error); /*FIXME don't swallow the error message*/
+			}
+
 			if ((cmod_class->image == mono_defaults.corlib) && !strcmp (cmod_class->name_space, "System.Runtime.CompilerServices")) {
 				if (!strcmp (cmod_class->name, "CallConvCdecl"))
 					csig->call_convention = MONO_CALL_C;

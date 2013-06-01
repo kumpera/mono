@@ -87,10 +87,15 @@ mono_exception_from_name_domain (MonoDomain *domain, MonoImage *image,
 MonoException *
 mono_exception_from_token (MonoImage *image, guint32 token)
 {
+	MonoError error;
 	MonoClass *klass;
 	MonoObject *o;
 
-	klass = mono_class_get (image, token);
+	klass = mono_class_get_checked (image, token, NULL, &error);
+	if (!mono_error_ok (&error)) {
+		g_error ("could not find exception class due to: %s", mono_error_get_message (&error));
+		mono_error_cleanup (&error);
+	}
 
 	o = mono_object_new (mono_domain_get (), klass);
 	g_assert (o != NULL);
@@ -197,7 +202,12 @@ MonoException *
 mono_exception_from_token_two_strings (MonoImage *image, guint32 token,
 									   MonoString *a1, MonoString *a2)
 {
-	MonoClass *klass = mono_class_get (image, token);
+	MonoError error;
+	MonoClass *klass = mono_class_get_checked (image, token, NULL, &error);
+	if (!mono_error_ok (&error)) {
+		g_error ("could not find exception class due to: %s", mono_error_get_message (&error));
+		mono_error_cleanup (&error);
+	}
 
 	return create_exception_two_strings (klass, a1, a2);
 }

@@ -390,6 +390,7 @@ decode_generic_context (MonoAotModule *module, MonoGenericContext *ctx, guint8 *
 static MonoClass*
 decode_klass_ref (MonoAotModule *module, guint8 *buf, guint8 **endbuf)
 {
+	MonoError error;
 	MonoImage *image;
 	MonoClass *klass = NULL, *eklass;
 	guint32 token, rank, idx;
@@ -402,27 +403,28 @@ decode_klass_ref (MonoAotModule *module, guint8 *buf, guint8 **endbuf)
 		return NULL;
 	}
 
+	mono_error_init (&error); /* Since not all switch cases take the error struct, we init it here. */
 	switch (reftype) {
 	case MONO_AOT_TYPEREF_TYPEDEF_INDEX:
 		idx = decode_value (p, &p);
 		image = load_image (module, 0, TRUE);
 		if (!image)
 			return NULL;
-		klass = mono_class_get (image, MONO_TOKEN_TYPE_DEF + idx);
+		klass = mono_class_get_checked (image, MONO_TOKEN_TYPE_DEF + idx, NULL, &error);
 		break;
 	case MONO_AOT_TYPEREF_TYPEDEF_INDEX_IMAGE:
 		idx = decode_value (p, &p);
 		image = load_image (module, decode_value (p, &p), TRUE);
 		if (!image)
 			return NULL;
-		klass = mono_class_get (image, MONO_TOKEN_TYPE_DEF + idx);
+		klass = mono_class_get_checked (image, MONO_TOKEN_TYPE_DEF + idx, NULL, &error);
 		break;
 	case MONO_AOT_TYPEREF_TYPESPEC_TOKEN:
 		token = decode_value (p, &p);
 		image = module->assembly->image;
 		if (!image)
 			return NULL;
-		klass = mono_class_get (image, token);
+		klass = mono_class_get_checked (image, token, NULL, &error);
 		break;
 	case MONO_AOT_TYPEREF_GINST: {
 		MonoClass *gclass;
@@ -525,6 +527,12 @@ decode_klass_ref (MonoAotModule *module, guint8 *buf, guint8 **endbuf)
 	default:
 		g_assert_not_reached ();
 	}
+
+	if (!mono_error_ok (&error)) {
+		g_error ("Could not decode class ref due to: %s", mono_error_get_message (&error));
+		mono_error_cleanup (&error); /*FIXME don't swallow the error message*/
+	}
+	
 	g_assert (klass);
 	//printf ("BLA: %s\n", mono_type_full_name (&klass->byval_arg));
 	*endbuf = p;
@@ -2119,8 +2127,13 @@ mono_aot_get_class_from_name (MonoImage *image, const char *name_space, const ch
 			name_space2 = mono_metadata_string_heap (image, cols [MONO_TYPEDEF_NAMESPACE]);
 
 			if (!strcmp (name, name2) && !strcmp (name_space, name_space2)) {
+				MonoError error;
 				mono_aot_unlock ();
-				*klass = mono_class_get (image, token);
+				*klass = mono_class_get_checked (image, token, NULL, &error);
+				if (!mono_error_ok (&error)) {
+					mono_error_cleanup (&error); /*FIXME don't swallow the error message*/
+					continue; /* FIXME this looks wrong, but preserves the current behavior. */
+				}
 
 				/* Add to cache */
 				if (*klass) {

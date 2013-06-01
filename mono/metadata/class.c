@@ -5657,10 +5657,10 @@ mono_class_create_from_typedef (MonoImage *image, guint32 type_token, MonoError 
 			class->byval_arg.data.klass = class;
 			class->byval_arg.type = MONO_TYPE_CLASS;
 		}
-		parent = mono_class_get_full (image, parent_token, context);
+		parent = mono_class_get_checked (image, parent_token, context, error);
 
-		if (parent == NULL) {
-			mono_class_set_failure_from_loader_error (class, error, g_strdup_printf ("Could not load parent, token is %x", parent_token));
+		if (!mono_error_ok (error)) {
+			mono_class_set_failure_and_error (class, error, "Could not load parent");
 			goto parent_failure;
 		}
 
@@ -7176,8 +7176,13 @@ mono_type_get_full (MonoImage *image, guint32 type_token, MonoGenericContext *co
 		return mono_class_get_type (mono_lookup_dynamic_token (image, type_token, context));
 
 	if ((type_token & 0xff000000) != MONO_TOKEN_TYPE_SPEC) {
-		MonoClass *class = mono_class_get_full (image, type_token, context);
-		return class ? mono_class_get_type (class) : NULL;
+		MonoClass *class = mono_class_get_checked (image, type_token, context, &error);
+		if (!mono_error_ok (&error)) {
+			mono_loader_set_error_from_mono_error (&error);
+			mono_error_cleanup (&error); /*FIXME don't swallow the error message*/
+			return NULL;
+		}
+		return mono_class_get_type (class);
 	}
 
 	type = mono_type_retrieve_from_typespec (image, type_token, context, &inflated, &error);
@@ -7358,6 +7363,8 @@ find_nocase (gpointer key, gpointer value, gpointer user_data)
 MonoClass *
 mono_class_from_name_case (MonoImage *image, const char* name_space, const char *name)
 {
+	MonoError error;
+	MonoClass *class;
 	MonoTableInfo  *t = &image->tables [MONO_TABLE_TYPEDEF];
 	guint32 cols [MONO_TYPEDEF_SIZE];
 	const char *n;
@@ -7391,10 +7398,14 @@ mono_class_from_name_case (MonoImage *image, const char* name_space, const char 
 
 		mono_image_unlock (image);
 		
-		if (token)
-			return mono_class_get (image, MONO_TOKEN_TYPE_DEF | token);
-		else
+		if (token) {
+			class = mono_class_get_checked (image, MONO_TOKEN_TYPE_DEF | token, NULL, &error);
+			if (!mono_error_ok (&error))
+				mono_error_cleanup (&error); /*FIXME don't swallow the error message*/
+			return class;
+		} else {
 			return NULL;
+		}
 
 	}
 
@@ -7410,8 +7421,12 @@ mono_class_from_name_case (MonoImage *image, const char* name_space, const char 
 			continue;
 		n = mono_metadata_string_heap (image, cols [MONO_TYPEDEF_NAME]);
 		nspace = mono_metadata_string_heap (image, cols [MONO_TYPEDEF_NAMESPACE]);
-		if (mono_utf8_strcasecmp (n, name) == 0 && mono_utf8_strcasecmp (nspace, name_space) == 0)
-			return mono_class_get (image, MONO_TOKEN_TYPE_DEF | i);
+		if (mono_utf8_strcasecmp (n, name) == 0 && mono_utf8_strcasecmp (nspace, name_space) == 0) {
+			class = mono_class_get_checked (image, MONO_TOKEN_TYPE_DEF | i, NULL, &error);
+			if (!mono_error_ok (&error))
+				mono_error_cleanup (&error); /*FIXME don't swallow the error message*/
+			return class;
+		}
 	}
 	return NULL;
 }
@@ -7485,6 +7500,7 @@ search_modules (MonoImage *image, const char *name_space, const char *name)
 MonoClass *
 mono_class_from_name (MonoImage *image, const char* name_space, const char *name)
 {
+	MonoError error;
 	GHashTable *nspace_table;
 	MonoImage *loaded_image;
 	guint32 token = 0;
@@ -7586,7 +7602,12 @@ mono_class_from_name (MonoImage *image, const char* name_space, const char *name
 
 	token = MONO_TOKEN_TYPE_DEF | token;
 
-	class = mono_class_get (image, token);
+	class = mono_class_get_checked (image, token, NULL, &error);
+	if (!mono_error_ok (&error)) {
+		mono_error_cleanup (&error); /*FIXME don't swallow the error message*/
+		return NULL;
+	}
+
 	if (nested)
 		return return_nested_in (class, nested);
 	return class;
@@ -8296,15 +8317,18 @@ mono_ldtoken (MonoImage *image, guint32 token, MonoClass **handle_class,
 		return type;
 	}
 	case MONO_TOKEN_FIELD_DEF: {
+		MonoError error;
 		MonoClass *class;
 		guint32 type = mono_metadata_typedef_from_field (image, mono_metadata_token_index (token));
 		if (!type)
 			return NULL;
 		if (handle_class)
 			*handle_class = mono_defaults.fieldhandle_class;
-		class = mono_class_get_full (image, MONO_TOKEN_TYPE_DEF | type, context);
-		if (!class)
+		class = mono_class_get_checked (image, MONO_TOKEN_TYPE_DEF | type, context, &error);
+		if (!mono_error_ok (&error)) {
+			mono_error_cleanup (&error); /*FIXME don't swallow error message.*/
 			return NULL;
+		}
 		mono_class_init (class);
 		return mono_class_get_field (class, token);
 	}

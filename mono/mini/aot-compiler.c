@@ -2230,6 +2230,7 @@ get_image_index (MonoAotCompile *cfg, MonoImage *image)
 static guint32
 find_typespec_for_class (MonoAotCompile *acfg, MonoClass *klass)
 {
+	MonoError error;
 	int i;
 	int len = acfg->image->tables [MONO_TABLE_TYPESPEC].rows;
 
@@ -2237,7 +2238,11 @@ find_typespec_for_class (MonoAotCompile *acfg, MonoClass *klass)
 	if (!acfg->typespec_classes) {
 		acfg->typespec_classes = mono_mempool_alloc0 (acfg->mempool, sizeof (MonoClass*) * len);
 		for (i = 0; i < len; ++i) {
-			acfg->typespec_classes [i] = mono_class_get_full (acfg->image, MONO_TOKEN_TYPE_SPEC | (i + 1), NULL);
+			acfg->typespec_classes [i] = mono_class_get_checked (acfg->image, MONO_TOKEN_TYPE_SPEC | (i + 1), NULL, &error);
+			if (!mono_error_ok (&error)) {
+				g_error ("Could not decode typespec %d due to %s", i, mono_error_get_message (&error));
+				mono_error_cleanup (&error); /*FIXME don't swallow the error message*/
+			};
 		}
 	}
 	for (i = 0; i < len; ++i) {
@@ -3439,14 +3444,15 @@ add_wrappers (MonoAotCompile *acfg)
 
 	/* delegate-invoke wrappers */
 	for (i = 0; i < acfg->image->tables [MONO_TABLE_TYPEDEF].rows; ++i) {
+		MonoError error;
 		MonoClass *klass;
 		MonoCustomAttrInfo *cattr;
 		
 		token = MONO_TOKEN_TYPE_DEF | (i + 1);
-		klass = mono_class_get (acfg->image, token);
+		klass = mono_class_get_checked (acfg->image, token, NULL, &error);
 
-		if (!klass) {
-			mono_loader_clear_error ();
+		if (!mono_error_ok (&error)) {
+			mono_error_cleanup (&error); /*FIXME don't swallow the error message*/
 			continue;
 		}
 
@@ -3710,13 +3716,14 @@ add_wrappers (MonoAotCompile *acfg)
 
 	/* StructureToPtr/PtrToStructure wrappers */
 	for (i = 0; i < acfg->image->tables [MONO_TABLE_TYPEDEF].rows; ++i) {
+		MonoError error;
 		MonoClass *klass;
 		
 		token = MONO_TOKEN_TYPE_DEF | (i + 1);
-		klass = mono_class_get (acfg->image, token);
+		klass = mono_class_get_checked (acfg->image, token, NULL, &error);
 
-		if (!klass) {
-			mono_loader_clear_error ();
+		if (!mono_error_ok (&error)) {
+			mono_error_cleanup (&error); /*FIXME don't swallow the error message*/
 			continue;
 		}
 
@@ -4174,15 +4181,18 @@ add_generic_instances (MonoAotCompile *acfg)
 	}
 
 	for (i = 0; i < acfg->image->tables [MONO_TABLE_TYPESPEC].rows; ++i) {
+		MonoError error;
 		MonoClass *klass;
 
 		token = MONO_TOKEN_TYPE_SPEC | (i + 1);
 
-		klass = mono_class_get (acfg->image, token);
-		if (!klass || klass->rank) {
-			mono_loader_clear_error ();
+		klass = mono_class_get_checked (acfg->image, token, NULL, &error);
+		if (!mono_error_ok (&error)) {
+			mono_error_cleanup (&error); /*FIXME don't swallow the error message*/
 			continue;
 		}
+		if (klass->rank)
+			continue;
 
 		add_generic_class (acfg, klass, FALSE, "typespec");
 	}
@@ -5495,14 +5505,15 @@ emit_exception_debug_info (MonoAotCompile *acfg, MonoCompile *cfg)
 static guint32
 emit_klass_info (MonoAotCompile *acfg, guint32 token)
 {
-	MonoClass *klass = mono_class_get (acfg->image, token);
+	MonoError error;
+	MonoClass *klass = mono_class_get_checked (acfg->image, token, NULL, &error);
 	guint8 *p, *buf;
 	int i, buf_size, res;
 	gboolean no_special_static, cant_encode;
 	gpointer iter = NULL;
 
-	if (!klass) {
-		mono_loader_clear_error ();
+	if (!mono_error_ok (&error)) {
+		mono_error_cleanup (&error); /*FIXME don't swallow the error message*/
 
 		buf_size = 16;
 
@@ -7715,10 +7726,12 @@ emit_class_name_table (MonoAotCompile *acfg)
 	for (i = 0; i < table_size; ++i)
 		g_ptr_array_add (table, NULL);
 	for (i = 0; i < acfg->image->tables [MONO_TABLE_TYPEDEF].rows; ++i) {
+		MonoError error;
+
 		token = MONO_TOKEN_TYPE_DEF | (i + 1);
-		klass = mono_class_get (acfg->image, token);
+		klass = mono_class_get_checked (acfg->image, token, NULL, &error);
 		if (!klass) {
-			mono_loader_clear_error ();
+			mono_error_cleanup (&error); /*FIXME don't swallow the error message*/
 			continue;
 		}
 		full_name = mono_type_get_name_full (mono_class_get_type (klass), MONO_TYPE_NAME_FORMAT_FULL_NAME);

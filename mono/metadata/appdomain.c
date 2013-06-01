@@ -2218,6 +2218,25 @@ unload_data_unref (unload_data *data)
 			return;
 		}
 	} while (InterlockedCompareExchange (&data->refcount, count - 1, count) != count);
+
+static void
+deregister_reflection_info_roots_nspace_table (gpointer key, gpointer value, gpointer image)
+{
+	MonoError error;
+	guint32 index = GPOINTER_TO_UINT (value);
+	MonoClass *class = mono_class_get_checked (image, MONO_TOKEN_TYPE_DEF | index, NULL, &error);
+	if (!mono_error_ok (&error)) {
+		g_error ("could not find class to unregister due to %s", mono_error_get_message (&error));
+		mono_error_cleanup (&error);
+	}
+
+	mono_class_free_ref_info (class);
+}
+
+static void
+deregister_reflection_info_roots_name_space (gpointer key, gpointer value, gpointer user_data)
+{
+	g_hash_table_foreach (value, deregister_reflection_info_roots_nspace_table, user_data);
 }
 
 static void

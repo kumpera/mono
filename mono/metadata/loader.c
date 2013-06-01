@@ -453,29 +453,23 @@ field_from_memberref (MonoImage *image, guint32 token, MonoClass **retklass,
 	switch (class) {
 	case MONO_MEMBERREF_PARENT_TYPEDEF:
 		class_table = MONO_TOKEN_TYPE_DEF;
-		klass = mono_class_get (image, MONO_TOKEN_TYPE_DEF | nindex);
+		klass = mono_class_get_checked (image, MONO_TOKEN_TYPE_DEF | nindex, NULL, &error);
 		break;
 	case MONO_MEMBERREF_PARENT_TYPEREF:
 		class_table = MONO_TOKEN_TYPE_REF;
 		klass = mono_class_from_typeref_checked (image, MONO_TOKEN_TYPE_REF | nindex, &error);
-		if (!mono_error_ok (&error))
-			mono_error_cleanup (&error); /*FIXME don't swallow the error message*/
 		break;
 	case MONO_MEMBERREF_PARENT_TYPESPEC:
 		class_table = MONO_TOKEN_TYPE_SPEC;
-		klass = mono_class_get_full (image, MONO_TOKEN_TYPE_SPEC | nindex, context);
+		klass = mono_class_get_checked (image, MONO_TOKEN_TYPE_SPEC | nindex, context, &error);
 		break;
 	default:
-		/*FIXME this must set a loader error!*/
-		g_warning ("field load from %x", class);
-		return NULL;
+		mono_error_set_bad_image (&error, image, "Bad memberref token class %x.", class);
 	}
 
-	if (!klass) {
-		char *name = mono_class_name_from_token (image, class_table | nindex);
-		g_warning ("Missing field %s in class %s (type token %d)", fname, name, class_table | nindex);
-		mono_loader_set_error_type_load (name, image->assembly_name);
-		g_free (name);
+	if (!mono_error_ok (&error)) {
+		mono_loader_set_error_from_mono_error (&error);
+		mono_error_cleanup (&error); /*FIXME don't swallow error message.*/
 		return NULL;
 	}
 
@@ -516,6 +510,7 @@ MonoClassField*
 mono_field_from_token (MonoImage *image, guint32 token, MonoClass **retklass,
 		       MonoGenericContext *context)
 {
+	MonoError error;
 	MonoClass *k;
 	guint32 type;
 	MonoClassField *field;
@@ -549,9 +544,12 @@ mono_field_from_token (MonoImage *image, guint32 token, MonoClass **retklass,
 		type = mono_metadata_typedef_from_field (image, mono_metadata_token_index (token));
 		if (!type)
 			return NULL;
-		k = mono_class_get (image, MONO_TOKEN_TYPE_DEF | type);
-		if (!k)
+		k = mono_class_get_checked (image, MONO_TOKEN_TYPE_DEF | type, NULL, &error);
+		if (!mono_error_ok (&error)) {
+			mono_loader_set_error_from_mono_error (&error);
+			mono_error_cleanup (&error); /*FIXME don't swallow error message.*/
 			return NULL;
+		}
 		mono_class_init (k);
 		if (retklass)
 			*retklass = k;
@@ -974,49 +972,29 @@ method_from_memberref (MonoImage *image, guint32 idx, MonoGenericContext *typesp
 	switch (class) {
 	case MONO_MEMBERREF_PARENT_TYPEREF:
 		klass = mono_class_from_typeref_checked (image, MONO_TOKEN_TYPE_REF | nindex, &error);
-		if (!mono_error_ok (&error))
-		if (!klass) {
-			mono_loader_set_error_from_mono_error (&error);
-			/*FIXME don't swallow the error message*/
-			mono_error_cleanup (&error);
-			return NULL;
-		}
 		break;
 	case MONO_MEMBERREF_PARENT_TYPESPEC:
 		/*
 		 * Parse the TYPESPEC in the parent's context.
 		 */
-		klass = mono_class_get_full (image, MONO_TOKEN_TYPE_SPEC | nindex, typespec_context);
-		if (!klass) {
-			char *name = mono_class_name_from_token (image, MONO_TOKEN_TYPE_SPEC | nindex);
-			g_warning ("Missing method %s in assembly %s, type %s", mname, image->name, name);
-			mono_loader_set_error_type_load (name, image->assembly_name);
-			g_free (name);
-			return NULL;
-		}
+		klass = mono_class_get_checked (image, MONO_TOKEN_TYPE_SPEC | nindex, typespec_context, &error);
 		break;
 	case MONO_MEMBERREF_PARENT_TYPEDEF:
-		klass = mono_class_get (image, MONO_TOKEN_TYPE_DEF | nindex);
-		if (!klass) {
-			char *name = mono_class_name_from_token (image, MONO_TOKEN_TYPE_DEF | nindex);
-			g_warning ("Missing method %s in assembly %s, type %s", mname, image->name, name);
-			mono_loader_set_error_type_load (name, image->assembly_name);
-			g_free (name);
-			return NULL;
-		}
+		klass = mono_class_get_checked (image, MONO_TOKEN_TYPE_DEF | nindex, NULL, &error);
 		break;
 	case MONO_MEMBERREF_PARENT_METHODDEF:
 		return mono_get_method (image, MONO_TOKEN_METHOD_DEF | nindex, NULL);
-		
 	default:
-		{
-			/* This message leaks */
-			char *message = g_strdup_printf ("Memberref parent unknown: class: %d, index %d", class, nindex);
-			mono_loader_set_error_method_load ("", message);
-			return NULL;
-		}
-
+		mono_error_set_bad_image (&error, image, "Memberref parent unknown: class: %d, index %d", class, nindex);
 	}
+
+	if (!mono_error_ok (&error)) {
+		mono_loader_set_error_from_mono_error (&error);
+		/*FIXME don't swallow the error message*/
+		mono_error_cleanup (&error);
+		return NULL;
+	}
+
 	g_assert (klass);
 	mono_class_init (klass);
 
@@ -1744,12 +1722,16 @@ mono_get_method_from_token (MonoImage *image, guint32 token, MonoClass *klass,
 	mono_stats.method_count ++;
 
 	if (!klass) { /*FIXME put this before the image alloc*/
+		MonoError error;
 		guint32 type = mono_metadata_typedef_from_method (image, token);
 		if (!type)
 			return NULL;
-		klass = mono_class_get (image, MONO_TOKEN_TYPE_DEF | type);
-		if (klass == NULL)
+		klass = mono_class_get_checked (image, MONO_TOKEN_TYPE_DEF | type, NULL, &error);
+		if (!mono_error_ok (&error)) {
+			mono_loader_set_error_from_mono_error (&error);
+			mono_error_cleanup (&error); /*FIXME don't swallow error message.*/
 			return NULL;
+		}
 	}
 
 	result->slot = -1;

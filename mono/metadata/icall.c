@@ -911,11 +911,13 @@ ves_icall_System_Runtime_CompilerServices_RuntimeHelpers_RunClassConstructor (Mo
 ICALL_EXPORT void
 ves_icall_System_Runtime_CompilerServices_RuntimeHelpers_RunModuleConstructor (MonoImage *image)
 {
-	MONO_ARCH_SAVE_REGS;
+	MonoError error;
 
 	mono_image_check_for_module_cctor (image);
 	if (image->has_module_cctor) {
-		MonoClass *module_klass = mono_class_get (image, MONO_TOKEN_TYPE_DEF | 1);
+		MonoClass *module_klass = mono_class_get_checked (image, MONO_TOKEN_TYPE_DEF | 1, NULL, &error);
+		mono_error_raise_exception (&error);
+
 		/*It's fine to raise the exception here*/
 		mono_runtime_class_init (mono_class_vtable_full (mono_domain_get (), module_klass, TRUE));
 	}
@@ -1664,8 +1666,7 @@ ves_icall_System_Reflection_FieldInfo_GetTypeModifiers (MonoReflectionField *fie
 {
 	MonoError error;
 	MonoType *type = mono_field_get_type_checked (field->field, &error);
-	if (!mono_error_ok (&error))
-		mono_error_raise_exception (&error);
+	mono_error_raise_exception (&error);
 
 	return type_array_from_modifiers (field->field->parent->image, type, optional);
 }
@@ -1685,8 +1686,7 @@ ves_icall_get_method_info (MonoMethod *method, MonoMethodInfo *info)
 	MONO_ARCH_SAVE_REGS;
 
 	sig = mono_method_signature_checked (method, &error);
-	if (!mono_error_ok (&error))
-		mono_error_raise_exception (&error);
+	mono_error_raise_exception (&error);
 
 
 	MONO_STRUCT_SETREF (info, parent, mono_type_get_object (domain, &method->klass->byval_arg));
@@ -1790,8 +1790,7 @@ ves_icall_MonoField_SetValueInternal (MonoReflectionField *field, MonoObject *ob
 		mono_security_core_clr_ensure_reflection_access_field (cf);
 
 	type = mono_field_get_type_checked (cf, &error);
-	if (!mono_error_ok (&error))
-		mono_error_raise_exception (&error);
+	mono_error_raise_exception (&error);
 
 	v = (gchar *) value;
 	if (!type->byref) {
@@ -1881,8 +1880,7 @@ ves_icall_MonoField_GetRawConstantValue (MonoReflectionField *this)
 	mono_class_init (field->parent);
 
 	t = mono_field_get_type_checked (field, &error);
-	if (!mono_error_ok (&error))
-		mono_error_raise_exception (&error);
+	mono_error_raise_exception (&error);
 
 	if (!(t->attrs & FIELD_ATTRIBUTE_HAS_DEFAULT))
 		mono_raise_exception (mono_get_exception_invalid_operation (NULL));
@@ -1941,8 +1939,8 @@ ves_icall_MonoField_ResolveType (MonoReflectionField *ref_field)
 	MonoError error;
 	MonoClassField *field = ref_field->field;
 	MonoType *type = mono_field_get_type_checked (field, &error);
-	if (!mono_error_ok (&error))
-		mono_error_raise_exception (&error);
+	mono_error_raise_exception (&error);
+
 	return mono_type_get_object (mono_object_domain (ref_field), type);
 }
 
@@ -2121,6 +2119,7 @@ ves_icall_Type_GetInterfaces (MonoReflectionType* type)
 fail:
 	g_hash_table_destroy (iface_hash);
 	mono_error_raise_exception (&error);
+
 	return NULL;
 }
 
@@ -5123,6 +5122,7 @@ ves_icall_System_Reflection_Assembly_LoadPermissions (MonoReflectionAssembly *as
 static MonoArray*
 mono_module_get_types (MonoDomain *domain, MonoImage *image, MonoArray **exceptions, MonoBoolean exportedOnly)
 {
+	MonoError error;
 	MonoArray *res;
 	MonoClass *klass;
 	MonoTableInfo *tdef = &image->tables [MONO_TABLE_TYPEDEF];
@@ -5148,21 +5148,21 @@ mono_module_get_types (MonoDomain *domain, MonoImage *image, MonoArray **excepti
 		attrs = mono_metadata_decode_row_col (tdef, i, MONO_TYPEDEF_FLAGS);
 		visibility = attrs & TYPE_ATTRIBUTE_VISIBILITY_MASK;
 		if (!exportedOnly || (visibility == TYPE_ATTRIBUTE_PUBLIC || visibility == TYPE_ATTRIBUTE_NESTED_PUBLIC)) {
-			klass = mono_class_get (image, (i + 1) | MONO_TOKEN_TYPE_DEF);
-			if (klass) {
+			klass = mono_class_get_checked (image, (i + 1) | MONO_TOKEN_TYPE_DEF, NULL, &error);
+			if (mono_error_ok (&error)) {
 				mono_array_setref (res, count, mono_type_get_object (domain, &klass->byval_arg));
 			} else {
-				MonoLoaderError *error;
+				MonoError nested;
 				MonoException *ex;
 				
-				error = mono_loader_get_last_error ();
-				g_assert (error != NULL);
-	
-				ex = mono_loader_error_prepare_exception (error);
+				ex = mono_error_prepare_exception (&error, &nested);
+				if (!mono_error_ok (&nested)) {
+					ex = mono_get_exception_execution_engine (mono_error_get_message (&nested));
+					mono_error_cleanup (&nested);
+				}
 				mono_array_setref (*exceptions, count, ex);
+				mono_error_cleanup (&error);
 			}
-			if (mono_loader_get_last_error ())
-				mono_loader_clear_error ();
 			count++;
 		}
 	}
@@ -5308,6 +5308,7 @@ ves_icall_System_Reflection_AssemblyName_ParseName (MonoReflectionAssemblyName *
 ICALL_EXPORT MonoReflectionType*
 ves_icall_System_Reflection_Module_GetGlobalType (MonoReflectionModule *module)
 {
+	MonoError error;
 	MonoDomain *domain = mono_object_domain (module); 
 	MonoClass *klass;
 
@@ -5319,7 +5320,9 @@ ves_icall_System_Reflection_Module_GetGlobalType (MonoReflectionModule *module)
 		/* These images do not have a global type */
 		return NULL;
 
-	klass = mono_class_get (module->image, 1 | MONO_TOKEN_TYPE_DEF);
+	klass = mono_class_get_checked (module->image, 1 | MONO_TOKEN_TYPE_DEF, NULL, &error);
+	mono_error_raise_exception (&error);
+
 	return mono_type_get_object (domain, &klass->byval_arg);
 }
 
@@ -5429,19 +5432,20 @@ init_generic_context_from_args (MonoGenericContext *context, MonoArray *type_arg
 }
 
 ICALL_EXPORT MonoType*
-ves_icall_System_Reflection_Module_ResolveTypeToken (MonoImage *image, guint32 token, MonoArray *type_args, MonoArray *method_args, MonoResolveTokenError *error)
+ves_icall_System_Reflection_Module_ResolveTypeToken (MonoImage *image, guint32 token, MonoArray *type_args, MonoArray *method_args, MonoResolveTokenError *resolve_error)
 {
+	MonoError error;
 	MonoClass *klass;
 	int table = mono_metadata_token_table (token);
 	int index = mono_metadata_token_index (token);
 	MonoGenericContext context;
 
-	*error = ResolveTokenError_Other;
+	*resolve_error = ResolveTokenError_Other;
 
 	/* Validate token */
 	if ((table != MONO_TABLE_TYPEDEF) && (table != MONO_TABLE_TYPEREF) && 
 		(table != MONO_TABLE_TYPESPEC)) {
-		*error = ResolveTokenError_BadTable;
+		*resolve_error = ResolveTokenError_BadTable;
 		return NULL;
 	}
 
@@ -5457,15 +5461,14 @@ ves_icall_System_Reflection_Module_ResolveTypeToken (MonoImage *image, guint32 t
 	}
 
 	if ((index <= 0) || (index > image->tables [table].rows)) {
-		*error = ResolveTokenError_OutOfRange;
+		*resolve_error = ResolveTokenError_OutOfRange;
 		return NULL;
 	}
 
 	init_generic_context_from_args (&context, type_args, method_args);
-	klass = mono_class_get_full (image, token, &context);
+	klass = mono_class_get_checked (image, token, &context, &error);
 
-	if (mono_loader_get_last_error ())
-		mono_raise_exception (mono_loader_error_prepare_exception (mono_loader_get_last_error ()));
+	mono_error_raise_exception (&error);
 
 	if (klass)
 		return &klass->byval_arg;
@@ -7413,6 +7416,7 @@ ves_icall_MonoDebugger_GetMethodToken (MonoReflectionMethod *method)
 static MonoArray*
 type_array_from_modifiers (MonoImage *image, MonoType *type, int optional)
 {
+	MonoError error;
 	MonoArray *res;
 	int i, count = 0;
 	for (i = 0; i < type->num_mods; ++i) {
@@ -7425,7 +7429,9 @@ type_array_from_modifiers (MonoImage *image, MonoType *type, int optional)
 	count = 0;
 	for (i = 0; i < type->num_mods; ++i) {
 		if ((optional && !type->modifiers [i].required) || (!optional && type->modifiers [i].required)) {
-			MonoClass *klass = mono_class_get (image, type->modifiers [i].token);
+			MonoClass *klass = mono_class_get_checked (image, type->modifiers [i].token, NULL, &error);
+			mono_error_raise_exception (&error);
+
 			mono_array_setref (res, count, mono_type_get_object (mono_domain_get (), &klass->byval_arg));
 			count++;
 		}
@@ -7571,8 +7577,8 @@ custom_attrs_get_by_type (MonoObject *obj, MonoReflectionType *attr_type)
 		mono_class_init_or_throw (attr_class);
 
 	res = mono_reflection_get_custom_attrs_by_type (obj, attr_class, &error);
-	if (!mono_error_ok (&error))
-		mono_error_raise_exception (&error);
+	mono_error_raise_exception (&error);
+
 	if (mono_loader_get_last_error ()) {
 		mono_raise_exception (mono_loader_error_prepare_exception (mono_loader_get_last_error ()));
 		g_assert_not_reached ();
