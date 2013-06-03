@@ -1389,11 +1389,19 @@ token_handler (MonoDisHelper *dh, MonoMethod *method, guint32 token)
 	case CEE_ISINST:
 	case CEE_CASTCLASS:
 	case CEE_LDELEMA:
-		if (method->wrapper_type)
+		if (method->wrapper_type) {
 			klass = data;
-		else
-			klass = mono_class_get_full (method->klass->image, token, NULL);
-		res = g_strdup_printf ("<%s>", klass->name);
+			res = g_strdup_printf ("<%s>", klass->name);
+		} else {
+			MonoError error;
+			klass = mono_class_get_checked (method->klass->image, token, NULL, &error);
+			if (mono_error_ok (&error))
+				res = g_strdup_printf ("<%s>", klass->name);
+			else
+				res = g_strdup_printf ("<bad token %x due to: '%s'>", token, mono_error_get_message (&error));
+			mono_error_cleanup (&error);
+		}
+		
 		break;
 	case CEE_NEWOBJ:
 	case CEE_CALL:

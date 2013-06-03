@@ -10905,7 +10905,10 @@ mono_method_to_ir (MonoCompile *cfg, MonoMethod *method, MonoBasicBlock *start_b
 							tclass, MONO_RGCTX_INFO_REFLECTION_TYPE);
 					} else if (cfg->compile_aot) {
 						if (method->wrapper_type) {
-							if (mono_class_get (tclass->image, tclass->type_token) == tclass && !generic_context) {
+							MonoError error;
+							MonoClass *token_class = mono_class_get_checked (tclass->image, tclass->type_token, NULL, &error);
+							mono_error_cleanup (&error); /*We swallow the error as this is an optimization. */
+							if (token_class == tclass && !generic_context) {
 								/* Special case for static synchronized wrappers */
 								EMIT_NEW_TYPE_FROM_HANDLE_CONST (cfg, ins, tclass->image, tclass->type_token, generic_context);
 							} else {
