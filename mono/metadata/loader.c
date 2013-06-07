@@ -2548,6 +2548,7 @@ mono_method_get_token (MonoMethod *method)
 MonoMethodHeader*
 mono_method_get_header (MonoMethod *method)
 {
+	MonoError error;
 	int idx;
 	guint32 rva;
 	MonoImage* img;
@@ -2602,7 +2603,11 @@ mono_method_get_header (MonoMethod *method)
 	if (!loc)
 		return NULL;
 
-	header = mono_metadata_parse_mh_full (img, mono_method_get_generic_container (method), loc);
+	header = mono_metadata_parse_mh_full (img, mono_method_get_generic_container (method), loc, &error);
+	if (!mono_error_ok (&error)) {
+		g_warning ("Could not decode method header due to: %s", mono_error_get_message (&error));
+		mono_error_cleanup (&error); /*FIXME don't swallow error message.*/
+	}
 
 	return header;
 }

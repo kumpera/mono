@@ -665,6 +665,7 @@ dis_locals (MonoImage *m, MonoMethodHeader *mh, const char *ptr)
 static void
 dis_code (MonoImage *m, guint32 token, guint32 rva, MonoGenericContainer *container)
 {
+	MonoError error;
 	MonoMethodHeader *mh;
 	const char *ptr = mono_image_rva_map (m, rva);
 	const char *loc;
@@ -680,14 +681,21 @@ dis_code (MonoImage *m, guint32 token, guint32 rva, MonoGenericContainer *contai
 		g_free (override);
 	}
 
-	mh = mono_metadata_parse_mh_full (m, container, ptr);
+	mh = mono_metadata_parse_mh_full (m, container, ptr, &error);
+
 	entry_point = mono_image_get_entry_point (m);
 	if (entry_point && mono_metadata_token_index (entry_point) && mono_metadata_token_table (entry_point) == MONO_TABLE_METHOD) {
 		loc = mono_metadata_locate_token (m, entry_point);
 		if (rva == read32 (loc))
 			fprintf (output, "\t.entrypoint\n");
 	}
-	
+
+	if (!mono_error_ok (&error)) {
+		fprintf (output, "Could not decode method (token %x) header due to %s", token, mono_error_get_message (&error));
+		mono_error_cleanup (&error);
+		return;
+	}
+
 	if (mh) {
 		fprintf (output, "\t// Code size %d (0x%x)\n", mh->code_size, mh->code_size);
 		fprintf (output, "\t.maxstack %d\n", mh->max_stack);

@@ -3286,7 +3286,7 @@ hex_dump (const char *buffer, int base, int count)
  * @ptr: Points to the beginning of the Section Data (25.3)
  */
 static MonoExceptionClause*
-parse_section_data (MonoImage *m, int *num_clauses, const unsigned char *ptr)
+parse_section_data (MonoImage *m, int *num_clauses, const unsigned char *ptr, MonoError *error)
 {
 	unsigned char sect_data_flags;
 	const unsigned char *sptr;
@@ -3346,12 +3346,9 @@ parse_section_data (MonoImage *m, int *num_clauses, const unsigned char *ptr)
 					ec->data.filter_offset = tof_value;
 				} else if (ec->flags == MONO_EXCEPTION_CLAUSE_NONE) {
 					if (tof_value) {
-						MonoError error;
-						ec->data.catch_class = mono_class_get_checked (m, tof_value, NULL, &error);
-						if (!mono_error_ok (&error)) {
-							g_error ("Could not lookup exception table due to: %s", mono_error_get_message (&error));
-							mono_error_cleanup (&error); /*FIXME don't swallow the error message*/
-						}
+						ec->data.catch_class = mono_class_get_checked (m, tof_value, NULL, error);
+						if (!mono_error_ok (error))
+							return NULL;
 					}
 				} else {
 					ec->data.catch_class = NULL;
@@ -3443,6 +3440,7 @@ mono_method_get_header_summary (MonoMethod *method, MonoMethodHeaderSummary *sum
  * @m: metadata context
  * @generic_context: generics context
  * @ptr: pointer to the method header.
+ * @error: error object
  *
  * Decode the method header at @ptr, including pointer to the IL code,
  * info about local variables and optional exception tables.
@@ -3453,7 +3451,7 @@ mono_method_get_header_summary (MonoMethod *method, MonoMethodHeaderSummary *sum
  * Returns: a transient MonoMethodHeader allocated from the heap.
  */
 MonoMethodHeader *
-mono_metadata_parse_mh_full (MonoImage *m, MonoGenericContainer *container, const char *ptr)
+mono_metadata_parse_mh_full (MonoImage *m, MonoGenericContainer *container, const char *ptr, MonoError *error)
 {
 	MonoMethodHeader *mh;
 	unsigned char flags = *(const unsigned char *) ptr;
@@ -3466,7 +3464,12 @@ mono_metadata_parse_mh_full (MonoImage *m, MonoGenericContainer *container, cons
 	MonoTableInfo *t = &m->tables [MONO_TABLE_STANDALONESIG];
 	guint32 cols [MONO_STAND_ALONE_SIGNATURE_SIZE];
 
-	g_return_val_if_fail (ptr != NULL, NULL);
+	mono_error_init (error);
+
+	if (ptr == NULL) {
+		mono_error_set_bad_image (error, m, "Invalid null method header");
+		return NULL;
+	}
 
 	switch (format) {
 	case METHOD_HEADER_TINY_FORMAT:
@@ -3505,20 +3508,31 @@ mono_metadata_parse_mh_full (MonoImage *m, MonoGenericContainer *container, cons
 		ptr = (char*)code + code_size;
 		break;
 	default:
+		mono_error_set_bad_image (error, m, "Invalid method header format %d", format);
 		return NULL;
 	}
 
 	if (local_var_sig_tok) {
 		int idx = (local_var_sig_tok & 0xffffff)-1;
-		if (idx >= t->rows || idx < 0)
+		if (idx >= t->rows || idx < 0) {
+			mono_error_set_bad_image (error, m, "Invalid method header local variable token out of bounds %x", local_var_sig_tok);
 			return NULL;
+		}
 		mono_metadata_decode_row (t, idx, cols, 1);
 
-		if (!mono_verifier_verify_standalone_signature (m, cols [MONO_STAND_ALONE_SIGNATURE], NULL))
+		if (!mono_verifier_verify_standalone_signature (m, cols [MONO_STAND_ALONE_SIGNATURE], NULL)) {
+			g_assert (!mono_loader_get_last_error ());
+			mono_error_set_bad_image (error, m, "Invalid method header locals signature");
 			return NULL;
+		}
 	}
-	if (fat_flags & METHOD_HEADER_MORE_SECTS)
-		clauses = parse_section_data (m, &num_clauses, (const unsigned char*)ptr);
+	if (fat_flags & METHOD_HEADER_MORE_SECTS) {
+		clauses = parse_section_data (m, &num_clauses, (const unsigned char*)ptr, error);
+		if (!mono_error_ok (error)) {
+			g_assert (!mono_loader_get_last_error ());
+			return NULL;
+		}
+	}
 	if (local_var_sig_tok) {
 		const char *locals_ptr;
 		int len=0, i, bsize;
@@ -3537,6 +3551,8 @@ mono_metadata_parse_mh_full (MonoImage *m, MonoGenericContainer *container, cons
 			if (!mh->locals [i]) {
 				g_free (clauses);
 				g_free (mh);
+				g_assert (!mono_loader_get_last_error ());
+				mono_error_set_bad_image (error, m, "Invalid local signature, could not decode local %d", i);
 				return NULL;
 			}
 		}
@@ -3555,6 +3571,8 @@ mono_metadata_parse_mh_full (MonoImage *m, MonoGenericContainer *container, cons
 		mh->clauses = clausesp;
 		mh->num_clauses = num_clauses;
 	}
+
+	g_assert (!mono_loader_get_last_error ());
 	return mh;
 }
 
@@ -3568,17 +3586,24 @@ mono_metadata_parse_mh_full (MonoImage *m, MonoGenericContainer *container, cons
  * This is a Mono runtime internal function.
  *
  * Returns: a MonoMethodHeader.
+ * LOCKING: Take the loader lock
  */
 MonoMethodHeader *
 mono_metadata_parse_mh (MonoImage *m, const char *ptr)
 {
+	MonoError error;
 	MonoMethodHeader *res;
 
 	mono_loader_lock ();
 
-	res = mono_metadata_parse_mh_full (m, NULL, ptr);
+	res = mono_metadata_parse_mh_full (m, NULL, ptr, &error);
 
 	mono_loader_unlock ();
+
+	if (!mono_error_ok (&error)) {
+		g_warning ("Could not decode method header due to: %s", mono_error_get_message (&error));
+		mono_error_cleanup (&error); /*FIXME don't swallow error message.*/
+	}
 
 	return res;
 }
