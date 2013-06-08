@@ -199,6 +199,9 @@ mono_error_set_type_load_class (MonoError *oerror, MonoClass *klass, const char 
 	set_error_message ();
 }
 
+/*
+This functions is different from others as @type_name and @assembly_name are expected to be heap allocated.
+*/
 void
 mono_error_set_type_load_name (MonoError *oerror, const char *type_name, const char *assembly_name, const char *msg_format, ...)
 {
@@ -208,6 +211,7 @@ mono_error_set_type_load_name (MonoError *oerror, const char *type_name, const c
 	error->error_code = MONO_ERROR_TYPE_LOAD;
 	mono_error_set_type_name (oerror, type_name);
 	mono_error_set_assembly_name (oerror, assembly_name);
+	mono_error_dup_strings (oerror, FALSE);
 	set_error_message ();
 }
 
