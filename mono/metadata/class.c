@@ -272,8 +272,11 @@ mono_class_from_typeref_checked (MonoImage *image, guint32 type_token, MonoError
 	}
 
 	res = mono_class_from_name (image->references [idx - 1]->image, nspace, name);
-	if (!res)
-		mono_error_set_bad_image (error, image, "Could not resolve type %s:%s", nspace, name);
+	if (!res) {
+		char *name = mono_class_name_from_token (image, type_token);
+		char *assembly = mono_assembly_name_from_token (image, type_token);
+		mono_error_set_type_load_name (error, name, assembly, "Could not resolve typedef token %08x", type_token);
+	}
 	return res;
 }
 
