@@ -65,7 +65,7 @@ If return non null Hazard Pointer 1 holds the return value.
 MonoThreadInfo*
 mono_thread_info_lookup (MonoNativeThreadId id)
 {
-		MonoThreadHazardPointers *hp = mono_hazard_pointer_get ();
+	MonoThreadHazardPointers *hp = mono_hazard_pointer_get ();
 
 	if (!mono_lls_find (&thread_list, hp, (uintptr_t)id)) {
 		mono_hazard_pointer_clear_all (hp, -1);
@@ -137,6 +137,8 @@ register_thread (MonoThreadInfo *info, gpointer baseptr)
 
 	/*set TLS early so SMR works */
 	mono_native_tls_set_value (thread_info_key, info);
+
+	info->tls_block_pointer = mono_tls_block_get_address ();
 
 	THREADS_DEBUG ("registering info %p tid %p small id %x\n", info, mono_thread_info_get_tid (info), info->small_id);
 
@@ -281,13 +283,10 @@ mono_threads_init (MonoThreadInfoCallbacks *callbacks, size_t info_size)
 
 	mono_mutex_init_suspend_safe (&global_suspend_lock);
 
+	mono_tls_init ();
 	mono_lls_init (&thread_list, NULL);
 	mono_thread_smr_init ();
 	mono_threads_init_platform ();
-
-#if defined(__MACH__)
-	mono_mach_init ();
-#endif
 
 	mono_threads_inited = TRUE;
 
@@ -607,4 +606,23 @@ mono_thread_info_new_interrupt_enabled (void)
 	return !disable_new_interrupt;
 #endif
 	return FALSE;
+}
+
+
+gpointer
+mono_thread_get_tls_slot (MonoThreadInfo *info, MonoFastTlsKey key)
+{
+	return info->tls_block_pointer [key];
+}
+
+void
+mono_thread_set_tls_slot (THREAD_INFO_TYPE *info, MonoFastTlsKey key, gpointer value)
+{
+	info->tls_block_pointer [key] = value;
+}
+
+MonoNativeTlsKey
+mono_thread_get_current_thread_info_tls_key (void)
+{
+	return thread_info_key;
 }

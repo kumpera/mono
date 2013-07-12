@@ -9,11 +9,12 @@
 
 #ifndef __MONO_THREADS_H__
 #define __MONO_THREADS_H__
-
+#include <config.h>
 #include <mono/utils/mono-semaphore.h>
 #include <mono/utils/mono-stack-unwinding.h>
 #include <mono/utils/mono-linked-list-set.h>
 #include <mono/utils/mono-mutex.h>
+#include <mono/utils/mono-fast-tls.h>
 
 #include <glib.h>
 
@@ -119,6 +120,10 @@ typedef struct {
 	/*async call machinery, thread MUST be suspended before accessing those fields*/
 	void (*async_target)(void*);
 	void *user_data;
+
+	gpointer *tls_block_pointer;
+	/*We might not be able to use KW_THREAD at runtime. */
+	gpointer tls_block [MONO_TLS_KEY_COUNT];
 } MonoThreadInfo;
 
 typedef struct {
@@ -223,6 +228,15 @@ mono_thread_info_disable_new_interrupt (gboolean disable) MONO_INTERNAL;
 void
 mono_thread_info_abort_socket_syscall_for_close (MonoNativeThreadId tid) MONO_INTERNAL;
 
+MonoNativeTlsKey
+mono_thread_get_current_thread_info_tls_key (void) MONO_INTERNAL;
+
+gpointer
+mono_thread_get_tls_slot (THREAD_INFO_TYPE *info, MonoFastTlsKey key) MONO_INTERNAL;
+
+void
+mono_thread_set_tls_slot (THREAD_INFO_TYPE *info, MonoFastTlsKey key, gpointer value) MONO_INTERNAL;
+
 #if !defined(HOST_WIN32)
 
 int
@@ -258,5 +272,6 @@ gboolean mono_native_thread_id_equals (MonoNativeThreadId id1, MonoNativeThreadI
 
 gboolean
 mono_native_thread_create (MonoNativeThreadId *tid, gpointer func, gpointer arg) MONO_INTERNAL;
+
 
 #endif /* __MONO_THREADS_H__ */
