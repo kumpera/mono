@@ -286,7 +286,7 @@ mono_threads_init (MonoThreadInfoCallbacks *callbacks, size_t info_size)
 	mono_threads_init_platform ();
 
 #if defined(__MACH__)
-	mono_mach_init (thread_info_key);
+	mono_mach_init ();
 #endif
 
 	mono_threads_inited = TRUE;

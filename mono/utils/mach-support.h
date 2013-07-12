@@ -23,7 +23,7 @@ extern pthread_t pthread_from_mach_thread_np(mach_port_t);
 
 void *mono_mach_arch_get_ip (thread_state_t state) MONO_INTERNAL;
 void *mono_mach_arch_get_sp (thread_state_t state) MONO_INTERNAL;
-void mono_mach_init (pthread_key_t key) MONO_INTERNAL;
+void mono_mach_init (void) MONO_INTERNAL;
 
 int mono_mach_arch_get_mcontext_size (void) MONO_INTERNAL;
 void mono_mach_arch_thread_state_to_mcontext (thread_state_t state, void *context) MONO_INTERNAL;
@@ -34,8 +34,17 @@ kern_return_t mono_mach_get_threads (thread_act_array_t *threads, guint32 *count
 kern_return_t mono_mach_free_threads (thread_act_array_t threads, guint32 count) MONO_INTERNAL;
 kern_return_t mono_mach_arch_get_thread_state (thread_port_t thread, thread_state_t state, mach_msg_type_number_t *count) MONO_INTERNAL;
 kern_return_t mono_mach_arch_set_thread_state (thread_port_t thread, thread_state_t state, mach_msg_type_number_t count) MONO_INTERNAL;
+
+//Low level functions that should only meant to be used by mono-tls
 void *mono_mach_arch_get_tls_value_from_thread (pthread_t thread, guint32 key) MONO_INTERNAL;
 void *mono_mach_get_tls_address_from_thread (pthread_t thread, pthread_key_t key) MONO_INTERNAL;
+gint32 mono_mach_get_pthread_offset (void) MONO_INTERNAL;
+gint32 mono_mach_get_local_tls_offset (void) MONO_INTERNAL;
+
+//Low level functions that are used between mach-support and mach-support-ARCH
+void mono_mach_arch_get_tls_probe_offsets (const gint32**offsets, gint32 *count) MONO_INTERNAL;
+gint32 mono_mach_arch_probe_local_tls_offset (void) MONO_INTERNAL;
+
 
 #endif
 #endif /* __MONO_MACH_SUPPORT_H__ */
