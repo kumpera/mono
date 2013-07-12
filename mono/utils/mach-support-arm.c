@@ -20,11 +20,11 @@
 
 /* Known offsets used for TLS storage*/
 
-/*Found on iOS 6 */
-#define TLS_VECTOR_OFFSET_0 0x48
-#define TLS_VECTOR_OFFSET_1 0xA8
-
-static int tls_vector_offset;
+static const int known_tls_offsets[] = {
+	0x48, /*Found on iOS 6 */
+	0xA4,
+	0xA8,
+};
 
 void *
 mono_mach_arch_get_ip (thread_state_t state)
@@ -91,48 +91,18 @@ mono_mach_arch_set_thread_state (thread_port_t thread, thread_state_t state, mac
 	return thread_set_state (thread, ARM_THREAD_STATE_COUNT, state, count);
 }
 
-void *
-mono_mach_get_tls_address_from_thread (pthread_t thread, pthread_key_t key)
-{
-	/* Mach stores TLS values in a hidden array inside the pthread_t structure
-	 * They are keyed off a giant array from a known offset into the pointer. This value
-	 * is baked into their pthread_getspecific implementation
-	 */
-	intptr_t *p = (intptr_t *) thread;
-	intptr_t **tsd = (intptr_t **) ((char*)p + tls_vector_offset);
-
-	return (void *) &tsd [key];
-}
-
-void *
-mono_mach_arch_get_tls_value_from_thread (pthread_t thread, guint32 key)
-{
-	return *(void**)mono_mach_get_tls_address_from_thread (thread, key);
-}
-
 void
-mono_mach_init (pthread_key_t key)
+mono_mach_arch_get_tls_probe_offsets (const gint32**offsets, gint32 *count)
 {
-	void *old_value = pthread_getspecific (key);
-	void *canary = (void*)0xDEADBEEFu;
+	*offsets = known_tls_offsets;
+	*count = G_N_ELEMENTS (known_tls_offsets);
+}
 
-	pthread_key_create (&key, NULL);
-	g_assert (old_value != canary);
-
-	pthread_setspecific (key, canary);
-
-	/*First we probe for cats*/
-	tls_vector_offset = TLS_VECTOR_OFFSET_0;
-	if (mono_mach_arch_get_tls_value_from_thread (pthread_self (), key) == canary)
-		goto ok;
-
-	tls_vector_offset = TLS_VECTOR_OFFSET_1;
-	if (mono_mach_arch_get_tls_value_from_thread (pthread_self (), key) == canary)
-		goto ok;
-
-	g_error ("could not discover the mach TLS offset");
-ok:
-	pthread_setspecific (key, old_value);
+gint32
+mono_mach_arch_probe_local_tls_offset (void)
+{
+	/*FIXME otherwise we're condened*/
+	return -1;
 }
 
 #endif
