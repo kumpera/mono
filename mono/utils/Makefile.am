@@ -100,6 +100,11 @@ monoutils_sources = \
 	mono-threads-windows.c	\
 	mono-threads.h	\
 	mono-tls.h	\
+	mono-fast-tls.c	\
+	mono-fast-tls.h	\
+	mono-fast-tls-native.c \
+	mono-fast-tls-darwin.c \
+	mono-fast-tls-unknown.c	\
 	linux_magic.h	\
 	mono-memory-model.h	\
 	atomic.h	\
@@ -120,7 +125,7 @@ endif
 if ARM
 arch_sources += mach-support-arm.c
 endif
-
+ 
 else
 
 arch_sources += mach-support-unknown.c

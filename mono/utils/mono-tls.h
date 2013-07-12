@@ -11,7 +11,9 @@
 #ifndef __MONO_TLS_H__
 #define __MONO_TLS_H__
 
+#include <glib.h>
 
+/* Native TLS */
 #ifdef HOST_WIN32
 
 #include <windows.h>
@@ -48,6 +50,4 @@ mono_native_tls_set_value (MonoNativeTlsKey key, gpointer value)
 }
 
 #endif /* HOST_WIN32 */
-
-
 #endif /* __MONO_TLS_H__ */
