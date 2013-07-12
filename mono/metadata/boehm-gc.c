@@ -760,7 +760,7 @@ create_allocator (int atype, int offset)
 	/* my_fl = ((GC_thread)tsd) -> ptrfree_freelists + index; */
 	mono_mb_emit_byte (mb, MONO_CUSTOM_PREFIX);
 	mono_mb_emit_byte (mb, 0x0D); /* CEE_MONO_TLS */
-	mono_mb_emit_i4 (mb, offset);
+	mono_mb_emit_i4 (mb, mono_tls_translate_native_offset (offset));
 	if (atype == ATYPE_FREEPTR || atype == ATYPE_FREEPTR_FOR_BOX || atype == ATYPE_STRING)
 		mono_mb_emit_icon (mb, G_STRUCT_OFFSET (struct GC_Thread_Rep, ptrfree_freelists));
 	else if (atype == ATYPE_NORMAL)
@@ -1093,11 +1093,6 @@ void*
 mono_gc_get_nursery (int *shift_bits, size_t *size)
 {
 	return NULL;
-}
-
-void
-mono_gc_set_current_thread_appdomain (MonoDomain *domain)
-{
 }
 
 gboolean

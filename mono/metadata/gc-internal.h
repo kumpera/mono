@@ -315,8 +315,6 @@ gboolean mono_gc_card_table_nursery_check (void) MONO_INTERNAL;
 
 void* mono_gc_get_nursery (int *shift_bits, size_t *size) MONO_INTERNAL;
 
-void mono_gc_set_current_thread_appdomain (MonoDomain *domain) MONO_INTERNAL;
-
 void mono_gc_set_skip_thread (gboolean skip) MONO_INTERNAL;
 
 /*

@@ -79,12 +79,6 @@ static gpointer mono_jit_compile_method_with_opt (MonoMethod *method, guint32 op
 static guint32 default_opt = 0;
 static gboolean default_opt_set = FALSE;
 
-MonoNativeTlsKey mono_jit_tls_id;
-
-#ifdef MONO_HAVE_FAST_TLS
-MONO_FAST_TLS_DECLARE(mono_jit_tls);
-#endif
-
 #ifndef MONO_ARCH_MONITOR_ENTER_ADJUSTMENT
 #define MONO_ARCH_MONITOR_ENTER_ADJUSTMENT 1
 #endif
@@ -2540,60 +2534,15 @@ mono_destroy_compile (MonoCompile *cfg)
 	g_free (cfg);
 }
 
-#ifdef MONO_HAVE_FAST_TLS
-MONO_FAST_TLS_DECLARE(mono_lmf_addr);
-#ifdef MONO_ARCH_ENABLE_MONO_LMF_VAR
-/* 
- * When this is defined, the current lmf is stored in this tls variable instead of in 
- * jit_tls->lmf.
- */
-MONO_FAST_TLS_DECLARE(mono_lmf);
-#endif
-#endif
-
-MonoNativeTlsKey
-mono_get_jit_tls_key (void)
-{
-	return mono_jit_tls_id;
-}
-
-gint32
-mono_get_jit_tls_offset (void)
-{
-	int offset;
-	MONO_THREAD_VAR_OFFSET (mono_jit_tls, offset);
-	return offset;
-}
-
-gint32
-mono_get_lmf_tls_offset (void)
-{
-#if defined(MONO_ARCH_ENABLE_MONO_LMF_VAR)
-	int offset;
-	MONO_THREAD_VAR_OFFSET(mono_lmf,offset);
-	return offset;
-#else
-	return -1;
-#endif
-}
-
-gint32
-mono_get_lmf_addr_tls_offset (void)
-{
-	int offset;
-	MONO_THREAD_VAR_OFFSET(mono_lmf_addr,offset);
-	return offset;
-}
-
 MonoLMF *
 mono_get_lmf (void)
 {
 #if defined(MONO_HAVE_FAST_TLS) && defined(MONO_ARCH_ENABLE_MONO_LMF_VAR)
-	return MONO_FAST_TLS_GET (mono_lmf);
+	return mono_tls_get (MONO_TLS_LMF_KEY);
 #else
 	MonoJitTlsData *jit_tls;
 
-	if ((jit_tls = mono_native_tls_get_value (mono_jit_tls_id)))
+	if ((jit_tls = return mono_tls_get (MONO_TLS_JIT_TLS_KEY)))
 		return jit_tls->lmf;
 	/*
 	 * We do not assert here because this function can be called from
@@ -2608,11 +2557,11 @@ MonoLMF **
 mono_get_lmf_addr (void)
 {
 #ifdef MONO_HAVE_FAST_TLS
-	return MONO_FAST_TLS_GET (mono_lmf_addr);
+	return mono_tls_get (MONO_TLS_LMF_ADDR_KEY);
 #else
 	MonoJitTlsData *jit_tls;
 
-	jit_tls = mono_native_tls_get_value (mono_jit_tls_id);
+	jit_tls = mono_tls_get (MONO_TLS_JIT_TLS_KEY);
 	if (G_LIKELY (jit_tls))
 		return &jit_tls->lmf;
 
@@ -2626,7 +2575,7 @@ mono_get_lmf_addr (void)
 
 	mono_jit_thread_attach (NULL);
 	
-	if ((jit_tls = mono_native_tls_get_value (mono_jit_tls_id)))
+	if ((jit_tls = mono_tls_get (MONO_TLS_JIT_TLS_KEY)))
 		return &jit_tls->lmf;
 
 	g_assert_not_reached ();
@@ -2638,7 +2587,7 @@ void
 mono_set_lmf (MonoLMF *lmf)
 {
 #if defined(MONO_HAVE_FAST_TLS) && defined(MONO_ARCH_ENABLE_MONO_LMF_VAR)
-	MONO_FAST_TLS_SET (mono_lmf, lmf);
+	mono_tls_set (MONO_TLS_LMF_KEY, lmf);
 #endif
 
 	(*mono_get_lmf_addr ()) = lmf;
@@ -2647,19 +2596,13 @@ mono_set_lmf (MonoLMF *lmf)
 static void
 mono_set_jit_tls (MonoJitTlsData *jit_tls)
 {
-	mono_native_tls_set_value (mono_jit_tls_id, jit_tls);
-
-#ifdef MONO_HAVE_FAST_TLS
-	MONO_FAST_TLS_SET (mono_jit_tls, jit_tls);
-#endif
+	mono_tls_set (MONO_TLS_JIT_TLS_KEY, jit_tls);
 }
 
 static void
 mono_set_lmf_addr (gpointer lmf_addr)
 {
-#ifdef MONO_HAVE_FAST_TLS
-	MONO_FAST_TLS_SET (mono_lmf_addr, lmf_addr);
-#endif
+	mono_tls_set (MONO_TLS_LMF_ADDR_KEY, lmf_addr);
 }
 
 /*
@@ -2681,13 +2624,13 @@ mono_jit_thread_attach (MonoDomain *domain)
 		domain = mono_get_root_domain ();
 
 #ifdef MONO_HAVE_FAST_TLS
-	if (!MONO_FAST_TLS_GET (mono_lmf_addr)) {
+	if (!mono_tls_get (MONO_TLS_LMF_KEY)) {
 		mono_thread_attach (domain);
 		// #678164
 		mono_thread_set_state (mono_thread_internal_current (), ThreadState_Background);
 	}
 #else
-	if (!mono_native_tls_get_value (mono_jit_tls_id)) {
+	if (!mono_tls_get (MONO_TLS_JIT_TLS_KEY)) {
 		mono_thread_attach (domain);
 		mono_thread_set_state (mono_thread_internal_current (), ThreadState_Background);
 	}
@@ -2716,7 +2659,7 @@ mono_jit_set_domain (MonoDomain *domain)
 static void
 mono_thread_abort (MonoObject *obj)
 {
-	/* MonoJitTlsData *jit_tls = mono_native_tls_get_value (mono_jit_tls_id); */
+	/* MonoJitTlsData *jit_tls = mono_tls_get (MONO_TLS_JIT_TLS_KEY); */
 	
 	/* handle_remove should be eventually called for this thread, too
 	g_free (jit_tls);*/
@@ -2735,7 +2678,7 @@ setup_jit_tls_data (gpointer stack_start, gpointer abort_func)
 	MonoJitTlsData *jit_tls;
 	MonoLMF *lmf;
 
-	jit_tls = mono_native_tls_get_value (mono_jit_tls_id);
+	jit_tls = mono_tls_get (MONO_TLS_JIT_TLS_KEY);
 	if (jit_tls)
 		return jit_tls;
 
@@ -2753,8 +2696,8 @@ setup_jit_tls_data (gpointer stack_start, gpointer abort_func)
 
 #if defined(MONO_HAVE_FAST_TLS) && defined(MONO_ARCH_ENABLE_MONO_LMF_VAR)
 	/* jit_tls->lmf is unused */
-	MONO_FAST_TLS_SET (mono_lmf, lmf);
-	mono_set_lmf_addr (MONO_FAST_TLS_ADDR (mono_lmf));
+	mono_tls_set (MONO_TLS_LMF_KEY, lmf);
+	mono_set_lmf_addr (mono_tls_get_address (MONO_TLS_LMF_KEY));
 #else
 	mono_set_lmf_addr (&jit_tls->lmf);
 
@@ -2855,16 +2798,16 @@ mini_get_tls_offset (MonoJitTlsKey key)
 
 	switch (key) {
 	case TLS_KEY_THREAD:
-		offset = mono_thread_get_tls_offset ();
+		offset = MONO_TLS_THREAD_KEY;
 		break;
 	case TLS_KEY_JIT_TLS:
-		offset = mono_get_jit_tls_offset ();
+		offset = MONO_TLS_JIT_TLS_KEY;
 		break;
 	case TLS_KEY_DOMAIN:
-		offset = mono_domain_get_tls_offset ();
+		offset = MONO_TLS_APPDOMAIN_KEY;
 		break;
 	case TLS_KEY_LMF:
-		offset = mono_get_lmf_tls_offset ();
+		offset = MONO_TLS_LMF_KEY;
 		break;
 	default:
 		g_assert_not_reached ();
@@ -3503,7 +3446,8 @@ mono_resolve_patch_target (MonoMethod *method, MonoDomain *domain, guint8 *code,
 		break;
 	}
 	case MONO_PATCH_INFO_JIT_TLS_ID: {
-		target = (gpointer) (size_t) mono_jit_tls_id;
+		g_error ("FIXME");
+		// target = (gpointer) (size_t) mono_jit_tls_id;
 		break;
 	}
 	case MONO_PATCH_INFO_TLS_OFFSET:
@@ -6492,7 +6436,7 @@ void
 SIG_HANDLER_SIGNATURE (mono_sigsegv_signal_handler)
 {
 	MonoJitInfo *ji;
-	MonoJitTlsData *jit_tls = mono_native_tls_get_value (mono_jit_tls_id);
+	MonoJitTlsData *jit_tls = mono_tls_get (MONO_TLS_JIT_TLS_KEY);
 	gpointer fault_addr = NULL;
 
 	GET_CONTEXT;
@@ -6891,14 +6835,7 @@ mini_init (const char *filename, const char *runtime_version)
 		mini_debugger_init ();
 #endif
 
-#ifdef MONO_HAVE_FAST_TLS
-	MONO_FAST_TLS_INIT (mono_jit_tls);
-	MONO_FAST_TLS_INIT (mono_lmf_addr);
-#ifdef MONO_ARCH_ENABLE_MONO_LMF_VAR
-	MONO_FAST_TLS_INIT (mono_lmf);
-#endif
-#endif
-
+	mono_tls_init ();
 	mono_runtime_set_has_tls_get (MONO_ARCH_HAVE_TLS_GET);
 
 	if (!global_codeman)
@@ -6968,8 +6905,6 @@ mini_init (const char *filename, const char *runtime_version)
 
 	if (!g_thread_supported ())
 		g_thread_init (NULL);
-
-	mono_native_tls_alloc (&mono_jit_tls_id, NULL);
 
 	if (default_opt & MONO_OPT_AOT)
 		mono_aot_init ();
@@ -7393,7 +7328,7 @@ mini_cleanup (MonoDomain *domain)
 	mono_runtime_cleanup (domain);
 #endif
 
-	free_jit_tls_data (mono_native_tls_get_value (mono_jit_tls_id));
+	free_jit_tls_data (mono_tls_get (MONO_TLS_JIT_TLS_KEY));
 
 	mono_icall_cleanup ();
 
@@ -7433,8 +7368,6 @@ mini_cleanup (MonoDomain *domain)
 
 	if (mono_inject_async_exc_method)
 		mono_method_desc_free (mono_inject_async_exc_method);
-
-	mono_native_tls_free (mono_jit_tls_id);
 
 	DeleteCriticalSection (&jit_mutex);
 

@@ -1713,18 +1713,6 @@ mono_gc_get_nursery (int *shift_bits, size_t *size)
 	return sgen_get_nursery_start ();
 }
 
-void
-mono_gc_set_current_thread_appdomain (MonoDomain *domain)
-{
-	SgenThreadInfo *info = mono_thread_info_current ();
-
-	/* Could be called from sgen_thread_unregister () with a NULL info */
-	if (domain) {
-		g_assert (info);
-		info->stopped_domain = domain;
-	}
-}
-
 gboolean
 mono_gc_precise_stack_mark_enabled (void)
 {
@@ -4035,7 +4023,8 @@ sgen_thread_register (SgenThreadInfo* info, void *addr)
 {
 	LOCK_GC;
 #ifndef HAVE_KW_THREAD
-	info->tlab_start = info->tlab_next = info->tlab_temp_end = info->tlab_real_end = NULL;
+	info->tlab_start = info->tlab_next = info->tlab_real_end = NULL;
+	mono_tls_set (MONO_TLS_SGEN_TLAB_TEMP_END_KEY, NULL);
 
 	g_assert (!mono_native_tls_get_value (thread_info_key));
 	mono_native_tls_set_value (thread_info_key, info);

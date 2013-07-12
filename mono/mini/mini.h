@@ -503,7 +503,6 @@ typedef struct MonoLMF MonoLMF;
 typedef struct MonoSpillInfo MonoSpillInfo;
 typedef struct MonoTraceSpec MonoTraceSpec;
 
-extern MonoNativeTlsKey mono_jit_tls_id;
 extern MonoTraceSpec *mono_jit_trace_calls;
 extern gboolean mono_break_on_exc;
 extern int mono_exc_esp_offset;
@@ -1010,7 +1009,7 @@ typedef struct {
 	gpointer          end_of_stack;
 	guint32           stack_size;
 #if !defined(HAVE_KW_THREAD) || !defined(MONO_ARCH_ENABLE_MONO_LMF_VAR)
-	MonoLMF          *lmf;
+       MonoLMF          *lmf;
 #endif
 	MonoLMF          *first_lmf;
 	gpointer         restore_stack_prot;
@@ -1961,10 +1960,6 @@ MonoLMF** mono_get_lmf_addr                 (void) MONO_INTERNAL;
 void      mono_set_lmf                      (MonoLMF *lmf) MONO_INTERNAL;
 MonoDomain *mono_jit_thread_attach          (MonoDomain *domain);
 void      mono_jit_set_domain               (MonoDomain *domain);
-MonoNativeTlsKey mono_get_jit_tls_key       (void) MONO_INTERNAL;
-gint32    mono_get_jit_tls_offset           (void) MONO_INTERNAL;
-gint32    mono_get_lmf_tls_offset           (void) MONO_INTERNAL;
-gint32    mono_get_lmf_addr_tls_offset      (void) MONO_INTERNAL;
 int       mini_get_tls_offset               (MonoJitTlsKey key) MONO_INTERNAL;
 MonoInst* mono_get_jit_tls_intrinsic        (MonoCompile *cfg) MONO_INTERNAL;
 MonoInst* mono_get_domain_intrinsic         (MonoCompile* cfg) MONO_INTERNAL;

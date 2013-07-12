@@ -82,9 +82,6 @@ mono_arch_nacl_skip_nops (guint8 *code)
 void sys_icache_invalidate (void *start, size_t len);
 #endif
 
-static gint lmf_tls_offset = -1;
-static gint lmf_addr_tls_offset = -1;
-
 /* This mutex protects architecture specific caches */
 #define mono_mini_arch_lock() EnterCriticalSection (&mini_arch_mutex)
 #define mono_mini_arch_unlock() LeaveCriticalSection (&mini_arch_mutex)
@@ -404,16 +401,14 @@ emit_save_lmf (MonoCompile *cfg, guint8 *code, gint32 lmf_offset)
 	int i;
 
 #ifdef HAVE_AEABI_READ_TP
-	gint32 lmf_addr_tls_offset = mono_get_lmf_addr_tls_offset ();
-
-	if (lmf_addr_tls_offset != -1) {
+	if (mono_tls_is_fast_tls_available (MONO_TLS_LMF_ADDR_KEY)) {
 		get_lmf_fast = TRUE;
 
 		mono_add_patch_info (cfg, code - cfg->native_code, MONO_PATCH_INFO_INTERNAL_METHOD,
 							 (gpointer)"__aeabi_read_tp");
 		code = emit_call_seq (cfg, code);
 
-		ARM_LDR_IMM (code, ARMREG_R0, ARMREG_R0, lmf_addr_tls_offset);
+		ARM_LDR_IMM (code, ARMREG_R0, ARMREG_R0, mono_tls_get_fast_tls_offset (MONO_TLS_LMF_ADDR_KEY));
 		get_lmf_fast = TRUE;
 	}
 #endif
@@ -5882,8 +5877,6 @@ mono_arch_emit_exceptions (MonoCompile *cfg)
 void
 mono_arch_finish_init (void)
 {
-	lmf_tls_offset = mono_get_lmf_tls_offset ();
-	lmf_addr_tls_offset = mono_get_lmf_addr_tls_offset ();
 }
 
 void

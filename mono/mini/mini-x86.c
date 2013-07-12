@@ -34,16 +34,13 @@
 #include "ir-emit.h"
 #include "mini-gc.h"
 
-/* On windows, these hold the key returned by TlsAlloc () */
-static gint lmf_tls_offset = -1;
-static gint lmf_addr_tls_offset = -1;
-static gint appdomain_tls_offset = -1;
-
 #ifdef MONO_XEN_OPT
 static gboolean optimize_for_xen = TRUE;
 #else
 #define optimize_for_xen 0
 #endif
+
+static gboolean enable_fast_tls;
 
 #ifdef TARGET_WIN32
 static gboolean is_win32 = TRUE;
@@ -2359,34 +2356,11 @@ emit_move_return_value (MonoCompile *cfg, MonoInst *ins, guint8 *code)
 	return code;
 }
 
-#ifdef __APPLE__
-static int tls_gs_offset;
-#endif
-
 gboolean
 mono_x86_have_tls_get (void)
 {
 #ifdef __APPLE__
-	static gboolean have_tls_get = FALSE;
-	static gboolean inited = FALSE;
-	guint32 *ins;
-
-	if (inited)
-		return have_tls_get;
-
-	ins = (guint32*)pthread_getspecific;
-	/*
-	 * We're looking for these two instructions:
-	 *
-	 * mov    0x4(%esp),%eax
-	 * mov    %gs:[offset](,%eax,4),%eax
-	 */
-	have_tls_get = ins [0] == 0x0424448b && ins [1] == 0x85048b65;
-	tls_gs_offset = ins [2];
-
-	inited = TRUE;
-
-	return have_tls_get;
+	return mono_tls_get_fast_tls_model () != MONO_FAST_TLS_MODEL_NONE;
 #elif defined(TARGET_ANDROID)
 	return FALSE;
 #else
@@ -2395,11 +2369,12 @@ mono_x86_have_tls_get (void)
 }
 
 static guint8*
-mono_x86_emit_tls_set (guint8* code, int sreg, int tls_offset)
+mono_x86_emit_tls_set (guint8* code, int sreg, MonoFastTlsKey tls_key)
 {
+	int tls_offset = mono_tls_get_fast_tls_offset (tls_key);
 #if defined(__APPLE__)
 	x86_prefix (code, X86_GS_PREFIX);
-	x86_mov_mem_reg (code, tls_gs_offset + (tls_offset * 4), sreg, 4);
+	x86_mov_mem_reg (code, tls_offset, sreg, 4);
 #elif defined(TARGET_WIN32)
 	g_assert_not_reached ();
 #else
@@ -2422,16 +2397,19 @@ mono_x86_emit_tls_set (guint8* code, int sreg, int tls_offset)
  * Returns: a pointer to the end of the stored code
  */
 guint8*
-mono_x86_emit_tls_get (guint8* code, int dreg, int tls_offset)
+mono_x86_emit_tls_get (guint8* code, int dreg, MonoFastTlsKey tls_key)
 {
+	int tls_offset = mono_tls_get_fast_tls_offset (tls_key);
 #if defined(__APPLE__)
+	g_assert (mono_tls_get_fast_tls_model () == MONO_FAST_TLS_MODEL_EMULATED);
 	x86_prefix (code, X86_GS_PREFIX);
-	x86_mov_reg_mem (code, dreg, tls_gs_offset + (tls_offset * 4), 4);
+	x86_mov_reg_mem (code, dreg, tls_offset, 4);
 #elif defined(TARGET_WIN32)
 	/* 
 	 * See the Under the Hood article in the May 1996 issue of Microsoft Systems 
 	 * Journal and/or a disassembly of the TlsGet () function.
 	 */
+	g_assert (mono_tls_get_fast_tls_model () == MONO_FAST_TLS_MODEL_NATIVE);
 	g_assert (tls_offset < 64);
 	x86_prefix (code, X86_FS_PREFIX);
 	x86_mov_reg_mem (code, dreg, 0x18, 4);
@@ -2439,6 +2417,7 @@ mono_x86_emit_tls_get (guint8* code, int dreg, int tls_offset)
 	x86_alu_membase_imm (code, X86_AND, dreg, 0x34, 0);
 	x86_mov_reg_membase (code, dreg, dreg, 3600 + (tls_offset * 4), 4);
 #else
+	g_assert (mono_tls_get_fast_tls_model () == MONO_FAST_TLS_MODEL_NATIVE);
 	if (optimize_for_xen) {
 		x86_prefix (code, X86_GS_PREFIX);
 		x86_mov_reg_mem (code, dreg, 0, 4);
@@ -2450,6 +2429,7 @@ mono_x86_emit_tls_get (guint8* code, int dreg, int tls_offset)
 #endif
 	return code;
 }
+
 
 /*
  * emit_load_volatile_arguments:
@@ -4207,8 +4187,8 @@ mono_arch_output_basic_block (MonoCompile *cfg, MonoBasicBlock *bb)
 			if (ins->dreg != ins->sreg1)
 				x86_mov_reg_reg (code, ins->dreg, ins->sreg1, sizeof (gpointer));
 			x86_shift_reg_imm (code, X86_SHL, ins->dreg, 2);
-			if (tls_gs_offset)
-				x86_alu_reg_imm (code, X86_ADD, ins->dreg, tls_gs_offset);
+			if (mono_mach_get_local_tls_offset ())
+				x86_alu_reg_imm (code, X86_ADD, ins->dreg, mono_mach_get_local_tls_offset ());
 			x86_prefix (code, X86_GS_PREFIX);
 			x86_mov_reg_membase (code, ins->dreg, ins->dreg, 0, sizeof (gpointer));
 #else
@@ -5240,13 +5220,13 @@ mono_arch_emit_prolog (MonoCompile *cfg)
 		mono_emit_unwind_op_offset (cfg, code, X86_EBX, - cfa_offset);
 		mini_gc_set_slot_type_from_cfa (cfg, -cfa_offset, SLOT_NOREF);
 
-		if ((lmf_tls_offset != -1) && !is_win32 && !optimize_for_xen) {
+		if (enable_fast_tls && mono_tls_is_fast_tls_available (MONO_TLS_LMF_KEY) && !is_win32 && !optimize_for_xen) {
 			/*
 			 * Optimized version which uses the mono_lmf TLS variable instead of indirection
 			 * through the mono_lmf_addr TLS variable.
 			 */
 			/* %eax = previous_lmf */
-			code = mono_x86_emit_tls_get (code, X86_EAX, lmf_tls_offset);
+			code = mono_x86_emit_tls_get (code, X86_EAX, MONO_TLS_LMF_KEY);
 			/* skip esp + method_info + lmf */
 			x86_alu_reg_imm (code, X86_SUB, X86_ESP, 12);
 			cfa_offset += 12;
@@ -5258,7 +5238,7 @@ mono_arch_emit_prolog (MonoCompile *cfg)
 			cfa_offset += 4;
 			mini_gc_set_slot_type_from_cfa (cfg, -cfa_offset, SLOT_NOREF);
 			/* new lmf = ESP */
-			code = mono_x86_emit_tls_set (code, X86_ESP, lmf_tls_offset);
+			code = mono_x86_emit_tls_set (code, X86_ESP, MONO_TLS_LMF_KEY);
 		} else {
 			/* get the address of lmf for the current thread */
 			/* 
@@ -5266,9 +5246,9 @@ mono_arch_emit_prolog (MonoCompile *cfg)
 			 * it fast.
 			 */									   
 
-			if (lmf_addr_tls_offset != -1) {
+			if (enable_fast_tls && mono_tls_is_fast_tls_available (MONO_TLS_LMF_ADDR_KEY)) {
 				/* Load lmf quicky using the GS register */
-				code = mono_x86_emit_tls_get (code, X86_EAX, lmf_addr_tls_offset);
+				code = mono_x86_emit_tls_get (code, X86_EAX, MONO_TLS_LMF_ADDR_KEY);
 #ifdef TARGET_WIN32
 				/* The TLS key actually contains a pointer to the MonoJitTlsData structure */
 				/* FIXME: Add a separate key for LMF to avoid this */
@@ -5498,9 +5478,9 @@ mono_arch_emit_epilog (MonoCompile *cfg)
 		gint32 lmf_offset = -sizeof (MonoLMF);
 
 		/* check if we need to restore protection of the stack after a stack overflow */
-		if (mono_get_jit_tls_offset () != -1) {
+		if (mono_tls_is_fast_tls_available (MONO_TLS_JIT_TLS_KEY)) {
 			guint8 *patch;
-			code = mono_x86_emit_tls_get (code, X86_ECX, mono_get_jit_tls_offset ());
+			code = mono_x86_emit_tls_get (code, X86_ECX, MONO_TLS_JIT_TLS_KEY);
 			/* we load the value in a separate instruction: this mechanism may be
 			 * used later as a safer way to do thread interruption
 			 */
@@ -5514,7 +5494,7 @@ mono_arch_emit_epilog (MonoCompile *cfg)
 		} else {
 			/* FIXME: maybe save the jit tls in the prolog */
 		}
-		if ((lmf_tls_offset != -1) && !is_win32 && !optimize_for_xen) {
+		if (enable_fast_tls && mono_tls_is_fast_tls_available (MONO_TLS_LMF_KEY) && !is_win32 && !optimize_for_xen) {
 			/*
 			 * Optimized version which uses the mono_lmf TLS variable instead of indirection
 			 * through the mono_lmf_addr TLS variable.
@@ -5523,7 +5503,7 @@ mono_arch_emit_epilog (MonoCompile *cfg)
 			x86_mov_reg_membase (code, X86_ECX, X86_EBP, lmf_offset + G_STRUCT_OFFSET (MonoLMF, previous_lmf), 4);
 
 			/* lmf = previous_lmf */
-			code = mono_x86_emit_tls_set (code, X86_ECX, lmf_tls_offset);
+			code = mono_x86_emit_tls_set (code, X86_ECX, MONO_TLS_LMF_KEY);
 		} else {
 			/* Find a spare register */
 			switch (mini_type_get_underlying_type (cfg->generic_sharing_context, sig->ret)->type) {
@@ -5766,26 +5746,9 @@ void
 mono_arch_finish_init (void)
 {
 	if (!getenv ("MONO_NO_TLS")) {
-#ifdef TARGET_WIN32
-		/* 
-		 * We need to init this multiple times, since when we are first called, the key might not
-		 * be initialized yet.
-		 */
-		appdomain_tls_offset = mono_domain_get_tls_key ();
-		lmf_tls_offset = mono_get_jit_tls_key ();
-
-		/* Only 64 tls entries can be accessed using inline code */
-		if (appdomain_tls_offset >= 64)
-			appdomain_tls_offset = -1;
-		if (lmf_tls_offset >= 64)
-			lmf_tls_offset = -1;
-#else
-#if MONO_XEN_OPT
+		enable_fast_tls = TRUE;
+#if !defined (TARGET_WIN32) && defined (MONO_XEN_OPT)
 		optimize_for_xen = access ("/proc/xen", F_OK) == 0;
-#endif
-		appdomain_tls_offset = mono_domain_get_tls_offset ();
-		lmf_tls_offset = mono_get_lmf_tls_offset ();
-		lmf_addr_tls_offset = mono_get_lmf_addr_tls_offset ();
 #endif
 	}		
 }
@@ -6061,11 +6024,11 @@ MonoInst* mono_arch_get_domain_intrinsic (MonoCompile* cfg)
 
 	return NULL;
 
-	if (appdomain_tls_offset == -1)
+	if (!enable_fast_tls || !mono_tls_is_fast_tls_available (MONO_TLS_APPDOMAIN_KEY))
 		return NULL;
 
 	MONO_INST_NEW (cfg, ins, OP_TLS_GET);
-	ins->inst_offset = appdomain_tls_offset;
+	ins->inst_offset = MONO_TLS_APPDOMAIN_KEY;
 	return ins;
 }
 

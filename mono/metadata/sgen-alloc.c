@@ -64,6 +64,13 @@ enum {
 
 #undef OPDEF
 
+#define EMIT_TLS_ACCESS(mb,tls_key)	do {	\
+	mono_mb_emit_byte ((mb), MONO_CUSTOM_PREFIX);	\
+	mono_mb_emit_byte ((mb), CEE_MONO_TLS);		\
+	mono_mb_emit_i4 ((mb), (tls_key));		\
+	} while (0)
+
+
 static gboolean use_managed_allocator = TRUE;
 
 #ifdef HEAVY_STATISTICS
@@ -90,23 +97,21 @@ static long long stat_bytes_alloced_los = 0;
 #ifdef HAVE_KW_THREAD
 static __thread char *tlab_start;
 static __thread char *tlab_next;
-static __thread char *tlab_temp_end;
 static __thread char *tlab_real_end;
-/* Used by the managed allocator/wbarrier */
-static __thread char **tlab_next_addr;
 #endif
 
 #ifdef HAVE_KW_THREAD
 #define TLAB_START	tlab_start
 #define TLAB_NEXT	tlab_next
-#define TLAB_TEMP_END	tlab_temp_end
 #define TLAB_REAL_END	tlab_real_end
 #else
 #define TLAB_START	(__thread_info__->tlab_start)
 #define TLAB_NEXT	(__thread_info__->tlab_next)
-#define TLAB_TEMP_END	(__thread_info__->tlab_temp_end)
 #define TLAB_REAL_END	(__thread_info__->tlab_real_end)
 #endif
+
+#define TLAB_TEMP_END_GET() ((char*)mono_tls_get (MONO_TLS_SGEN_TLAB_TEMP_END_KEY))
+#define TLAB_TEMP_END_SET(value) mono_tls_set (MONO_TLS_SGEN_TLAB_TEMP_END_KEY, (void*)(value))
 
 static void*
 alloc_degraded (MonoVTable *vtable, size_t size, gboolean for_mature)
@@ -210,7 +215,7 @@ mono_gc_alloc_obj_nolock (MonoVTable *vtable, size_t size)
 		new_next = (char*)p + size;
 		TLAB_NEXT = new_next;
 
-		if (G_LIKELY (new_next < TLAB_TEMP_END)) {
+		if (G_LIKELY (new_next < TLAB_TEMP_END_GET ())) {
 			/* Fast path */
 
 			/* 
@@ -302,7 +307,7 @@ mono_gc_alloc_obj_nolock (MonoVTable *vtable, size_t size)
 				TLAB_START = (char*)p;
 				TLAB_NEXT = TLAB_START;
 				TLAB_REAL_END = TLAB_START + alloc_size;
-				TLAB_TEMP_END = TLAB_START + MIN (SGEN_SCAN_START_SIZE, alloc_size);
+				TLAB_TEMP_END_SET (TLAB_START + MIN (SGEN_SCAN_START_SIZE, alloc_size));
 
 				if (nursery_clear_policy == CLEAR_AT_TLAB_CREATION) {
 					memset (TLAB_START, 0, alloc_size);
@@ -319,8 +324,8 @@ mono_gc_alloc_obj_nolock (MonoVTable *vtable, size_t size)
 			/* record the scan start so we can find pinned objects more easily */
 			sgen_set_nursery_scan_start ((char*)p);
 			/* we just bump tlab_temp_end as well */
-			TLAB_TEMP_END = MIN (TLAB_REAL_END, TLAB_NEXT + SGEN_SCAN_START_SIZE);
-			SGEN_LOG (5, "Expanding local alloc: %p-%p", TLAB_NEXT, TLAB_TEMP_END);
+			TLAB_TEMP_END_SET (MIN (TLAB_REAL_END, TLAB_NEXT + SGEN_SCAN_START_SIZE));
+			SGEN_LOG (5, "Expanding local alloc: %p-%p", TLAB_NEXT, TLAB_TEMP_END_GET ());
 		}
 	}
 
@@ -378,11 +383,11 @@ mono_gc_try_alloc_obj_nolock (MonoVTable *vtable, size_t size)
 			TLAB_NEXT = new_next;
 
 			/* Second case, we overflowed temp end */
-			if (G_UNLIKELY (new_next >= TLAB_TEMP_END)) {
+			if (G_UNLIKELY (new_next >= TLAB_TEMP_END_GET ())) {
 				sgen_set_nursery_scan_start (new_next);
 				/* we just bump tlab_temp_end as well */
-				TLAB_TEMP_END = MIN (TLAB_REAL_END, TLAB_NEXT + SGEN_SCAN_START_SIZE);
-				SGEN_LOG (5, "Expanding local alloc: %p-%p", TLAB_NEXT, TLAB_TEMP_END);
+				TLAB_TEMP_END_SET (MIN (TLAB_REAL_END, TLAB_NEXT + SGEN_SCAN_START_SIZE));
+				SGEN_LOG (5, "Expanding local alloc: %p-%p", TLAB_NEXT, TLAB_TEMP_END_GET ());
 			}
 		} else if (available_in_tlab > SGEN_MAX_NURSERY_WASTE) {
 			/* Allocate directly from the nursery */
@@ -404,7 +409,7 @@ mono_gc_try_alloc_obj_nolock (MonoVTable *vtable, size_t size)
 			TLAB_START = (char*)new_next;
 			TLAB_NEXT = new_next + size;
 			TLAB_REAL_END = new_next + alloc_size;
-			TLAB_TEMP_END = new_next + MIN (SGEN_SCAN_START_SIZE, alloc_size);
+			TLAB_TEMP_END_SET (new_next + MIN (SGEN_SCAN_START_SIZE, alloc_size));
 			sgen_set_nursery_scan_start ((char*)p);
 
 			if (nursery_clear_policy == CLEAR_AT_TLAB_CREATION)
@@ -627,13 +632,8 @@ sgen_init_tlab_info (SgenThreadInfo* info)
 #endif
 
 	info->tlab_start_addr = &TLAB_START;
-	info->tlab_next_addr = &TLAB_NEXT;
-	info->tlab_temp_end_addr = &TLAB_TEMP_END;
+	mono_tls_set (MONO_TLS_SGEN_TLAB_NEXT_ADDR_KEY, &TLAB_NEXT);
 	info->tlab_real_end_addr = &TLAB_REAL_END;
-
-#ifdef HAVE_KW_THREAD
-	tlab_next_addr = &tlab_next;
-#endif
 }
 
 /*
@@ -647,8 +647,8 @@ sgen_clear_tlabs (void)
 	FOREACH_THREAD (info) {
 		/* A new TLAB will be allocated when the thread does its first allocation */
 		*info->tlab_start_addr = NULL;
-		*info->tlab_next_addr = NULL;
-		*info->tlab_temp_end_addr = NULL;
+		*(void**)mono_thread_get_tls_slot (info, MONO_TLS_SGEN_TLAB_NEXT_ADDR_KEY) = NULL;
+		mono_thread_set_tls_slot (info, MONO_TLS_SGEN_TLAB_TEMP_END_KEY, NULL);
 		*info->tlab_real_end_addr = NULL;
 	} END_FOREACH_THREAD
 }
@@ -678,16 +678,6 @@ create_allocator (int atype)
 	const char *name = NULL;
 	AllocatorWrapperInfo *info;
 
-#ifdef HAVE_KW_THREAD
-	int tlab_next_addr_offset = -1;
-	int tlab_temp_end_offset = -1;
-
-	MONO_THREAD_VAR_OFFSET (tlab_next_addr, tlab_next_addr_offset);
-	MONO_THREAD_VAR_OFFSET (tlab_temp_end, tlab_temp_end_offset);
-
-	g_assert (tlab_next_addr_offset != -1);
-	g_assert (tlab_temp_end_offset != -1);
-#endif
 
 	if (!registered) {
 		mono_register_jit_icall (mono_gc_alloc_obj, "mono_gc_alloc_obj", mono_create_icall_signature ("object ptr int"), FALSE);
@@ -832,7 +822,7 @@ create_allocator (int atype)
 
 	/* tlab_next_addr (local) = tlab_next_addr (TLS var) */
 	tlab_next_addr_var = mono_mb_add_local (mb, &mono_defaults.int_class->byval_arg);
-	EMIT_TLS_ACCESS (mb, tlab_next_addr, tlab_next_addr_offset);
+	EMIT_TLS_ACCESS (mb, MONO_TLS_SGEN_TLAB_NEXT_ADDR_KEY);
 	mono_mb_emit_stloc (mb, tlab_next_addr_var);
 
 	/* p = (void**)tlab_next; */
@@ -851,7 +841,7 @@ create_allocator (int atype)
 
 	/* if (G_LIKELY (new_next < tlab_temp_end)) */
 	mono_mb_emit_ldloc (mb, new_next_var);
-	EMIT_TLS_ACCESS (mb, tlab_temp_end, tlab_temp_end_offset);
+	EMIT_TLS_ACCESS (mb, MONO_TLS_SGEN_TLAB_TEMP_END_KEY);
 	slowpath_branch = mono_mb_emit_short_branch (mb, MONO_CEE_BLT_UN_S);
 
 	/* Slowpath */
@@ -958,15 +948,8 @@ mono_gc_get_managed_allocator (MonoClass *klass, gboolean for_box)
 {
 #ifdef MANAGED_ALLOCATION
 
-#ifdef HAVE_KW_THREAD
-	int tlab_next_offset = -1;
-	int tlab_temp_end_offset = -1;
-	MONO_THREAD_VAR_OFFSET (tlab_next, tlab_next_offset);
-	MONO_THREAD_VAR_OFFSET (tlab_temp_end, tlab_temp_end_offset);
-
-	if (tlab_next_offset == -1 || tlab_temp_end_offset == -1)
+	if (!mono_tls_is_fast_tls_available (MONO_TLS_SGEN_TLAB_NEXT_ADDR_KEY) || !mono_tls_is_fast_tls_available (MONO_TLS_SGEN_TLAB_TEMP_END_KEY))
 		return NULL;
-#endif
 
 	if (!mono_runtime_has_tls_get ())
 		return NULL;
@@ -995,15 +978,9 @@ MonoMethod*
 mono_gc_get_managed_array_allocator (MonoClass *klass)
 {
 #ifdef MANAGED_ALLOCATION
-#ifdef HAVE_KW_THREAD
-	int tlab_next_offset = -1;
-	int tlab_temp_end_offset = -1;
-	MONO_THREAD_VAR_OFFSET (tlab_next, tlab_next_offset);
-	MONO_THREAD_VAR_OFFSET (tlab_temp_end, tlab_temp_end_offset);
 
-	if (tlab_next_offset == -1 || tlab_temp_end_offset == -1)
+	if (!mono_tls_is_fast_tls_available (MONO_TLS_SGEN_TLAB_NEXT_ADDR_KEY) || !mono_tls_is_fast_tls_available (MONO_TLS_SGEN_TLAB_TEMP_END_KEY))
 		return NULL;
-#endif
 
 	if (klass->rank != 1)
 		return NULL;

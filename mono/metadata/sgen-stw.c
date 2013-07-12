@@ -160,6 +160,7 @@ restart_threads_until_none_in_managed_allocator (void)
 			result = sgen_suspend_thread (info);
 
 			if (result) {
+				info->stopped_domain = (MonoDomain*)mono_thread_get_tls_slot (info, MONO_TLS_APPDOMAIN_KEY);
 				++restarted_count;
 			} else {
 				info->skip = 1;

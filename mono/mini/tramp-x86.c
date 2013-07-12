@@ -21,6 +21,7 @@
 #include <mono/arch/x86/x86-codegen.h>
 
 #include <mono/utils/memcheck.h>
+#include <mono/utils/mono-tls.h>
 
 #include "mini.h"
 #include "mini-x86.h"
@@ -832,7 +833,7 @@ mono_arch_create_monitor_enter_trampoline (MonoTrampInfo **info, gboolean aot)
 
 	code = buf = mono_global_codeman_reserve (tramp_size);
 
-	if (mono_thread_get_tls_offset () != -1) {
+	if (mono_tls_is_fast_tls_available (MONO_TLS_THREAD_KEY)) {
 		/* MonoObject* obj is in EAX */
 		/* is obj null? */
 		x86_test_reg_reg (code, X86_EAX, X86_EAX);
@@ -862,7 +863,7 @@ mono_arch_create_monitor_enter_trampoline (MonoTrampInfo **info, gboolean aot)
 		x86_branch8 (code, X86_CC_Z, -1, 1);
 
 		/* load MonoInternalThread* into EDX */
-		code = mono_x86_emit_tls_get (code, X86_EDX, mono_thread_get_tls_offset ());
+		code = mono_x86_emit_tls_get (code, X86_EDX, MONO_TLS_THREAD_KEY);
 		/* load TID into EDX */
 		x86_mov_reg_membase (code, X86_EDX, X86_EDX, G_STRUCT_OFFSET (MonoInternalThread, tid), 4);
 
@@ -965,7 +966,7 @@ mono_arch_create_monitor_exit_trampoline (MonoTrampInfo **info, gboolean aot)
 
 	code = buf = mono_global_codeman_reserve (tramp_size);
 
-	if (mono_thread_get_tls_offset () != -1) {
+	if (mono_tls_is_fast_tls_available (MONO_TLS_THREAD_KEY) != -1) {
 		/* MonoObject* obj is in EAX */
 		/* is obj null? */
 		x86_test_reg_reg (code, X86_EAX, X86_EAX);
@@ -995,7 +996,7 @@ mono_arch_create_monitor_exit_trampoline (MonoTrampInfo **info, gboolean aot)
 
 		/* next case: synchronization is not null */
 		/* load MonoInternalThread* into EDX */
-		code = mono_x86_emit_tls_get (code, X86_EDX, mono_thread_get_tls_offset ());
+		code = mono_x86_emit_tls_get (code, X86_EDX, MONO_TLS_THREAD_KEY);
 		/* load TID into EDX */
 		x86_mov_reg_membase (code, X86_EDX, X86_EDX, G_STRUCT_OFFSET (MonoInternalThread, tid), 4);
 		/* is synchronization->owner == TID */
@@ -1085,7 +1086,7 @@ mono_arch_invalidate_method (MonoJitInfo *ji, void *func, gpointer func_arg)
 static void
 handler_block_trampoline_helper (gpointer *ptr)
 {
-	MonoJitTlsData *jit_tls = mono_native_tls_get_value (mono_jit_tls_id);
+	MonoJitTlsData *jit_tls = mono_tls_get (MONO_TLS_JIT_TLS_KEY);
 	*ptr = jit_tls->handler_block_return_address;
 }
 
@@ -1101,8 +1102,8 @@ mono_arch_create_handler_block_trampoline (void)
 	This trampoline restore the call chain of the handler block then jumps into the code that deals with it.
 	*/
 
-	if (mono_get_jit_tls_offset () != -1) {
-		code = mono_x86_emit_tls_get (code, X86_EAX, mono_get_jit_tls_offset ());
+	if (mono_tls_is_fast_tls_available (MONO_TLS_JIT_TLS_KEY)) {
+		code = mono_x86_emit_tls_get (code, X86_EAX, MONO_TLS_JIT_TLS_KEY);
 		x86_mov_reg_membase (code, X86_EAX, X86_EAX, G_STRUCT_OFFSET (MonoJitTlsData, handler_block_return_address), 4);
 		/*simulate a call*/
 		/*Fix stack alignment*/

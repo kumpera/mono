@@ -515,7 +515,7 @@ mono_arch_monoctx_to_sigctx (MonoContext *mctx, void *ctx)
 static void
 handle_signal_exception (gpointer obj)
 {
-	MonoJitTlsData *jit_tls = mono_native_tls_get_value (mono_jit_tls_id);
+	MonoJitTlsData *jit_tls = mono_tls_get (MONO_TLS_JIT_TLS_KEY);
 	MonoContext ctx;
 	static void (*restore_context) (MonoContext *);
 
@@ -557,7 +557,7 @@ mono_arch_handle_exception (void *ctx, gpointer obj)
 	 * signal is disabled, and we could run arbitrary code though the debugger. So
 	 * resume into the normal stack and do most work there if possible.
 	 */
-	MonoJitTlsData *jit_tls = mono_native_tls_get_value (mono_jit_tls_id);
+	MonoJitTlsData *jit_tls = mono_tls_get (MONO_TLS_JIT_TLS_KEY);
 	guint64 sp = UCONTEXT_REG_SP (sigctx);
 
 	/* Pass the ctx parameter in TLS */

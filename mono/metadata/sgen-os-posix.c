@@ -59,7 +59,6 @@ suspend_thread (SgenThreadInfo *info, void *context)
 
 	g_assert (info->doing_handshake);
 
-	info->stopped_domain = mono_domain_get ();
 	info->stopped_ip = context ? (gpointer) ARCH_SIGCTX_IP (context) : NULL;
 	stop_count = sgen_global_stop_count;
 	/* duplicate signal */

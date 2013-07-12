@@ -135,5 +135,4 @@ mono_runtime_init_tls (void)
 {
 	mono_marshal_init_tls ();
 	mono_thread_pool_init_tls ();
-	mono_thread_init_tls ();
 }

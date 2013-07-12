@@ -1000,7 +1000,7 @@ mono_arch_create_monitor_enter_trampoline (MonoTrampInfo **info, gboolean aot)
 
 	unwind_ops = mono_arch_get_cie_program ();
 
-	if (mono_thread_get_tls_offset () != -1) {
+	if (mono_tls_is_fast_tls_available (MONO_TLS_THREAD_KEY)) {
 		/* MonoObject* obj is in RDI */
 		/* is obj null? */
 		amd64_test_reg_reg (code, AMD64_RDI, AMD64_RDI);
@@ -1029,7 +1029,7 @@ mono_arch_create_monitor_enter_trampoline (MonoTrampInfo **info, gboolean aot)
 		amd64_branch8 (code, X86_CC_Z, -1, 1);
 
 		/* load MonoInternalThread* into RDX */
-		code = mono_amd64_emit_tls_get (code, AMD64_RDX, mono_thread_get_tls_offset ());
+		code = mono_amd64_emit_tls_get (code, AMD64_RDX, MONO_TLS_THREAD_KEY);
 		/* load TID into RDX */
 		amd64_mov_reg_membase (code, AMD64_RDX, AMD64_RDX, G_STRUCT_OFFSET (MonoInternalThread, tid), 8);
 
@@ -1125,7 +1125,7 @@ mono_arch_create_monitor_exit_trampoline (MonoTrampInfo **info, gboolean aot)
 
 	unwind_ops = mono_arch_get_cie_program ();
 
-	if (mono_thread_get_tls_offset () != -1) {
+	if (mono_tls_is_fast_tls_available (MONO_TLS_THREAD_KEY)) {
 		/* MonoObject* obj is in RDI */
 		/* is obj null? */
 		amd64_test_reg_reg (code, AMD64_RDI, AMD64_RDI);
@@ -1155,7 +1155,7 @@ mono_arch_create_monitor_exit_trampoline (MonoTrampInfo **info, gboolean aot)
 
 		/* next case: synchronization is not null */
 		/* load MonoInternalThread* into RDX */
-		code = mono_amd64_emit_tls_get (code, AMD64_RDX, mono_thread_get_tls_offset ());
+		code = mono_amd64_emit_tls_get (code, AMD64_RDX, MONO_TLS_THREAD_KEY);
 		/* load TID into RDX */
 		amd64_mov_reg_membase (code, AMD64_RDX, AMD64_RDX, G_STRUCT_OFFSET (MonoInternalThread, tid), 8);
 		/* is synchronization->owner == TID */
@@ -1233,7 +1233,7 @@ mono_arch_invalidate_method (MonoJitInfo *ji, void *func, gpointer func_arg)
 static void
 handler_block_trampoline_helper (gpointer *ptr)
 {
-	MonoJitTlsData *jit_tls = mono_native_tls_get_value (mono_jit_tls_id);
+	MonoJitTlsData *jit_tls = mono_tls_get (MONO_TLS_JIT_TLS_KEY);
 	*ptr = jit_tls->handler_block_return_address;
 }
 
@@ -1249,8 +1249,8 @@ mono_arch_create_handler_block_trampoline (void)
 	This trampoline restore the call chain of the handler block then jumps into the code that deals with it.
 	*/
 
-	if (mono_get_jit_tls_offset () != -1) {
-		code = mono_amd64_emit_tls_get (code, AMD64_RDI, mono_get_jit_tls_offset ());
+	if (mono_tls_is_fast_tls_available (MONO_TLS_JIT_TLS_KEY)) {
+		code = mono_amd64_emit_tls_get (code, AMD64_RDI, MONO_TLS_JIT_TLS_KEY);
 		amd64_mov_reg_membase (code, AMD64_RDI, AMD64_RDI, G_STRUCT_OFFSET (MonoJitTlsData, handler_block_return_address), 8);
 		/* Simulate a call */
 		amd64_push_reg (code, AMD64_RAX);

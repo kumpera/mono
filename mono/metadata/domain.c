@@ -22,7 +22,7 @@
 #include <mono/utils/mono-membar.h>
 #include <mono/utils/mono-counters.h>
 #include <mono/utils/hazard-pointer.h>
-#include <mono/utils/mono-tls.h>
+#include <mono/utils/mono-fast-tls.h>
 #include <mono/metadata/object.h>
 #include <mono/metadata/object-internals.h>
 #include <mono/metadata/domain-internals.h>
@@ -49,27 +49,8 @@
  */
 static MonoNativeTlsKey appdomain_thread_id;
 
-#ifdef MONO_HAVE_FAST_TLS
-
-MONO_FAST_TLS_DECLARE(tls_appdomain);
-
-#define GET_APPDOMAIN() ((MonoDomain*)MONO_FAST_TLS_GET(tls_appdomain))
-
-#define SET_APPDOMAIN(x) do { \
-	MONO_FAST_TLS_SET (tls_appdomain,x); \
-	mono_native_tls_set_value (appdomain_thread_id, x); \
-	mono_gc_set_current_thread_appdomain (x); \
-} while (FALSE)
-
-#else /* !MONO_HAVE_FAST_TLS */
-
-#define GET_APPDOMAIN() ((MonoDomain *)mono_native_tls_get_value (appdomain_thread_id))
-#define SET_APPDOMAIN(x) do {						\
-		mono_native_tls_set_value (appdomain_thread_id, x);	\
-		mono_gc_set_current_thread_appdomain (x);		\
-	} while (FALSE)
-
-#endif
+#define GET_APPDOMAIN() ((MonoDomain*)mono_tls_get (MONO_TLS_APPDOMAIN_KEY))
+#define SET_APPDOMAIN(x) mono_tls_set (MONO_TLS_APPDOMAIN_KEY, (x))
 
 #define GET_APPCONTEXT() (mono_thread_internal_current ()->current_appcontext)
 #define SET_APPCONTEXT(x) MONO_OBJECT_SETREF (mono_thread_internal_current (), current_appcontext, (x))
@@ -149,22 +130,6 @@ get_runtime_by_version (const char *version);
 
 static MonoImage*
 mono_jit_info_find_aot_module (guint8* addr);
-
-MonoNativeTlsKey
-mono_domain_get_tls_key (void)
-{
-	return appdomain_thread_id;
-}
-
-gint32
-mono_domain_get_tls_offset (void)
-{
-	int offset = -1;
-	MONO_THREAD_VAR_OFFSET (tls_appdomain, offset);
-/*	__asm ("jmp 1f; .section writetext, \"awx\"; 1: movl $tls_appdomain@ntpoff, %0; jmp 2f; .previous; 2:" 
-		: "=r" (offset));*/
-	return offset;
-}
 
 #define JIT_INFO_TABLE_FILL_RATIO_NOM		3
 #define JIT_INFO_TABLE_FILL_RATIO_DENOM		4
@@ -1290,9 +1255,6 @@ mono_init_internal (const char *filename, const char *exe_filename, const char *
 	mono_counters_register ("Total code space allocated", MONO_COUNTER_INT|MONO_COUNTER_JIT, &total_domain_code_alloc);
 
 	mono_gc_base_init ();
-
-	MONO_FAST_TLS_INIT (tls_appdomain);
-	mono_native_tls_alloc (&appdomain_thread_id, NULL);
 
 	InitializeCriticalSection (&appdomains_mutex);
 

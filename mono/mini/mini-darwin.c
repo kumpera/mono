@@ -50,6 +50,8 @@
 #include <mono/utils/mono-counters.h>
 #include <mono/utils/mono-logger-internal.h>
 #include <mono/utils/mono-mmap.h>
+#include <mono/utils/mono-tls.h>
+#include <mono/utils/mono-threads.h>
 #include <mono/utils/dtrace.h>
 
 #include "mini.h"
@@ -297,12 +299,9 @@ mono_thread_state_init_from_handle (MonoThreadUnwindState *tctx, MonoNativeThrea
 	thread_state_t state;
 	ucontext_t ctx;
 	mcontext_t mctx;
-	guint32 domain_key, jit_key;
 	MonoJitTlsData *jit_tls;
-	void *domain;
-#if defined (MONO_ARCH_ENABLE_MONO_LMF_VAR)
-	guint32 lmf_key;
-#endif
+	void *domain, *lmf;
+	MonoThreadInfo *info;
 
 	/*Zero enough state to make sure the caller doesn't confuse itself*/
 	tctx->valid = FALSE;
@@ -322,19 +321,20 @@ mono_thread_state_init_from_handle (MonoThreadUnwindState *tctx, MonoNativeThrea
 
 	mono_sigctx_to_monoctx (&ctx, &tctx->ctx);
 
-	domain_key = mono_domain_get_tls_key ();
-	jit_key = mono_get_jit_tls_key ();
-
-	jit_tls = mono_mach_arch_get_tls_value_from_thread (thread_id, jit_key);
-	domain = mono_mach_arch_get_tls_value_from_thread (thread_id, domain_key);
+	info = mono_thread_info_lookup (thread_id);
+	if (info) {
+		domain = mono_thread_get_tls_slot (info, MONO_TLS_APPDOMAIN_KEY);
+		jit_tls = mono_thread_get_tls_slot (info, MONO_TLS_JIT_TLS_KEY);
+		lmf = mono_thread_get_tls_slot (info, MONO_TLS_LMF_KEY);
+		mono_hazard_pointer_clear (mono_hazard_pointer_get (), 1);
+	}
 
 	/*Thread already started to cleanup, can no longer capture unwind state*/
 	if (!jit_tls || !domain)
 		return FALSE;
 
 #if defined (MONO_ARCH_ENABLE_MONO_LMF_VAR)
-	lmf_key =  mono_get_lmf_tls_offset ();
-	tctx->unwind_data [MONO_UNWIND_DATA_LMF] = mono_mach_arch_get_tls_value_from_thread (thread_id, lmf_key);;
+	tctx->unwind_data [MONO_UNWIND_DATA_LMF] = lmf;
 #else
 	tctx->unwind_data [MONO_UNWIND_DATA_LMF] = jit_tls ? jit_tls->lmf : NULL;
 #endif

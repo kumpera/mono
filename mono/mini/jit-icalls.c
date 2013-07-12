@@ -1057,7 +1057,7 @@ mono_object_castclass (MonoObject *obj, MonoClass *klass)
 	MonoJitTlsData *jit_tls = NULL;
 
 	if (mini_get_debug_options ()->better_cast_details) {
-		jit_tls = mono_native_tls_get_value (mono_jit_tls_id);
+		jit_tls = mono_tls_get (MONO_TLS_JIT_TLS_KEY);
 		jit_tls->class_cast_from = NULL;
 	}
 
@@ -1085,7 +1085,7 @@ mono_object_castclass_with_cache (MonoObject *obj, MonoClass *klass, gpointer *c
 	gpointer cached_vtable, obj_vtable;
 
 	if (mini_get_debug_options ()->better_cast_details) {
-		jit_tls = mono_native_tls_get_value (mono_jit_tls_id);
+		jit_tls = mono_tls_get (MONO_TLS_JIT_TLS_KEY);
 		jit_tls->class_cast_from = NULL;
 	}
 
