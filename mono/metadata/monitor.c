@@ -897,7 +897,7 @@ mono_monitor_get_fast_enter_method (MonoMethod *monitor_enter_method)
 	/* The !is_v4 version is not used/tested */
 	g_assert (is_v4);
 
-	if (mono_tls_is_fast_tls_available (MONO_TLS_THREAD_KEY))
+	if (!mono_tls_is_fast_tls_available (MONO_TLS_THREAD_KEY))
 		return NULL;
 
 	if (monitor_il_fastpaths [fast_path_idx])
