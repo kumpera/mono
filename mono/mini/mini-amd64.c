@@ -3588,10 +3588,6 @@ emit_move_return_value (MonoCompile *cfg, MonoInst *ins, guint8 *code)
 
 #endif /* DISABLE_JIT */
 
-#ifdef __APPLE__
-static int tls_gs_offset;
-#endif
-
 gboolean
 mono_amd64_have_tls_get (void)
 {
@@ -3602,6 +3598,23 @@ mono_amd64_have_tls_get (void)
 #endif
 }
 
+static guint8*
+mono_amd64_emit_tls_set (guint8* code, int sreg, MonoFastTlsKey tls_key)
+{
+	int tls_offset = mono_tls_get_fast_tls_offset (tls_key);
+#ifdef HOST_WIN32
+	g_assert_not_reached ();
+#elif defined(__APPLE__)
+	g_assert (mono_tls_get_fast_tls_model () == MONO_FAST_TLS_MODEL_EMULATED);
+	x86_prefix (code, X86_GS_PREFIX);
+	amd64_mov_mem_reg (code, tls_offset, sreg, 8);
+#else
+	g_assert (mono_tls_get_fast_tls_model () == MONO_FAST_TLS_MODEL_NATIVE);
+	x86_prefix (code, X86_FS_PREFIX);
+	amd64_mov_mem_reg (code, tls_offset, sreg, 8);
+#endif
+	return code;
+}
 /*
  * mono_amd64_emit_tls_get:
  * @code: buffer to store code to
@@ -3615,7 +3628,7 @@ mono_amd64_have_tls_get (void)
  * Returns: a pointer to the end of the stored code
  */
 guint8*
-mono_amd64_emit_tls_get (guint8* code, int dreg, int tls_offset)
+mono_amd64_emit_tls_get (guint8* code, int dreg, MonoFastTlsKey tls_key)
 {
 	int tls_offset = mono_tls_get_fast_tls_offset (tls_key);
 #ifdef HOST_WIN32
@@ -3623,9 +3636,11 @@ mono_amd64_emit_tls_get (guint8* code, int dreg, int tls_offset)
 	x86_prefix (code, X86_GS_PREFIX);
 	amd64_mov_reg_mem (code, dreg, (tls_offset * 8) + 0x1480, 8);
 #elif defined(__APPLE__)
+	g_assert (mono_tls_get_fast_tls_model () == MONO_FAST_TLS_MODEL_EMULATED);
 	x86_prefix (code, X86_GS_PREFIX);
-	amd64_mov_reg_mem (code, dreg, tls_gs_offset + (tls_offset * 8), 8);
+	amd64_mov_reg_mem (code, dreg, tls_offset, 8);
 #else
+	g_assert (mono_tls_get_fast_tls_model () == MONO_FAST_TLS_MODEL_NATIVE);
 	if (optimize_for_xen) {
 		x86_prefix (code, X86_FS_PREFIX);
 		amd64_mov_reg_mem (code, dreg, 0, 8);
@@ -3648,6 +3663,7 @@ emit_setup_lmf (MonoCompile *cfg, guint8 *code, gint32 lmf_offset, int cfa_offse
 {
 	int i;
 
+	if (cfg->verbose_level) printf ("--steup lmf %x\n", cfg->code_len);
 	/* 
 	 * The ip field is not set, the exception handling code will obtain it from the stack location pointed to by the sp field.
 	 */
@@ -3716,28 +3732,30 @@ emit_setup_lmf (MonoCompile *cfg, guint8 *code, gint32 lmf_offset, int cfa_offse
 static guint8*
 emit_save_lmf (MonoCompile *cfg, guint8 *code, gint32 lmf_offset, gboolean *args_clobbered)
 {
+	if (cfg->verbose_level) printf ("--save lmf %x\n", cfg->code_len);
 	if ((lmf_tls_offset != -1) && !optimize_for_xen) {
+		if (cfg->verbose_level) printf ("--using fast lmf\n");
+
 		/*
 		 * Optimized version which uses the mono_lmf TLS variable instead of 
 		 * indirection through the mono_lmf_addr TLS variable.
 		 */
 		/* %rax = previous_lmf */
-		x86_prefix (code, X86_FS_PREFIX);
-		amd64_mov_reg_mem (code, AMD64_RAX, lmf_tls_offset, 8);
+		code = mono_amd64_emit_tls_get (code, AMD64_RAX, MONO_TLS_LMF_KEY);
 
 		/* Save previous_lmf */
 		amd64_mov_membase_reg (code, cfg->frame_reg, lmf_offset + G_STRUCT_OFFSET (MonoLMF, previous_lmf), AMD64_RAX, 8);
 		/* Set new lmf */
 		if (lmf_offset == 0) {
-			x86_prefix (code, X86_FS_PREFIX);
-			amd64_mov_mem_reg (code, lmf_tls_offset, cfg->frame_reg, 8);
+			code = mono_amd64_emit_tls_set (code, cfg->frame_reg, MONO_TLS_LMF_KEY);
 		} else {
 			amd64_lea_membase (code, AMD64_R11, cfg->frame_reg, lmf_offset);
-			x86_prefix (code, X86_FS_PREFIX);
-			amd64_mov_mem_reg (code, lmf_tls_offset, AMD64_R11, 8);
+			code = mono_amd64_emit_tls_set (code, AMD64_R11, MONO_TLS_LMF_KEY);
 		}
 	} else {
+		if (cfg->verbose_level) printf ("--using slow lmf\n");
 		if (lmf_addr_tls_offset != -1) {
+			if (cfg->verbose_level) printf ("--using lmf addr\n");
 			/* Load lmf quicky using the FS register */
 			code = mono_amd64_emit_tls_get (code, AMD64_RAX, MONO_TLS_LMF_ADDR_KEY);
 #ifdef HOST_WIN32
@@ -3771,23 +3789,26 @@ emit_save_lmf (MonoCompile *cfg, guint8 *code, gint32 lmf_offset, gboolean *args
 }
 
 /*
- * emit_save_lmf:
+ * emit_restore_lmf:
  *
  *   Emit code to pop an LMF structure from the LMF stack.
  */
 static guint8*
 emit_restore_lmf (MonoCompile *cfg, guint8 *code, gint32 lmf_offset)
 {
+	if (cfg->verbose_level) printf ("--restore lmf %x\n", cfg->code_len);
+	
 	if ((lmf_tls_offset != -1) && !optimize_for_xen) {
-		/*
+		if (cfg->verbose_level) printf ("--restore with lmf var\n");
+ 		/*
 		 * Optimized version which uses the mono_lmf TLS variable instead of indirection
 		 * through the mono_lmf_addr TLS variable.
 		 */
 		/* reg = previous_lmf */
 		amd64_mov_reg_membase (code, AMD64_R11, cfg->frame_reg, lmf_offset + G_STRUCT_OFFSET (MonoLMF, previous_lmf), sizeof(gpointer));
-		x86_prefix (code, X86_FS_PREFIX);
-		amd64_mov_mem_reg (code, lmf_tls_offset, AMD64_R11, 8);
+		code = mono_amd64_emit_tls_set (code, AMD64_R11, MONO_TLS_LMF_KEY);
 	} else {
+		if (cfg->verbose_level) printf ("--restore with slow path\n");
 		/* Restore previous lmf */
 		amd64_mov_reg_membase (code, AMD64_RCX, cfg->frame_reg, lmf_offset + G_STRUCT_OFFSET (MonoLMF, previous_lmf), sizeof(gpointer));
 		amd64_mov_reg_membase (code, AMD64_R11, cfg->frame_reg, lmf_offset + G_STRUCT_OFFSET (MonoLMF, lmf_addr), sizeof(gpointer));
@@ -5570,8 +5591,8 @@ mono_arch_output_basic_block (MonoCompile *cfg, MonoBasicBlock *bb)
 			if (ins->dreg != ins->sreg1)
 				amd64_mov_reg_reg (code, ins->dreg, ins->sreg1, sizeof (gpointer));
 			amd64_shift_reg_imm (code, X86_SHL, ins->dreg, 3);
-			if (tls_gs_offset)
-				amd64_alu_reg_imm (code, X86_ADD, ins->dreg, tls_gs_offset);
+			if (mono_mach_get_local_tls_offset ())
+				amd64_alu_reg_imm (code, X86_ADD, ins->dreg, mono_mach_get_local_tls_offset ());
 			x86_prefix (code, X86_GS_PREFIX);
 			amd64_mov_reg_membase (code, ins->dreg, ins->dreg, 0, sizeof (gpointer));
 #else
