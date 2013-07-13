@@ -2373,6 +2373,7 @@ mono_x86_emit_tls_set (guint8* code, int sreg, MonoFastTlsKey tls_key)
 {
 	int tls_offset = mono_tls_get_fast_tls_offset (tls_key);
 #if defined(__APPLE__)
+	g_assert (mono_tls_get_fast_tls_model () == MONO_FAST_TLS_MODEL_EMULATED);
 	x86_prefix (code, X86_GS_PREFIX);
 	x86_mov_mem_reg (code, tls_offset, sreg, 4);
 #elif defined(TARGET_WIN32)

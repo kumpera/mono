@@ -2542,7 +2542,7 @@ mono_get_lmf (void)
 #else
 	MonoJitTlsData *jit_tls;
 
-	if ((jit_tls = return mono_tls_get (MONO_TLS_JIT_TLS_KEY)))
+	if ((jit_tls = mono_tls_get (MONO_TLS_JIT_TLS_KEY)))
 		return jit_tls->lmf;
 	/*
 	 * We do not assert here because this function can be called from
