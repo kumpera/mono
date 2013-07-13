@@ -130,6 +130,7 @@ MonoFastTlsKey
 mono_tls_translate_native_offset (gint32 native_offset)
 {
 	g_error ("current tls model cannot translate offsets");
+	return -1;
 }
 
 void
