@@ -28,7 +28,7 @@ Decide which TLS backend is best suited for this configuration.
 Given all Fast TLS requires changes to the JIT, we'll leave only
 the fallback model enabled.
 */
-#if defined (TARGET_MACH) && 0
+#if defined (TARGET_MACH)
 #define FAST_TLS_MODEL_DARWIN
 #elif defined(HAVE_KW_THREAD) && 0
 #define FAST_TLS_MODEL_NATIVE
