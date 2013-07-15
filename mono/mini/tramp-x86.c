@@ -966,7 +966,7 @@ mono_arch_create_monitor_exit_trampoline (MonoTrampInfo **info, gboolean aot)
 
 	code = buf = mono_global_codeman_reserve (tramp_size);
 
-	if (mono_tls_is_fast_tls_available (MONO_TLS_THREAD_KEY) != -1) {
+	if (mono_tls_is_fast_tls_available (MONO_TLS_THREAD_KEY)) {
 		/* MonoObject* obj is in EAX */
 		/* is obj null? */
 		x86_test_reg_reg (code, X86_EAX, X86_EAX);

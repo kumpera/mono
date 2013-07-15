@@ -2369,13 +2369,21 @@ mono_x86_have_tls_get (void)
 }
 
 static guint8*
-mono_x86_emit_tls_set (guint8* code, int sreg, MonoFastTlsKey tls_key)
+mono_x86_emit_tls_set (guint8* code, int sreg, int scratch_reg, MonoFastTlsKey tls_key)
 {
 	int tls_offset = mono_tls_get_fast_tls_offset (tls_key);
 #if defined(__APPLE__)
-	g_assert (mono_tls_get_fast_tls_model () == MONO_FAST_TLS_MODEL_EMULATED);
-	x86_prefix (code, X86_GS_PREFIX);
-	x86_mov_mem_reg (code, tls_offset, sreg, 4);
+	if (mono_tls_get_fast_tls_model () == MONO_FAST_TLS_MODEL_EMULATED) {
+		x86_prefix (code, X86_GS_PREFIX);
+		x86_mov_mem_reg (code, tls_offset, sreg, 4);
+	} else if (mono_tls_get_fast_tls_model () == MONO_FAST_TLS_MODEL_EMULATED_INDIRECT) {
+		// x86_breakpoint (code);
+		x86_prefix (code, X86_GS_PREFIX);
+		x86_mov_reg_mem (code, scratch_reg, mono_tls_get_fast_tls_block_offset (), 4);
+		x86_mov_membase_reg (code, scratch_reg, tls_key * 4 + G_STRUCT_OFFSET (MonoThreadInfo, tls_block), sreg, 4);
+	} else {
+		g_error ("Unsuported tls model %d", mono_tls_get_fast_tls_model ());
+	}
 #elif defined(TARGET_WIN32)
 	g_assert_not_reached ();
 #else
@@ -2402,9 +2410,16 @@ mono_x86_emit_tls_get (guint8* code, int dreg, MonoFastTlsKey tls_key)
 {
 	int tls_offset = mono_tls_get_fast_tls_offset (tls_key);
 #if defined(__APPLE__)
-	g_assert (mono_tls_get_fast_tls_model () == MONO_FAST_TLS_MODEL_EMULATED);
-	x86_prefix (code, X86_GS_PREFIX);
-	x86_mov_reg_mem (code, dreg, tls_offset, 4);
+	if (mono_tls_get_fast_tls_model () == MONO_FAST_TLS_MODEL_EMULATED) {
+		x86_prefix (code, X86_GS_PREFIX);
+		x86_mov_reg_mem (code, dreg, tls_offset, 4);
+	} else if (mono_tls_get_fast_tls_model () == MONO_FAST_TLS_MODEL_EMULATED_INDIRECT) {
+		x86_prefix (code, X86_GS_PREFIX);
+		x86_mov_reg_mem (code, dreg, mono_tls_get_fast_tls_block_offset (), 4);
+		x86_mov_reg_membase (code, dreg, dreg, tls_key * 4 + G_STRUCT_OFFSET (MonoThreadInfo, tls_block), 4);
+	} else {
+		g_error ("Unsuported tls model %d", mono_tls_get_fast_tls_model ());
+	}
 #elif defined(TARGET_WIN32)
 	/* 
 	 * See the Under the Hood article in the May 1996 issue of Microsoft Systems 
@@ -5239,7 +5254,7 @@ mono_arch_emit_prolog (MonoCompile *cfg)
 			cfa_offset += 4;
 			mini_gc_set_slot_type_from_cfa (cfg, -cfa_offset, SLOT_NOREF);
 			/* new lmf = ESP */
-			code = mono_x86_emit_tls_set (code, X86_ESP, MONO_TLS_LMF_KEY);
+			code = mono_x86_emit_tls_set (code, X86_ESP, X86_EAX, MONO_TLS_LMF_KEY);
 		} else {
 			/* get the address of lmf for the current thread */
 			/* 
@@ -5496,6 +5511,7 @@ mono_arch_emit_epilog (MonoCompile *cfg)
 			/* FIXME: maybe save the jit tls in the prolog */
 		}
 		if (enable_fast_tls && mono_tls_is_fast_tls_available (MONO_TLS_LMF_KEY) && !is_win32 && !optimize_for_xen) {
+			int scratch_tls_set_reg = X86_EAX;
 			/*
 			 * Optimized version which uses the mono_lmf TLS variable instead of indirection
 			 * through the mono_lmf_addr TLS variable.
@@ -5503,8 +5519,22 @@ mono_arch_emit_epilog (MonoCompile *cfg)
 			/* reg = previous_lmf */
 			x86_mov_reg_membase (code, X86_ECX, X86_EBP, lmf_offset + G_STRUCT_OFFSET (MonoLMF, previous_lmf), 4);
 
+			/* Find a spare register */
+			if (mono_tls_get_fast_tls_model () == MONO_FAST_TLS_MODEL_EMULATED_INDIRECT) {
+				switch (mini_type_get_underlying_type (cfg->generic_sharing_context, sig->ret)->type) {
+				case MONO_TYPE_I8:
+				case MONO_TYPE_U8:
+					scratch_tls_set_reg = X86_EDI;
+					cfg->used_int_regs |= (1 << X86_EDI);
+					break;
+				default:
+					scratch_tls_set_reg = X86_EDX;
+					break;
+				}
+			}
+
 			/* lmf = previous_lmf */
-			code = mono_x86_emit_tls_set (code, X86_ECX, MONO_TLS_LMF_KEY);
+			code = mono_x86_emit_tls_set (code, X86_ECX, scratch_tls_set_reg, MONO_TLS_LMF_KEY);
 		} else {
 			/* Find a spare register */
 			switch (mini_type_get_underlying_type (cfg->generic_sharing_context, sig->ret)->type) {
