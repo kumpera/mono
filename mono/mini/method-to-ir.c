@@ -11070,7 +11070,7 @@ mono_method_to_ir (MonoCompile *cfg, MonoMethod *method, MonoBasicBlock *start_b
 				ad_ins = NULL;
 				lmf_ins = NULL;
 #else
-				ad_ins = mono_get_domain_intrinsic (cfg);
+				ad_ins = mono_get_domain_intrinsic (cfg); /*FIXME this call might be done with an unattached thread.*/
 				lmf_ins = mono_get_lmf_intrinsic (cfg);
 #endif
 
