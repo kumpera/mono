@@ -2344,6 +2344,9 @@ guint8* mono_arch_get_call_target               (guint8 *code) MONO_INTERNAL;
 guint32 mono_arch_get_plt_info_offset           (guint8 *plt_entry, mgreg_t *regs, guint8 *code) MONO_INTERNAL;
 GSList *mono_arch_get_trampolines               (gboolean aot) MONO_INTERNAL;
 
+MonoInst* mono_arch_get_tls_get_intrinsic       (MonoCompile* cfg, gint32 tls_var) MONO_INTERNAL;
+MonoInst* mono_arch_get_tls_set_intrinsic       (MonoCompile* cfg, gint32 tls_var, MonoInst *value) MONO_INTERNAL;
+
 /* Handle block guard */
 gpointer mono_arch_install_handler_block_guard (MonoJitInfo *ji, MonoJitExceptionInfo *clause, MonoContext *ctx, gpointer new_value) MONO_INTERNAL;
 gpointer mono_arch_create_handler_block_trampoline (void) MONO_INTERNAL;

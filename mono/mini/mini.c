@@ -56,6 +56,7 @@
 #include <mono/utils/mono-mmap.h>
 #include <mono/utils/mono-path.h>
 #include <mono/utils/mono-tls.h>
+#include <mono/utils/mono-fast-tls.h>
 #include <mono/utils/dtrace.h>
 
 #include "mini.h"
@@ -7272,6 +7273,9 @@ mini_init (const char *filename, const char *runtime_version)
 	register_icall (pthread_getspecific, "pthread_getspecific", NULL, TRUE);
 #endif
 
+	register_icall (mono_tls_get, "mono_tls_get", "ptr int", FALSE);
+	register_icall (mono_tls_set, "mono_tls_set", "void int ptr", FALSE);
+
 	mono_generic_sharing_init ();
 
 #ifdef MONO_ARCH_SIMD_INTRINSICS
@@ -7718,4 +7722,26 @@ mono_jumptable_get_entry (guint8 *code_ptr)
 {
 	return mono_arch_jumptable_entry_from_code (code_ptr);
 }
+#endif
+
+#if !defined (DISABLE_JIT) && !defined (MONO_ARCH_HAVE_TLS_OPS)
+MonoInst*
+mono_arch_get_tls_get_intrinsic (MonoCompile* cfg, gint32 tls_var)
+{
+	MonoInst *iargs [1];
+
+	EMIT_NEW_ICONST (cfg, iargs [0], tls_var);
+	return mono_emit_jit_icall (cfg, mono_tls_get, iargs);
+}
+
+MonoInst*
+mono_arch_get_tls_set_intrinsic (MonoCompile* cfg, gint32 tls_var, MonoInst *value)
+{
+	MonoInst *iargs [2];
+
+	EMIT_NEW_ICONST (cfg, iargs [0], tls_var);
+	iargs [1] = value;
+	return mono_emit_jit_icall (cfg, mono_tls_set, iargs);
+}
+
 #endif
