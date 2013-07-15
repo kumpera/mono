@@ -81,9 +81,7 @@ struct _SgenThreadInfo {
 	void *stack_end;
 	void *stack_start;
 	void *stack_start_limit;
-	char **tlab_next_addr;
 	char **tlab_start_addr;
-	char **tlab_temp_end_addr;
 	char **tlab_real_end_addr;
 	gpointer runtime_data;
 
@@ -103,8 +101,6 @@ struct _SgenThreadInfo {
 
 #ifndef HAVE_KW_THREAD
 	char *tlab_start;
-	char *tlab_next;
-	char *tlab_temp_end;
 	char *tlab_real_end;
 #endif
 };
@@ -923,33 +919,6 @@ extern __thread char *stack_end;
  * We don't need to emit a full barrier since we
  */
 #define EXIT_CRITICAL_REGION  do { mono_atomic_store_release (&IN_CRITICAL_REGION, 0); } while (0)
-
-#endif
-
-#ifdef HAVE_KW_THREAD
-#define EMIT_TLS_ACCESS(mb,dummy,offset)	do {	\
-	mono_mb_emit_byte ((mb), MONO_CUSTOM_PREFIX);	\
-	mono_mb_emit_byte ((mb), CEE_MONO_TLS);		\
-	mono_mb_emit_i4 ((mb), (offset));		\
-	} while (0)
-#else
-
-/* 
- * CEE_MONO_TLS requires the tls offset, not the key, so the code below only works on darwin,
- * where the two are the same.
- */
-#if defined(__APPLE__) || defined (HOST_WIN32)
-#define EMIT_TLS_ACCESS(mb,member,dummy)	do {	\
-	mono_mb_emit_byte ((mb), MONO_CUSTOM_PREFIX);	\
-	mono_mb_emit_byte ((mb), CEE_MONO_TLS);		\
-	mono_mb_emit_i4 ((mb), thread_info_key);	\
-	mono_mb_emit_icon ((mb), G_STRUCT_OFFSET (SgenThreadInfo, member));	\
-	mono_mb_emit_byte ((mb), CEE_ADD);		\
-	mono_mb_emit_byte ((mb), CEE_LDIND_I);		\
-	} while (0)
-#else
-#define EMIT_TLS_ACCESS(mb,member,dummy)	do { g_error ("sgen is not supported when using --with-tls=pthread.\n"); } while (0)
-#endif
 
 #endif
 

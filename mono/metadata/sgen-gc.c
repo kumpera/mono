@@ -219,6 +219,7 @@
 #include "utils/mono-time.h"
 #include "utils/mono-semaphore.h"
 #include "utils/mono-counters.h"
+#include "utils/mono-fast-tls.h"
 #include "utils/mono-proclib.h"
 #include "utils/mono-memory-model.h"
 #include "utils/mono-logger-internal.h"
@@ -4035,7 +4036,9 @@ sgen_thread_register (SgenThreadInfo* info, void *addr)
 {
 	LOCK_GC;
 #ifndef HAVE_KW_THREAD
-	info->tlab_start = info->tlab_next = info->tlab_temp_end = info->tlab_real_end = NULL;
+	info->tlab_start = info->tlab_real_end = NULL;
+	mono_tls_set (MONO_TLS_SGEN_TLAB_NEXT, NULL);
+	mono_tls_set (MONO_TLS_SGEN_TLAB_TEMP_END, NULL);
 
 	g_assert (!mono_native_tls_get_value (thread_info_key));
 	mono_native_tls_set_value (thread_info_key, info);

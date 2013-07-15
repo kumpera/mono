@@ -89,22 +89,14 @@ static long long stat_bytes_alloced_los = 0;
  */
 #ifdef HAVE_KW_THREAD
 static __thread char *tlab_start;
-static __thread char *tlab_next;
-static __thread char *tlab_temp_end;
 static __thread char *tlab_real_end;
-/* Used by the managed allocator/wbarrier */
-static __thread char **tlab_next_addr;
 #endif
 
 #ifdef HAVE_KW_THREAD
 #define TLAB_START	tlab_start
-#define TLAB_NEXT	tlab_next
-#define TLAB_TEMP_END	tlab_temp_end
 #define TLAB_REAL_END	tlab_real_end
 #else
 #define TLAB_START	(__thread_info__->tlab_start)
-#define TLAB_NEXT	(__thread_info__->tlab_next)
-#define TLAB_TEMP_END	(__thread_info__->tlab_temp_end)
 #define TLAB_REAL_END	(__thread_info__->tlab_real_end)
 #endif
 
@@ -204,13 +196,14 @@ mono_gc_alloc_obj_nolock (MonoVTable *vtable, size_t size)
 		p = sgen_los_alloc_large_inner (vtable, size);
 	} else {
 		/* tlab_next and tlab_temp_end are TLS vars so accessing them might be expensive */
+		char *tlab_next = mono_tls_get (MONO_TLS_SGEN_TLAB_NEXT);
 
-		p = (void**)TLAB_NEXT;
+		p = (void**)tlab_next;
 		/* FIXME: handle overflow */
-		new_next = (char*)p + size;
-		TLAB_NEXT = new_next;
+		tlab_next = new_next = (char*)p + size;
+		mono_tls_set (MONO_TLS_SGEN_TLAB_NEXT, tlab_next);
 
-		if (G_LIKELY (new_next < TLAB_TEMP_END)) {
+		if (G_LIKELY (new_next < (char*)mono_tls_get (MONO_TLS_SGEN_TLAB_TEMP_END))) {
 			/* Fast path */
 
 			/* 
@@ -239,7 +232,7 @@ mono_gc_alloc_obj_nolock (MonoVTable *vtable, size_t size)
 		 * This avoids taking again the GC lock when registering, but this is moot when
 		 * doing thread-local allocation, so it may not be a good idea.
 		 */
-		if (TLAB_NEXT >= TLAB_REAL_END) {
+		if (tlab_next >= TLAB_REAL_END) {
 			int available_in_tlab;
 			/* 
 			 * Run out of space in the TLAB. When this happens, some amount of space
@@ -248,14 +241,16 @@ mono_gc_alloc_obj_nolock (MonoVTable *vtable, size_t size)
 			 * keep it if the remaining space is above a treshold, and satisfy the
 			 * allocation directly from the nursery.
 			 */
-			TLAB_NEXT -= size;
+			tlab_next -= size;
+			mono_tls_set (MONO_TLS_SGEN_TLAB_NEXT, tlab_next);
+
 			/* when running in degraded mode, we continue allocing that way
 			 * for a while, to decrease the number of useless nursery collections.
 			 */
 			if (degraded_mode && degraded_mode < DEFAULT_NURSERY_SIZE)
 				return alloc_degraded (vtable, size, FALSE);
 
-			available_in_tlab = TLAB_REAL_END - TLAB_NEXT;
+			available_in_tlab = TLAB_REAL_END - tlab_next;
 			if (size > tlab_size || available_in_tlab > SGEN_MAX_NURSERY_WASTE) {
 				/* Allocate directly from the nursery */
 				do {
@@ -279,7 +274,7 @@ mono_gc_alloc_obj_nolock (MonoVTable *vtable, size_t size)
 			} else {
 				size_t alloc_size = 0;
 				if (TLAB_START)
-					SGEN_LOG (3, "Retire TLAB: %p-%p [%ld]", TLAB_START, TLAB_REAL_END, (long)(TLAB_REAL_END - TLAB_NEXT - size));
+					SGEN_LOG (3, "Retire TLAB: %p-%p [%ld]", TLAB_START, TLAB_REAL_END, (long)(TLAB_REAL_END - tlab_next - size));
 				sgen_nursery_retire_region (p, available_in_tlab);
 
 				do {
@@ -300,17 +295,20 @@ mono_gc_alloc_obj_nolock (MonoVTable *vtable, size_t size)
 
 				/* Allocate a new TLAB from the current nursery fragment */
 				TLAB_START = (char*)p;
-				TLAB_NEXT = TLAB_START;
+				tlab_next = (char*)p;
+
 				TLAB_REAL_END = TLAB_START + alloc_size;
-				TLAB_TEMP_END = TLAB_START + MIN (SGEN_SCAN_START_SIZE, alloc_size);
+				mono_tls_set (MONO_TLS_SGEN_TLAB_TEMP_END, TLAB_START + MIN (SGEN_SCAN_START_SIZE, alloc_size));
 
 				if (nursery_clear_policy == CLEAR_AT_TLAB_CREATION) {
 					memset (TLAB_START, 0, alloc_size);
 				}
 
 				/* Allocate from the TLAB */
-				p = (void*)TLAB_NEXT;
-				TLAB_NEXT += size;
+				p = (void*)tlab_next;
+				tlab_next += size;
+				mono_tls_set (MONO_TLS_SGEN_TLAB_NEXT, tlab_next);
+
 				sgen_set_nursery_scan_start ((char*)p);
 			}
 		} else {
@@ -319,8 +317,8 @@ mono_gc_alloc_obj_nolock (MonoVTable *vtable, size_t size)
 			/* record the scan start so we can find pinned objects more easily */
 			sgen_set_nursery_scan_start ((char*)p);
 			/* we just bump tlab_temp_end as well */
-			TLAB_TEMP_END = MIN (TLAB_REAL_END, TLAB_NEXT + SGEN_SCAN_START_SIZE);
-			SGEN_LOG (5, "Expanding local alloc: %p-%p", TLAB_NEXT, TLAB_TEMP_END);
+			mono_tls_set (MONO_TLS_SGEN_TLAB_TEMP_END,  MIN (TLAB_REAL_END, tlab_next + SGEN_SCAN_START_SIZE));
+			SGEN_LOG (5, "Expanding local alloc: %p-%p", tlab_next, mono_tls_get (MONO_TLS_SGEN_TLAB_TEMP_END));
 		}
 	}
 
@@ -364,10 +362,11 @@ mono_gc_try_alloc_obj_nolock (MonoVTable *vtable, size_t size)
 			memset (p, 0, size);
 	} else {
 		int available_in_tlab;
-		char *real_end;
+		char *real_end, *tlab_next;
 		/* tlab_next and tlab_temp_end are TLS vars so accessing them might be expensive */
 
-		p = (void**)TLAB_NEXT;
+		tlab_next = mono_tls_get (MONO_TLS_SGEN_TLAB_NEXT);
+		p = (void**)tlab_next;
 		/* FIXME: handle overflow */
 		new_next = (char*)p + size;
 
@@ -375,14 +374,15 @@ mono_gc_try_alloc_obj_nolock (MonoVTable *vtable, size_t size)
 		available_in_tlab = real_end - (char*)p;
 
 		if (G_LIKELY (new_next < real_end)) {
-			TLAB_NEXT = new_next;
+			tlab_next = new_next;
+			mono_tls_set (MONO_TLS_SGEN_TLAB_NEXT, new_next);
 
 			/* Second case, we overflowed temp end */
-			if (G_UNLIKELY (new_next >= TLAB_TEMP_END)) {
+			if (G_UNLIKELY (new_next >= (char*)mono_tls_get (MONO_TLS_SGEN_TLAB_TEMP_END))) {
 				sgen_set_nursery_scan_start (new_next);
 				/* we just bump tlab_temp_end as well */
-				TLAB_TEMP_END = MIN (TLAB_REAL_END, TLAB_NEXT + SGEN_SCAN_START_SIZE);
-				SGEN_LOG (5, "Expanding local alloc: %p-%p", TLAB_NEXT, TLAB_TEMP_END);
+				mono_tls_set (MONO_TLS_SGEN_TLAB_TEMP_END, MIN (TLAB_REAL_END, tlab_next + SGEN_SCAN_START_SIZE));
+				SGEN_LOG (5, "Expanding local alloc: %p-%p", tlab_next, mono_tls_get (MONO_TLS_SGEN_TLAB_TEMP_END));
 			}
 		} else if (available_in_tlab > SGEN_MAX_NURSERY_WASTE) {
 			/* Allocate directly from the nursery */
@@ -402,9 +402,11 @@ mono_gc_try_alloc_obj_nolock (MonoVTable *vtable, size_t size)
 				return NULL;
 
 			TLAB_START = (char*)new_next;
-			TLAB_NEXT = new_next + size;
+			tlab_next = new_next + size;
+			mono_tls_set (MONO_TLS_SGEN_TLAB_NEXT, tlab_next);
+
 			TLAB_REAL_END = new_next + alloc_size;
-			TLAB_TEMP_END = new_next + MIN (SGEN_SCAN_START_SIZE, alloc_size);
+			mono_tls_set (MONO_TLS_SGEN_TLAB_TEMP_END, new_next + MIN (SGEN_SCAN_START_SIZE, alloc_size));
 			sgen_set_nursery_scan_start ((char*)p);
 
 			if (nursery_clear_policy == CLEAR_AT_TLAB_CREATION)
@@ -627,13 +629,7 @@ sgen_init_tlab_info (SgenThreadInfo* info)
 #endif
 
 	info->tlab_start_addr = &TLAB_START;
-	info->tlab_next_addr = &TLAB_NEXT;
-	info->tlab_temp_end_addr = &TLAB_TEMP_END;
 	info->tlab_real_end_addr = &TLAB_REAL_END;
-
-#ifdef HAVE_KW_THREAD
-	tlab_next_addr = &tlab_next;
-#endif
 }
 
 /*
@@ -647,11 +643,24 @@ sgen_clear_tlabs (void)
 	FOREACH_THREAD (info) {
 		/* A new TLAB will be allocated when the thread does its first allocation */
 		*info->tlab_start_addr = NULL;
-		*info->tlab_next_addr = NULL;
-		*info->tlab_temp_end_addr = NULL;
 		*info->tlab_real_end_addr = NULL;
+		mono_tls_set (MONO_TLS_SGEN_TLAB_NEXT, NULL	);
+		mono_thread_set_tls_slot (info, MONO_TLS_SGEN_TLAB_TEMP_END, NULL);
 	} END_FOREACH_THREAD
 }
+
+#define EMIT_TLS_GET(mb,variable)	do {	\
+	mono_mb_emit_byte ((mb), MONO_CUSTOM_PREFIX);	\
+	mono_mb_emit_byte ((mb), CEE_MONO_TLS_GET);		\
+	mono_mb_emit_i4 ((mb), (variable));		\
+} while (0)
+
+#define EMIT_TLS_SET(mb,variable)	do {	\
+	mono_mb_emit_byte ((mb), MONO_CUSTOM_PREFIX);	\
+	mono_mb_emit_byte ((mb), CEE_MONO_TLS_SET);		\
+	mono_mb_emit_i4 ((mb), (variable));		\
+} while (0)
+
 
 static MonoMethod* alloc_method_cache [ATYPE_NUM];
 
@@ -673,21 +682,10 @@ create_allocator (int atype)
 	MonoMethod *res;
 	MonoMethodSignature *csig;
 	static gboolean registered = FALSE;
-	int tlab_next_addr_var, new_next_var;
+	int new_next_var;
 	int num_params, i;
 	const char *name = NULL;
 	AllocatorWrapperInfo *info;
-
-#ifdef HAVE_KW_THREAD
-	int tlab_next_addr_offset = -1;
-	int tlab_temp_end_offset = -1;
-
-	MONO_THREAD_VAR_OFFSET (tlab_next_addr, tlab_next_addr_offset);
-	MONO_THREAD_VAR_OFFSET (tlab_temp_end, tlab_temp_end_offset);
-
-	g_assert (tlab_next_addr_offset != -1);
-	g_assert (tlab_temp_end_offset != -1);
-#endif
 
 	if (!registered) {
 		mono_register_jit_icall (mono_gc_alloc_obj, "mono_gc_alloc_obj", mono_create_icall_signature ("object ptr int"), FALSE);
@@ -830,15 +828,9 @@ create_allocator (int atype)
 	 * another tls var holding its address instead.
 	 */
 
-	/* tlab_next_addr (local) = tlab_next_addr (TLS var) */
-	tlab_next_addr_var = mono_mb_add_local (mb, &mono_defaults.int_class->byval_arg);
-	EMIT_TLS_ACCESS (mb, tlab_next_addr, tlab_next_addr_offset);
-	mono_mb_emit_stloc (mb, tlab_next_addr_var);
-
 	/* p = (void**)tlab_next; */
 	p_var = mono_mb_add_local (mb, &mono_defaults.int_class->byval_arg);
-	mono_mb_emit_ldloc (mb, tlab_next_addr_var);
-	mono_mb_emit_byte (mb, CEE_LDIND_I);
+	EMIT_TLS_GET (mb, MONO_TLS_SGEN_TLAB_NEXT);
 	mono_mb_emit_stloc (mb, p_var);
 	
 	/* new_next = (char*)p + size; */
@@ -851,7 +843,7 @@ create_allocator (int atype)
 
 	/* if (G_LIKELY (new_next < tlab_temp_end)) */
 	mono_mb_emit_ldloc (mb, new_next_var);
-	EMIT_TLS_ACCESS (mb, tlab_temp_end, tlab_temp_end_offset);
+	EMIT_TLS_GET (mb, MONO_TLS_SGEN_TLAB_TEMP_END);
 	slowpath_branch = mono_mb_emit_short_branch (mb, MONO_CEE_BLT_UN_S);
 
 	/* Slowpath */
@@ -883,9 +875,8 @@ create_allocator (int atype)
 	/* FIXME: Memory barrier */
 
 	/* tlab_next = new_next */
-	mono_mb_emit_ldloc (mb, tlab_next_addr_var);
 	mono_mb_emit_ldloc (mb, new_next_var);
-	mono_mb_emit_byte (mb, CEE_STIND_I);
+	EMIT_TLS_SET (mb, MONO_TLS_SGEN_TLAB_NEXT);
 
 	/*The tlab store must be visible before the the vtable store. This could be replaced with a DDS but doing it with IL would be tricky. */
 	mono_mb_emit_byte ((mb), MONO_CUSTOM_PREFIX);
