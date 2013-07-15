@@ -3370,6 +3370,9 @@ register_icalls (void)
 #ifdef TARGET_IOS
 	register_icall (pthread_getspecific, "pthread_getspecific", "ptr ptr", TRUE);
 #endif
+
+	register_icall (mono_tls_get, "mono_tls_get", "ptr int", TRUE);
+	register_icall (mono_tls_set, "mono_tls_set", "void int ptr", TRUE);
 }
 
 MonoJitStats mono_jit_stats = {0};

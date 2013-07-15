@@ -12258,6 +12258,19 @@ mono_method_to_ir (MonoCompile *cfg, MonoMethod *method, MonoBasicBlock *start_b
 				ip += 6;
 				break;
 			}
+			case CEE_MONO_TLS_GET:
+				CHECK_STACK_OVF (1);
+				CHECK_OPSIZE (6);
+				*sp++ = mono_arch_get_tls_get_intrinsic (cfg, (gint32)read32 (ip + 2));
+				ip += 6;
+				break;
+			case CEE_MONO_TLS_SET:
+				CHECK_STACK (1);
+				CHECK_OPSIZE (6);
+				--sp;
+				mono_arch_get_tls_set_intrinsic (cfg, (gint32)read32 (ip + 2), sp [0]);
+				ip += 6;
+				break;
 			case CEE_MONO_DYN_CALL: {
 				MonoCallInst *call;
 
