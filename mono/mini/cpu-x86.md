@@ -309,6 +309,10 @@ memory_barrier: len:16
 
 card_table_wbarrier: src1:a src2:i clob:d len:34
 
+tls2_get: dest:i len:40
+tls2_set: src1:i len:20
+tls2_addr: dest:i len:40
+
 relaxed_nop: len:2
 hard_nop: len:1
 

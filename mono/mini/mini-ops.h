@@ -610,6 +610,12 @@ MINI_OP(OP_CARD_TABLE_WBARRIER, "card_table_wbarrier", NONE, IREG, IREG)
 MINI_OP(OP_TLS_GET,            "tls_get", IREG, NONE, NONE)
 MINI_OP(OP_TLS_GET_REG,            "tls_get_reg", IREG, IREG, NONE)
 
+/*New style tls access */
+MINI_OP(OP_TLS2_GET,            "tls2_get", IREG, NONE, NONE)
+MINI_OP(OP_TLS2_SET,            "tls2_set", NONE, IREG, NONE)
+MINI_OP(OP_TLS2_ADDR,           "tls2_addr", IREG, NONE, NONE)
+
+/* Internal ops used by the JIT */
 MINI_OP(OP_LOAD_GOTADDR, "load_gotaddr", IREG, NONE, NONE)
 MINI_OP(OP_DUMMY_USE, "dummy_use", NONE, IREG, NONE)
 MINI_OP(OP_DUMMY_STORE, "dummy_store", NONE, NONE, NONE)
