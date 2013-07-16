@@ -399,6 +399,7 @@ typedef struct MonoCompileArch {
 
 #ifdef TARGET_OSX
 #define MONO_ARCH_HAVE_TLS_GET_REG 1
+#define MONO_ARCH_HAVE_TLS_OPS 1
 #endif
 
 gboolean

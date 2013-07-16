@@ -30,6 +30,8 @@
 #include <mono/utils/mono-mmap.h>
 #include <mono/utils/mono-memory-model.h>
 #include <mono/utils/mono-tls.h>
+#include <mono/utils/mono-fast-tls.h>
+
 
 #include "trace.h"
 #include "ir-emit.h"
@@ -3666,6 +3668,85 @@ mono_amd64_emit_tls_get (guint8* code, int dreg, int tls_offset)
 	return code;
 }
 
+
+static guint8*
+mono_amd64_emit_tls2_get (guint8* code, int dreg, MonoFastTlsKey tls_key)
+{
+	int tls_offset = mono_tls_get_offset (tls_key);
+#if defined(__APPLE__)
+	switch (mono_tls_get_model ()) {
+	case MONO_FAST_TLS_MODEL_EMULATED:
+		x86_prefix (code, X86_GS_PREFIX);
+		amd64_mov_reg_mem (code, dreg, tls_offset, 8);
+		break;
+	case MONO_FAST_TLS_MODEL_EMULATED_INDIRECT: {
+		guint8 *jump_to_end;
+
+		x86_prefix (code, X86_GS_PREFIX);
+		amd64_mov_reg_mem (code, dreg, mono_tls_block_get_offset (), 8);
+
+		/* TLS might not be initialized, can't store blindly. */
+		amd64_test_reg_reg (code, dreg, dreg);
+		jump_to_end = code; x86_branch8 (code, X86_CC_NE, 0, TRUE);
+		amd64_mov_reg_membase (code, dreg, dreg, tls_key * 8 + G_STRUCT_OFFSET (MonoThreadInfo, tls_block), 8);
+		amd64_patch (jump_to_end, code);
+		break;
+	}
+	default:
+		g_error ("Unsuported tls model %d", mono_tls_get_model ());
+	}
+#else
+	g_assert_not_reached ();
+#endif
+	return code;
+}
+
+static guint8*
+mono_amd64_emit_tls2_set (guint8* code, int sreg, int scratch_reg, MonoFastTlsKey tls_key)
+{
+	int tls_offset = mono_tls_get_offset (tls_key);
+#if defined(__APPLE__)
+	switch (mono_tls_get_model ()) {
+	case MONO_FAST_TLS_MODEL_EMULATED:
+		x86_prefix (code, X86_GS_PREFIX);
+		amd64_mov_mem_reg (code, tls_offset, sreg, 8);
+		break;
+	case MONO_FAST_TLS_MODEL_EMULATED_INDIRECT: {
+		g_assert (scratch_reg != -1); /* We decompose indirect set before it reaches here. */
+		x86_prefix (code, X86_GS_PREFIX);
+		amd64_mov_reg_mem (code, scratch_reg, mono_tls_block_get_offset (), 8);
+		/*We can't store to a TLS variable if the thread is not attached so it's ok to fault as this is a bug. */
+		amd64_mov_membase_reg (code, scratch_reg, tls_key * 8 + G_STRUCT_OFFSET (MonoThreadInfo, tls_block), sreg, 8);
+		break;
+	}
+	default:
+		g_error ("Unsuported tls model %d", mono_tls_get_model ());
+	}
+#else
+	g_assert_not_reached ();
+#endif
+	return code;
+}
+
+static guint8*
+mono_amd64_emit_tls2_addr (guint8* code, int dreg, MonoFastTlsKey tls_key)
+{
+#if defined(__APPLE__)
+	switch (mono_tls_get_model ()) {
+	case MONO_FAST_TLS_MODEL_EMULATED_INDIRECT:
+		x86_prefix (code, X86_GS_PREFIX);
+		amd64_mov_reg_mem (code, dreg, mono_tls_block_get_offset (), 8);
+		amd64_alu_reg_imm (code, X86_ADD, dreg, tls_key * 8 + G_STRUCT_OFFSET (MonoThreadInfo, tls_block));
+		break;
+	default:
+		g_error ("Unsuported tls model %d", mono_tls_get_model ());
+	}
+#else
+	g_assert_not_reached ();
+#endif
+	return code;
+}
+
 /*
  * emit_setup_lmf:
  *
@@ -5606,6 +5687,18 @@ mono_arch_output_basic_block (MonoCompile *cfg, MonoBasicBlock *bb)
 			g_assert_not_reached ();
 #endif
 			break;
+			case OP_TLS2_GET: {
+				code = mono_amd64_emit_tls2_get (code, ins->dreg, ins->inst_offset);
+				break;
+			}
+			case OP_TLS2_SET: {
+				code = mono_amd64_emit_tls2_set (code, ins->sreg1, -1, ins->inst_offset);
+				break;
+			}
+			case OP_TLS2_ADDR: {
+				code = mono_amd64_emit_tls2_addr (code, ins->dreg, ins->inst_offset);
+				break;
+			}
 		case OP_MEMORY_BARRIER: {
 			switch (ins->backend.memory_barrier_kind) {
 			case StoreLoadBarrier:
@@ -8371,6 +8464,63 @@ MonoInst* mono_arch_get_domain_intrinsic (MonoCompile* cfg)
 	ins->inst_offset = appdomain_tls_offset;
 	return ins;
 }
+
+MonoInst*
+mono_arch_get_tls_get_intrinsic (MonoCompile* cfg, gint32 tls_var)
+{
+	MonoInst *ins, *iargs [1];
+
+	switch (mono_tls_get_model ()) {
+	case MONO_FAST_TLS_MODEL_NONE:
+		EMIT_NEW_ICONST (cfg, iargs [0], tls_var);
+		return mono_emit_jit_icall (cfg, mono_tls_get, iargs);
+
+	case MONO_FAST_TLS_MODEL_NATIVE:
+	case MONO_FAST_TLS_MODEL_EMULATED:
+	case MONO_FAST_TLS_MODEL_EMULATED_INDIRECT:
+		MONO_INST_NEW (cfg, ins, OP_TLS2_GET);
+		ins->inst_offset = tls_var;
+		ins->dreg = mono_alloc_ireg (cfg);
+		ins->type = STACK_PTR;
+		MONO_ADD_INS (cfg->cbb, ins);
+		return ins;
+	default:
+		g_assert_not_reached ();
+		return NULL;
+	}
+}
+
+MonoInst*
+mono_arch_get_tls_set_intrinsic (MonoCompile* cfg, gint32 tls_var, MonoInst *value)
+{
+	MonoInst *ins, *store, *iargs [2];
+
+	switch (mono_tls_get_model ()) {
+	case MONO_FAST_TLS_MODEL_NONE:
+		EMIT_NEW_ICONST (cfg, iargs [0], tls_var);
+		iargs [1] = value;
+		return mono_emit_jit_icall (cfg, mono_tls_set, iargs);
+
+	case MONO_FAST_TLS_MODEL_NATIVE:
+	case MONO_FAST_TLS_MODEL_EMULATED:
+		MONO_INST_NEW (cfg, ins, OP_TLS2_SET);
+		ins->inst_offset = tls_var;
+		ins->sreg1 = value->dreg;
+		MONO_ADD_INS (cfg->cbb, ins);
+		return ins;
+	case MONO_FAST_TLS_MODEL_EMULATED_INDIRECT:
+		MONO_INST_NEW (cfg, ins, OP_TLS2_ADDR);
+		ins->inst_offset = tls_var;
+		ins->dreg = mono_alloc_ireg (cfg);
+		MONO_ADD_INS (cfg->cbb, ins);
+		NEW_STORE_MEMBASE (cfg, store, OP_STORE_MEMBASE_REG, ins->dreg, 0, value->dreg);
+		return store;
+	default:
+		g_assert_not_reached ();
+		return NULL;
+	}
+}
+
 
 #define _CTX_REG(ctx,fld,i) ((&ctx->fld)[i])
 
