@@ -48,6 +48,7 @@
 #include <mono/utils/hazard-pointer.h>
 #include <mono/utils/mono-tls.h>
 #include <mono/utils/atomic.h>
+#include <mono/utils/mono-fast-tls.h>
 
 #include <mono/metadata/gc-internal.h>
 
@@ -155,23 +156,8 @@ static MonoGHashTable *threads_starting_up = NULL;
 /* Protected by mono_threads_lock () */
 static MonoGHashTable *thread_start_args = NULL;
 
-/* The TLS key that holds the MonoObject assigned to each thread */
-static MonoNativeTlsKey current_object_key;
-
-#ifdef MONO_HAVE_FAST_TLS
-/* we need to use both the Tls* functions and __thread because
- * the gc needs to see all the threads 
- */
-MONO_FAST_TLS_DECLARE(tls_current_object);
-#define SET_CURRENT_OBJECT(x) do { \
-	MONO_FAST_TLS_SET (tls_current_object, x); \
-	mono_native_tls_set_value (current_object_key, x); \
-} while (FALSE)
-#define GET_CURRENT_OBJECT() ((MonoInternalThread*) MONO_FAST_TLS_GET (tls_current_object))
-#else
-#define SET_CURRENT_OBJECT(x) mono_native_tls_set_value (current_object_key, x)
-#define GET_CURRENT_OBJECT() (MonoInternalThread*) mono_native_tls_get_value (current_object_key)
-#endif
+#define SET_CURRENT_OBJECT(x) mono_tls_set (MONO_TLS_THREAD, (x))
+#define GET_CURRENT_OBJECT() (MonoInternalThread*) mono_tls_get (MONO_TLS_THREAD)
 
 /* function called at thread start */
 static MonoThreadStartCB mono_thread_start_cb = NULL;
@@ -223,20 +209,6 @@ static guint32
 get_next_managed_thread_id (void)
 {
 	return InterlockedIncrement (&managed_thread_id_counter);
-}
-
-MonoNativeTlsKey
-mono_thread_get_tls_key (void)
-{
-	return current_object_key;
-}
-
-gint32
-mono_thread_get_tls_offset (void)
-{
-	int offset;
-	MONO_THREAD_VAR_OFFSET (tls_current_object,offset);
-	return offset;
 }
 
 /* handle_store() and handle_remove() manage the array of threads that
@@ -568,8 +540,6 @@ static guint32 WINAPI start_wrapper_internal(void *data)
 	internal->stack_ptr = &tid;
 
 	LIBGC_DEBUG (g_message ("%s: (%"G_GSIZE_FORMAT",%d) Setting thread stack to %p", __func__, GetCurrentThreadId (), getpid (), thread->stack_ptr));
-
-	THREAD_DEBUG (g_message ("%s: (%"G_GSIZE_FORMAT") Setting current_object_key to %p", __func__, GetCurrentThreadId (), internal));
 
 	/* On 2.0 profile (and higher), set explicitly since state might have been
 	   Unknown */
@@ -969,8 +939,6 @@ mono_thread_attach_full (MonoDomain *domain, gboolean force_attach)
 		for (;;)
 			Sleep (10000);
 	}
-
-	THREAD_DEBUG (g_message ("%s: (%"G_GSIZE_FORMAT") Setting current_object_key to %p", __func__, GetCurrentThreadId (), thread));
 
 	SET_CURRENT_OBJECT (thread);
 	mono_domain_set (domain, TRUE);
@@ -2577,8 +2545,6 @@ ves_icall_System_Threading_Volatile_Write_T (void *ptr, MonoObject *value)
 void
 mono_thread_init_tls (void)
 {
-	MONO_FAST_TLS_INIT (tls_current_object);
-	mono_native_tls_alloc (&current_object_key, NULL);
 }
 
 void mono_thread_init (MonoThreadStartCB start_cb,
@@ -2593,8 +2559,6 @@ void mono_thread_init (MonoThreadStartCB start_cb,
 	
 	mono_init_static_data_info (&thread_static_info);
 	mono_init_static_data_info (&context_static_info);
-
-	THREAD_DEBUG (g_message ("%s: Allocated current_object_key %d", __func__, current_object_key));
 
 	mono_thread_start_cb = start_cb;
 	mono_thread_attach_cb = attach_cb;
@@ -2635,8 +2599,6 @@ void mono_thread_cleanup (void)
 	DeleteCriticalSection (&small_id_mutex);
 	CloseHandle (background_change_event);
 #endif
-
-	mono_native_tls_free (current_object_key);
 }
 
 void

@@ -1,4 +1,4 @@
-/*
+#include <mono/utils/mono-fast-tls.h>/*
  * tramp-x86.c: JIT trampoline code for x86
  *
  * Authors:
@@ -21,6 +21,7 @@
 #include <mono/arch/x86/x86-codegen.h>
 
 #include <mono/utils/memcheck.h>
+#include <mono/utils/mono-fast-tls.h>
 
 #include "mini.h"
 #include "mini-x86.h"
@@ -832,7 +833,7 @@ mono_arch_create_monitor_enter_trampoline (MonoTrampInfo **info, gboolean aot)
 
 	code = buf = mono_global_codeman_reserve (tramp_size);
 
-	if (mono_thread_get_tls_offset () != -1) {
+	if (TRUE) { /*XXX not removing this to avoid a reformating storm and make the changes explicit*/
 		/* MonoObject* obj is in EAX */
 		/* is obj null? */
 		x86_test_reg_reg (code, X86_EAX, X86_EAX);
@@ -862,7 +863,7 @@ mono_arch_create_monitor_enter_trampoline (MonoTrampInfo **info, gboolean aot)
 		x86_branch8 (code, X86_CC_Z, -1, 1);
 
 		/* load MonoInternalThread* into EDX */
-		code = mono_x86_emit_tls_get (code, X86_EDX, mono_thread_get_tls_offset ());
+		code = mono_x86_emit_tls2_get (code, X86_EDX, MONO_TLS_THREAD);
 		/* load TID into EDX */
 		x86_mov_reg_membase (code, X86_EDX, X86_EDX, G_STRUCT_OFFSET (MonoInternalThread, tid), 4);
 
@@ -965,7 +966,7 @@ mono_arch_create_monitor_exit_trampoline (MonoTrampInfo **info, gboolean aot)
 
 	code = buf = mono_global_codeman_reserve (tramp_size);
 
-	if (mono_thread_get_tls_offset () != -1) {
+	if (TRUE) { /*XXX not removing this to avoid a reformating storm and make the changes explicit*/
 		/* MonoObject* obj is in EAX */
 		/* is obj null? */
 		x86_test_reg_reg (code, X86_EAX, X86_EAX);
@@ -995,7 +996,7 @@ mono_arch_create_monitor_exit_trampoline (MonoTrampInfo **info, gboolean aot)
 
 		/* next case: synchronization is not null */
 		/* load MonoInternalThread* into EDX */
-		code = mono_x86_emit_tls_get (code, X86_EDX, mono_thread_get_tls_offset ());
+		code = mono_x86_emit_tls2_get (code, X86_EDX, MONO_TLS_THREAD);
 		/* load TID into EDX */
 		x86_mov_reg_membase (code, X86_EDX, X86_EDX, G_STRUCT_OFFSET (MonoInternalThread, tid), 4);
 		/* is synchronization->owner == TID */

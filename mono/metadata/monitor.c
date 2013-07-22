@@ -27,6 +27,7 @@
 #include <mono/metadata/profiler-private.h>
 #include <mono/utils/mono-time.h>
 #include <mono/utils/atomic.h>
+#include <mono/utils/mono-fast-tls.h>
 
 /*
  * Pull the list of opcodes
@@ -889,17 +890,12 @@ mono_monitor_get_fast_enter_method (MonoMethod *monitor_enter_method)
 	static MonoMethod *compare_exchange_method;
 	int obj_null_branch, true_locktaken_branch = 0, syncp_null_branch, has_owner_branch, other_owner_branch, tid_branch, thin_hash_branch;
 	int tid_loc, syncp_loc, owner_loc;
-	int thread_tls_offset;
 	gboolean is_v4 = mono_method_signature (monitor_enter_method)->param_count == 2;
 	int fast_path_idx = is_v4 ? FASTPATH_ENTERV4 : FASTPATH_ENTER;
 	WrapperInfo *info;
 
 	/* The !is_v4 version is not used/tested */
 	g_assert (is_v4);
-
-	thread_tls_offset = mono_thread_get_tls_offset ();
-	if (thread_tls_offset == -1)
-		return NULL;
 
 	if (monitor_il_fastpaths [fast_path_idx])
 		return monitor_il_fastpaths [fast_path_idx];
@@ -946,8 +942,8 @@ mono_monitor_get_fast_enter_method (MonoMethod *monitor_enter_method)
 	*/
 
 	mono_mb_emit_byte (mb, MONO_CUSTOM_PREFIX);
-	mono_mb_emit_byte (mb, CEE_MONO_TLS);
-	mono_mb_emit_i4 (mb, thread_tls_offset);
+	mono_mb_emit_byte (mb, CEE_MONO_TLS_GET);
+	mono_mb_emit_i4 (mb, MONO_TLS_THREAD);
 	mono_mb_emit_icon (mb, G_STRUCT_OFFSET (MonoInternalThread, tid));
 	mono_mb_emit_byte (mb, CEE_ADD);
 	mono_mb_emit_byte (mb, CEE_LDIND_I);
@@ -1061,13 +1057,8 @@ mono_monitor_get_fast_exit_method (MonoMethod *monitor_exit_method)
 	MonoMethodBuilder *mb;
 	MonoMethod *res;
 	int obj_null_branch, has_waiting_branch, has_syncp_branch, owned_branch, nested_branch, thin_hash_branch;
-	int thread_tls_offset;
 	int syncp_loc;
 	WrapperInfo *info;
-
-	thread_tls_offset = mono_thread_get_tls_offset ();
-	if (thread_tls_offset == -1)
-		return NULL;
 
 	if (monitor_il_fastpaths [FASTPATH_EXIT])
 		return monitor_il_fastpaths [FASTPATH_EXIT];
@@ -1108,8 +1099,8 @@ mono_monitor_get_fast_exit_method (MonoMethod *monitor_exit_method)
 	mono_mb_emit_byte (mb, CEE_ADD);
 	mono_mb_emit_byte (mb, CEE_LDIND_I);
 	mono_mb_emit_byte (mb, MONO_CUSTOM_PREFIX);
-	mono_mb_emit_byte (mb, CEE_MONO_TLS);
-	mono_mb_emit_i4 (mb, thread_tls_offset);
+	mono_mb_emit_byte (mb, CEE_MONO_TLS_GET);
+	mono_mb_emit_i4 (mb, MONO_TLS_THREAD);
 	mono_mb_emit_icon (mb, G_STRUCT_OFFSET (MonoInternalThread, tid));
 	mono_mb_emit_byte (mb, CEE_ADD);
 	mono_mb_emit_byte (mb, CEE_LDIND_I);

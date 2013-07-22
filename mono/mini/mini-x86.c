@@ -2452,7 +2452,7 @@ mono_x86_emit_tls_get (guint8* code, int dreg, int tls_offset)
 	return code;
 }
 
-static guint8*
+guint8*
 mono_x86_emit_tls2_get (guint8* code, int dreg, MonoFastTlsKey tls_key)
 {
 	int tls_offset = mono_tls_get_offset (tls_key);

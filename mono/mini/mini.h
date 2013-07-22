@@ -1048,8 +1048,6 @@ typedef struct {
 
 /* TLS entries used by JITted code */
 typedef enum {
-	/* mono_thread_internal_current () */
-	TLS_KEY_THREAD = 0,
 	TLS_KEY_JIT_TLS = 1,
 	/* mono_domain_get () */
 	TLS_KEY_DOMAIN = 2,

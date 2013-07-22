@@ -6385,17 +6385,10 @@ create_magic_tls_access (MonoCompile *cfg, MonoClassField *tls_field, MonoInst *
 		EMIT_NEW_TEMPLOAD (cfg, addr, (*cached_tls_addr)->inst_c0);
 		return addr;
 	}
-	thread_ins = mono_get_thread_intrinsic (cfg);
 	offset_field = mono_class_get_field_from_name (tls_field->parent, "tls_offset");
 
 	EMIT_NEW_LOAD_MEMBASE_TYPE (cfg, load, offset_field->type, thread_local->dreg, offset_field->offset);
-	if (thread_ins) {
-		MONO_ADD_INS (cfg->cbb, thread_ins);
-	} else {
-		MonoMethod *thread_method;
-		thread_method = mono_class_get_method_from_name (mono_get_thread_class(), "CurrentInternalThread_internal", 0);
-		thread_ins = mono_emit_method_call (cfg, thread_method, NULL, NULL);
-	}
+	thread_ins = mono_get_thread_intrinsic (cfg);
 	addr = emit_managed_static_data_access (cfg, thread_ins, load->dreg);
 	addr->klass = mono_class_from_mono_type (tls_field->type);
 	addr->type = STACK_MP;
@@ -9881,7 +9874,7 @@ mono_method_to_ir (MonoCompile *cfg, MonoMethod *method, MonoBasicBlock *start_b
 			is_special_static = mono_class_field_is_special_static (field);
 
 			/* Generate IR to compute the field address */
-			if (is_special_static && ((gsize)addr & 0x80000000) == 0 && mono_get_thread_intrinsic (cfg) && !(cfg->opt & MONO_OPT_SHARED) && !context_used) {
+			if (is_special_static && ((gsize)addr & 0x80000000) == 0 && !(cfg->opt & MONO_OPT_SHARED) && !context_used) {
 				/*
 				 * Fast access to TLS data
 				 * Inline version of get_thread_static_data () in
@@ -9898,7 +9891,6 @@ mono_method_to_ir (MonoCompile *cfg, MonoMethod *method, MonoBasicBlock *start_b
 				//	return ((char*) thread->static_data [idx]) + (offset & 0xffffff);
 
 				thread_ins = mono_get_thread_intrinsic (cfg);
-				MONO_ADD_INS (cfg->cbb, thread_ins);
 				static_data_reg = alloc_ireg (cfg);
 				MONO_EMIT_NEW_LOAD_MEMBASE (cfg, static_data_reg, thread_ins->dreg, G_STRUCT_OFFSET (MonoInternalThread, static_data));
 

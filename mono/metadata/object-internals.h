@@ -671,12 +671,6 @@ int
 mono_thread_kill           (MonoInternalThread *thread, int signal) MONO_INTERNAL;
 
 MonoNativeTlsKey
-mono_thread_get_tls_key    (void) MONO_INTERNAL;
-
-gint32
-mono_thread_get_tls_offset (void) MONO_INTERNAL;
-
-MonoNativeTlsKey
 mono_domain_get_tls_key    (void) MONO_INTERNAL;
 
 gint32

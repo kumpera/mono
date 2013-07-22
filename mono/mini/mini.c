@@ -2855,9 +2855,6 @@ mini_get_tls_offset (MonoJitTlsKey key)
 	int offset;
 
 	switch (key) {
-	case TLS_KEY_THREAD:
-		offset = mono_thread_get_tls_offset ();
-		break;
 	case TLS_KEY_JIT_TLS:
 		offset = mono_get_jit_tls_offset ();
 		break;
@@ -2927,7 +2924,7 @@ mono_get_domain_intrinsic (MonoCompile* cfg)
 MonoInst*
 mono_get_thread_intrinsic (MonoCompile* cfg)
 {
-	return mono_create_tls_get (cfg, TLS_KEY_THREAD);
+	return mono_arch_get_tls_get_intrinsic (cfg, MONO_TLS_THREAD);
 }
 
 MonoInst*
