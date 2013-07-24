@@ -38,9 +38,6 @@
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
-#if FULL_AOT_RUNTIME
-using Crimson.CommonCrypto;
-#endif
 
 namespace System {
 
@@ -48,14 +45,7 @@ namespace System {
 	[StructLayout (LayoutKind.Sequential)]
 	[ComVisible (true)]
 	public struct Guid : IFormattable, IComparable, IComparable<Guid>, IEquatable<Guid> {
-#if FULL_AOT_RUNTIME
-		static Guid () {
-			if (MonoTouchAOTHelper.FalseFlag) {
-				var comparer = new System.Collections.Generic.GenericComparer <Guid> ();
-				var eqcomparer = new System.Collections.Generic.GenericEqualityComparer <Guid> ();
-			}
-		}
-#endif
+
 		private int _a; //_timeLow;
 		private short _b; //_timeMid;
 		private short _c; //_timeHighAndVersion;
@@ -484,7 +474,7 @@ namespace System {
 				_rng.GetBytes (b);
 			}
 #else
-			Cryptor.GetRandom (b);
+			FullAOTHelper.GetRandom (b);
 #endif
 
 			Guid res = new Guid (b);
