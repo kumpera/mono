@@ -9,7 +9,7 @@ namespace System {
 	}
 
 	internal class FullAOTHelper
-
+	{
 		static FullAOTHelper () {
 			if (FalseFlag) {
 				var comparer = new System.Collections.Generic.GenericComparer <Guid> ();
