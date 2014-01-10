@@ -16,17 +16,20 @@
 #define LOAD_FACTOR 0.75f
 
 typedef struct {
+	gpointer key;
+	gpointer value;
+} key_value_pair;
+
+typedef struct {
 	int table_size;
-	gpointer *keys;
-	gpointer *values;
+	key_value_pair *kvs;
 } conc_table;
 
 struct _MonoConcurrentHashTable {
-	mono_mutex_t *mutex;
-	volatile conc_table *current_table; /* goes to HP0 */
+	volatile conc_table *table; /* goes to HP0 */
 	GHashFunc hash_func;
 	GEqualFunc equal_func;
-	conc_table *table;
+	mono_mutex_t *mutex;
 	int element_count;
 	int overflow_count;
 };
@@ -36,8 +39,7 @@ conc_table_new (int size)
 {
 	conc_table *res = g_new (conc_table, 1);
 	res->table_size = size;
-	res->keys = g_new0 (gpointer, size);
-	res->values = g_new (gpointer, size);
+	res->kvs = g_new0 (key_value_pair, size);
 	return res;
 }
 
@@ -45,8 +47,7 @@ static void
 conc_table_free (gpointer ptr)
 {
 	conc_table *table = ptr;
-	g_free (table->values);
-	g_free (table->keys);
+	g_free (table->kvs);
 	g_free (table);
 }
 
@@ -74,29 +75,29 @@ mix_hash (int hash)
 static MONO_ALWAYS_INLINE void
 insert_one_local (conc_table *table, GHashFunc hash_func, gpointer key, gpointer value)
 {
+	key_value_pair *kvs = table->kvs;
+	int table_mask = table->table_size - 1;
 	int hash = mix_hash (hash_func (key));
-	int i = hash & (table->table_size - 1);
-	for (;;) {
-		if (table->keys [i]) {
-			i = (i + 1) & (table->table_size - 1);
-			continue;
-		}
-		table->values [i] = value;
-		table->keys [i] = key;
-		break;
-	}
+	int i = hash & table_mask;
+
+	while (table->kvs [i].key)
+		i = (i + 1) & table_mask;
+
+	kvs [i].key = key;
+	kvs [i].value = value;
 }
+
 /* LOCKING: Must be called holding hash_table->mutex */
 static void
 expand_table (MonoConcurrentHashTable *hash_table)
 {
-	conc_table *old_table = hash_table->table;
+	conc_table *old_table = (conc_table*)hash_table->table;
 	conc_table *new_table = conc_table_new (old_table->table_size * 2);
 	int i;
 
 	for (i = 0; i < old_table->table_size; ++i) {
-		if (old_table->keys [i])
-			insert_one_local (new_table, hash_table->hash_func, old_table->keys [i], old_table->values [i]);
+		if (old_table->kvs [i].key)
+			insert_one_local (new_table, hash_table->hash_func, old_table->kvs [i].key, old_table->kvs [i].value);
 	}
 	mono_memory_barrier ();
 	hash_table->table = new_table;
@@ -111,7 +112,8 @@ mono_conc_hashtable_new (mono_mutex_t *mutex, GHashFunc hash_func, GEqualFunc ke
 	MonoConcurrentHashTable *res = g_new0 (MonoConcurrentHashTable, 1);
 	res->mutex = mutex;
 	res->hash_func = hash_func ? hash_func : g_direct_hash;
-	res->equal_func = key_equal_func ? key_equal_func : g_direct_equal;
+	res->equal_func = key_equal_func;
+	// res->equal_func = g_direct_equal;
 	res->table = conc_table_new (INITIAL_SIZE);
 	res->element_count = 0;
 	res->overflow_count = (int)(INITIAL_SIZE * LOAD_FACTOR);	
@@ -121,7 +123,7 @@ mono_conc_hashtable_new (mono_mutex_t *mutex, GHashFunc hash_func, GEqualFunc ke
 void
 mono_conc_hashtable_destroy (MonoConcurrentHashTable *hash_table)
 {
-	conc_table_free (hash_table->table);
+	conc_table_free ((gpointer)hash_table->table);
 	g_free (hash_table);
 }
 
@@ -130,49 +132,62 @@ mono_conc_hashtable_lookup (MonoConcurrentHashTable *hash_table, gpointer key)
 {
 	MonoThreadHazardPointers* hp;
 	conc_table *table;
-	int hash, i, first;
-	gpointer value = NULL;
-	
+	int hash, i, table_mask;
+	key_value_pair *kvs;
 	hash = mix_hash (hash_table->hash_func (key));
 	hp = mono_hazard_pointer_get ();
 
 retry:
 	table = get_hazardous_pointer ((gpointer volatile*)&hash_table->table, hp, 0);
+	table_mask = table->table_size - 1;
+	kvs = table->kvs;
+	i = hash & table_mask;
 
-	first = i = hash & (table->table_size - 1);
-
-	do {
-		gpointer candidate = table->keys [i];
-		/*Found a hole. */
-		if (!candidate)
-			break;
-
-		if (hash_table->equal_func (key, table->keys [i])) {
-			/* The read of keys must happen before the read of values */
-			mono_memory_barrier ();
-			value = table->values [i];
-			/* FIXME check for NULL if we add suppport for removal */
-			break;
+	if (G_LIKELY (!hash_table->equal_func)) {
+		while (kvs [i].key) {
+			if (key == kvs [i].key) {
+				gpointer value;
+				/* The read of keys must happen before the read of values */
+				mono_memory_barrier ();
+				value = kvs [i].value;
+				/* FIXME check for NULL if we add suppport for removal */
+				mono_hazard_pointer_clear (hp, 0);
+				return value;
+			}
+			i = (i + 1) & table_mask;
 		}
+	} else {
+		GEqualFunc equal = hash_table->equal_func;
 
-		i = (i + 1) & (table->table_size - 1);
-	} while (i != first);
-	/* The table might have expanded and the value is now on the newer table */
-	if (!value) {
-		mono_memory_barrier ();
-		if (hash_table->table != table)	
-			goto retry;
+		while (kvs [i].key) {
+			if (equal (key, kvs [i].key)) {
+				gpointer value;
+				/* The read of keys must happen before the read of values */
+				mono_memory_barrier ();
+				value = kvs [i].value;
+				/* FIXME check for NULL if we add suppport for removal */
+				mono_hazard_pointer_clear (hp, 0);
+				return value;
+			}
+			i = (i + 1) & table_mask;
+		}
 	}
 
+	/* The table might have expanded and the value is now on the newer table */
+	mono_memory_barrier ();
+	if (hash_table->table != table)
+		goto retry;
+
 	mono_hazard_pointer_clear (hp, 0);
-	return value;
+	return NULL;
 }
 
-void
+gboolean
 mono_conc_hashtable_insert (MonoConcurrentHashTable *hash_table, gpointer key, gpointer value)
 {
 	conc_table *table;
-	int hash, i;
+	key_value_pair *kvs;
+	int hash, i, table_mask;
 
 	hash = mix_hash (hash_table->hash_func (key));
 
@@ -181,22 +196,47 @@ mono_conc_hashtable_insert (MonoConcurrentHashTable *hash_table, gpointer key, g
 	if (hash_table->element_count >= hash_table->overflow_count)
 		expand_table (hash_table);
 
-	table = hash_table->table;
-	i = hash & (table->table_size - 1);
-	for (;;) {
-		if (table->keys [i]) {
-			i = (i + 1) & (table->table_size - 1);
-			continue;
-		}
-		table->values [i] = value;
-		/* The write to values must happen after the write to keys */
-		mono_memory_barrier (); 
-		table->keys [i] = key;
-		break;
-	}
+	table = (conc_table*)hash_table->table;
+	kvs = table->kvs;
+	table_mask = table->table_size - 1;
+	i = hash & table_mask;
 
-	++hash_table->element_count;
-	mono_mutex_unlock (hash_table->mutex);
+	if (!hash_table->equal_func) {
+		for (;;) {
+			if (!kvs [i].key) {
+				kvs [i].value = value;
+				/* The write to values must happen after the write to keys */
+				mono_memory_barrier (); 
+				kvs [i].key = key;
+				++hash_table->element_count;
+				mono_mutex_unlock (hash_table->mutex);
+				return TRUE;
+			}
+			if (key == kvs [i].key) {
+				mono_mutex_unlock (hash_table->mutex);
+				return FALSE;
+			}
+			i = (i + 1) & table_mask;
+		}
+	} else {
+		GEqualFunc equal = hash_table->equal_func;
+		for (;;) {
+			if (!kvs [i].key) {
+				kvs [i].value = value;
+				/* The write to values must happen after the write to keys */
+				mono_memory_barrier (); 
+				kvs [i].key = key;
+				++hash_table->element_count;
+				mono_mutex_unlock (hash_table->mutex);
+				return TRUE;
+			}
+			if (equal (key, kvs [i].key)) {
+				mono_mutex_unlock (hash_table->mutex);
+				return FALSE;
+			}
+			i = (i + 1) & table_mask;
+		}
+	}
 }
 
 
