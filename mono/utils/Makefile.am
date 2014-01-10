@@ -109,7 +109,9 @@ monoutils_sources = \
 	mono-hwcap.c	\
 	bsearch.h	\
 	bsearch.c	\
-	mono-signal-handler.h
+	mono-signal-handler.h	\
+	mono-conc-hashtable.h	\
+	mono-conc-hashtable.c
 
 arch_sources = 
 
@@ -183,3 +185,17 @@ libmonoutilsinclude_HEADERS = 	\
 	mono-dl-fallback.h
 
 EXTRA_DIST = ChangeLog mono-embed.h mono-embed.c
+
+if !HOST_WIN32
+
+test_conc_hashtable_SOURCES = test-conc-hashtable.c
+test_conc_hashtable_LDADD = ../metadata/libmonoruntimesgen.la ../io-layer/libwapi.la libmonoutils.la $(LIBGC_LIBS) $(GLIB_LIBS) -lm $(LIBICONV)
+if PLATFORM_DARWIN
+test_conc_hashtable_LDFLAGS=-framework CoreFoundation
+endif
+
+noinst_PROGRAMS = test-conc-hashtable
+
+TESTS = test-conc-hashtable
+
+endif !HOST_WIN32
