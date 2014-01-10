@@ -158,6 +158,49 @@ parallel_reader_single_writer (void)
 		printf ("SINGLE_WRITER_PAR_READER TEST FAILED %d\n", res);
 	return res;
 }
+
+static void
+benchmark_conc (void)
+{
+	mono_mutex_t mutex;
+	MonoConcurrentHashTable *h;
+	int i, j;
+
+	mono_mutex_init (&mutex);
+	h = mono_conc_hashtable_new (&mutex, NULL, NULL);
+
+	for (i = 1; i < 10 * 1000; ++i)
+		mono_conc_hashtable_insert (h, GUINT_TO_POINTER (i), GUINT_TO_POINTER (i));
+
+
+	for (j = 0; j < 100000; ++j)
+		for (i = 1; i < 10 * 105; ++i)
+			mono_conc_hashtable_lookup (h, GUINT_TO_POINTER (i));
+
+	mono_conc_hashtable_destroy (h);
+	mono_mutex_destroy (&mutex);
+
+}
+
+static void
+benchmark_glib (void)
+{
+	GHashTable *h;
+	int i, j;
+
+	h = g_hash_table_new (NULL, NULL);
+
+	for (i = 1; i < 10 * 1000; ++i)
+		g_hash_table_insert (h, GUINT_TO_POINTER (i), GUINT_TO_POINTER (i));
+
+
+	for (j = 0; j < 100000; ++j)
+		for (i = 1; i < 10 * 105; ++i)
+			g_hash_table_lookup (h, GUINT_TO_POINTER (i));
+
+	g_hash_table_destroy (h);
+}
+
 int
 main (void)
 {
@@ -166,8 +209,11 @@ main (void)
 
 	mono_threads_init (&cb, sizeof (MonoThreadInfo));
 	mono_thread_info_attach ((gpointer)&cb);
-	res |= serial_test ();
-	res |= parallel_writers_single_reader ();
-	res |= parallel_reader_single_writer ();
+
+	benchmark_conc ();
+	//benchmark_glib ();
+	// res |= serial_test ();
+	// res |= parallel_writers_single_reader ();
+	// res |= parallel_reader_single_writer ();
 	return res;
 }
