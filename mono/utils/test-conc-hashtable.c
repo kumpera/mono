@@ -46,26 +46,118 @@ serial_test (void)
 	if (mono_conc_hashtable_lookup (h, GUINT_TO_POINTER (30)) != GUINT_TO_POINTER (40))
 		res = 1;
 	if (mono_conc_hashtable_lookup (h, GUINT_TO_POINTER (10)) != GUINT_TO_POINTER (20))
-		res = 1;
+		res = 2;
 	if (mono_conc_hashtable_lookup (h, GUINT_TO_POINTER (2)) != GUINT_TO_POINTER (3))
-		res = 1;
+		res = 3;
 	if (mono_conc_hashtable_lookup (h, GUINT_TO_POINTER (50)) != GUINT_TO_POINTER (60))
-		res = 1;
+		res = 4;
 
-done:
 	mono_conc_hashtable_destroy (h);
 	mono_mutex_destroy (&mutex);
-	if (!res)
+	if (res)
 		printf ("SERIAL TEST FAILED %d\n", res);
 	return res;
+}
+
+static MonoConcurrentHashTable *hash;
+
+static void*
+pw_sr_thread (void *arg)
+{
+	int i, idx = 1000 * GPOINTER_TO_INT (arg);
+	mono_thread_info_attach ((gpointer)&arg);
+
+	for (i = 0; i < 1000; ++i)
+		mono_conc_hashtable_insert (hash, GINT_TO_POINTER (i + idx), GINT_TO_POINTER (i));
+	return NULL;
 }
 
 static int
 parallel_writers_single_reader (void)
 {
-	
+	pthread_t a,b,c;
+	mono_mutex_t mutex;
+	int i, j, res = 0;
+
+	mono_mutex_init (&mutex);
+	hash = mono_conc_hashtable_new (&mutex, NULL, NULL);
+
+	pthread_create (&a, NULL, pw_sr_thread, GINT_TO_POINTER (0));
+	pthread_create (&b, NULL, pw_sr_thread, GINT_TO_POINTER (1));
+	pthread_create (&c, NULL, pw_sr_thread, GINT_TO_POINTER (2));
+
+	pthread_join (a, NULL);
+	pthread_join (b, NULL);
+	pthread_join (c, NULL);
+
+	for (i = 0; i < 1000; ++i) {
+		for (j = 0; j < 3; ++j) {
+			if (mono_conc_hashtable_lookup (hash, GINT_TO_POINTER (j * 1000 + i)) != GINT_TO_POINTER (i)) {
+				res = j + 1;
+				goto done;
+			}
+		}
+	}
+
+done:
+	mono_conc_hashtable_destroy (hash);
+	mono_mutex_destroy (&mutex);
+	if (res)
+		printf ("PAR_WRITER_SINGLE_READER TEST FAILED %d\n", res);
+	return res;
 }
 
+
+static void*
+pw_sw_thread (void *arg)
+{
+	int i = 0, idx = 100 * GPOINTER_TO_INT (arg);
+	mono_thread_info_attach ((gpointer)&arg);
+
+	while (i < 100) {
+		gpointer res = mono_conc_hashtable_lookup (hash, GINT_TO_POINTER (i + idx + 1));
+		if (!res)
+			continue;
+		if (res != GINT_TO_POINTER ((i + idx) * 2 + 1))
+			return GINT_TO_POINTER (i);
+		++i;
+	}
+	return NULL;
+}
+
+static int
+parallel_reader_single_writer (void)
+{
+	pthread_t a,b,c;
+	mono_mutex_t mutex;
+	gpointer ra, rb, rc;
+	int i, res = 0;
+	ra = rb = rc = GINT_TO_POINTER (1);
+
+	mono_mutex_init (&mutex);
+	hash = mono_conc_hashtable_new (&mutex, NULL, NULL);
+
+	pthread_create (&a, NULL, pw_sw_thread, GINT_TO_POINTER (0));
+	pthread_create (&b, NULL, pw_sw_thread, GINT_TO_POINTER (1));
+	pthread_create (&c, NULL, pw_sw_thread, GINT_TO_POINTER (2));
+
+	for (i = 0; i < 100; ++i) {
+		mono_conc_hashtable_insert (hash, GINT_TO_POINTER (i +   0 + 1), GINT_TO_POINTER ((i +   0) * 2 + 1));
+		mono_conc_hashtable_insert (hash, GINT_TO_POINTER (i + 100 + 1), GINT_TO_POINTER ((i + 100) * 2 + 1));
+		mono_conc_hashtable_insert (hash, GINT_TO_POINTER (i + 200 + 1), GINT_TO_POINTER ((i + 200) * 2 + 1));
+	}
+
+	pthread_join (a, &ra);
+	pthread_join (b, &rb);
+	pthread_join (c, &rc);
+	res = GPOINTER_TO_INT (ra) + GPOINTER_TO_INT (rb) + GPOINTER_TO_INT (rc);
+
+	mono_conc_hashtable_destroy (hash);
+	mono_mutex_destroy (&mutex);
+	if (res)
+		printf ("SINGLE_WRITER_PAR_READER TEST FAILED %d\n", res);
+	return res;
+}
 int
 main (void)
 {
@@ -76,5 +168,6 @@ main (void)
 	mono_thread_info_attach ((gpointer)&cb);
 	res |= serial_test ();
 	res |= parallel_writers_single_reader ();
+	res |= parallel_reader_single_writer ();
 	return res;
 }
