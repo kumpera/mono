@@ -33,6 +33,8 @@ struct _MonoConcurrentHashTable {
 	mono_mutex_t *mutex;
 	int element_count;
 	int overflow_count;
+	GDestroyNotify key_destroy_func;
+	GDestroyNotify value_destroy_func;
 };
 
 static conc_table*
@@ -122,9 +124,33 @@ mono_conc_hashtable_new (mono_mutex_t *mutex, GHashFunc hash_func, GEqualFunc ke
 	return res;
 }
 
+MonoConcurrentHashTable*
+mono_conc_hashtable_new_full (mono_mutex_t *mutex, GHashFunc hash_func, GEqualFunc key_equal_func, GDestroyNotify key_destroy_func, GDestroyNotify value_destroy_func)
+{
+	MonoConcurrentHashTable *res = mono_conc_hashtable_new (mutex, hash_func, key_equal_func);
+	res->key_destroy_func = key_destroy_func;
+	res->value_destroy_func = value_destroy_func;
+	return res;
+}
+
+
 void
 mono_conc_hashtable_destroy (MonoConcurrentHashTable *hash_table)
 {
+	if (hash_table->key_destroy_func || hash_table->value_destroy_func) {
+		int i;
+		conc_table *table = (conc_table*)hash_table->table;
+		key_value_pair *kvs = table->kvs;
+
+		for (i = 0; i < table->table_size; ++i) {
+			if (kvs [i].key && kvs [i].key != TOMBSTONE) {
+				if (hash_table->key_destroy_func)
+					(hash_table->key_destroy_func) (kvs [i].key);
+				if (hash_table->value_destroy_func)
+					(hash_table->value_destroy_func) (kvs [i].value);
+			}
+		}
+	}
 	conc_table_free ((gpointer)hash_table->table);
 	g_free (hash_table);
 }
@@ -222,6 +248,11 @@ mono_conc_hashtable_remove (MonoConcurrentHashTable *hash_table, gpointer key)
 				kvs [i].key = TOMBSTONE;
 
 				mono_mutex_unlock (hash_table->mutex);
+				if (hash_table->key_destroy_func != NULL)
+					(*hash_table->key_destroy_func) (key);
+				if (hash_table->value_destroy_func != NULL)
+					(*hash_table->value_destroy_func) (value);
+
 				return value;
 			}
 			i = (i + 1) & table_mask;
@@ -233,12 +264,17 @@ mono_conc_hashtable_remove (MonoConcurrentHashTable *hash_table, gpointer key)
 				return NULL; /*key not found*/
 
 			if (kvs [i].key != TOMBSTONE && equal (key, kvs [i].key)) {
+				gpointer old_key = kvs [i].key;
 				gpointer value = kvs [i].value;
 				kvs [i].value = NULL;
 				mono_memory_barrier (); 
 				kvs [i].key = TOMBSTONE;
 
 				mono_mutex_unlock (hash_table->mutex);
+				if (hash_table->key_destroy_func != NULL)
+					(*hash_table->key_destroy_func) (old_key);
+				if (hash_table->value_destroy_func != NULL)
+					(*hash_table->value_destroy_func) (value);
 				return value;
 			}
 
