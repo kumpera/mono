@@ -94,11 +94,12 @@ expand_table (MonoConcurrentHashTable *hash_table)
 {
 	conc_table *old_table = (conc_table*)hash_table->table;
 	conc_table *new_table = conc_table_new (old_table->table_size * 2);
+	key_value_pair *kvs = old_table->kvs;
 	int i;
 
 	for (i = 0; i < old_table->table_size; ++i) {
-		if (old_table->kvs [i].key)
-			insert_one_local (new_table, hash_table->hash_func, old_table->kvs [i].key, old_table->kvs [i].value);
+		if (kvs [i].key && kvs [i].key != TOMBSTONE)
+			insert_one_local (new_table, hash_table->hash_func, kvs [i].key, kvs [i].value);
 	}
 	mono_memory_barrier ();
 	hash_table->table = new_table;
