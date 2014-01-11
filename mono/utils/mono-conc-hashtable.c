@@ -14,6 +14,7 @@
 
 #define INITIAL_SIZE 32
 #define LOAD_FACTOR 0.75f
+#define TOMBSTONE ((gpointer)(ssize_t)-1)
 
 typedef struct {
 	gpointer key;
@@ -160,12 +161,16 @@ retry:
 		GEqualFunc equal = hash_table->equal_func;
 
 		while (kvs [i].key) {
-			if (equal (key, kvs [i].key)) {
+			if (kvs [i].key != TOMBSTONE && equal (key, kvs [i].key)) {
 				gpointer value;
 				/* The read of keys must happen before the read of values */
 				mono_memory_barrier ();
 				value = kvs [i].value;
-				/* FIXME check for NULL if we add suppport for removal */
+
+				/* We just read a value been deleted, try again. */
+				if (G_UNLIKELY (!value))
+					goto retry;
+
 				mono_hazard_pointer_clear (hp, 0);
 				return value;
 			}
@@ -182,15 +187,80 @@ retry:
 	return NULL;
 }
 
-gboolean
+/**
+ * mono_conc_hashtable_remove
+ *
+ * @Returns the old value if key is already present or null
+ */
+gpointer
+mono_conc_hashtable_remove (MonoConcurrentHashTable *hash_table, gpointer key)
+{
+	conc_table *table;
+	key_value_pair *kvs;
+	int hash, i, table_mask;
+
+	g_assert (key != NULL && key != TOMBSTONE);
+
+	hash = mix_hash (hash_table->hash_func (key));
+	mono_mutex_lock (hash_table->mutex);
+
+	table = (conc_table*)hash_table->table;
+	kvs = table->kvs;
+	table_mask = table->table_size - 1;
+	i = hash & table_mask;
+
+	if (!hash_table->equal_func) {
+		for (;;) {
+			if (!kvs [i].key)
+				return NULL; /*key not found*/
+
+			if (key == kvs [i].key) {
+				gpointer value = kvs [i].value;
+				kvs [i].value = NULL;
+				mono_memory_barrier (); 
+				kvs [i].key = TOMBSTONE;
+
+				mono_mutex_unlock (hash_table->mutex);
+				return value;
+			}
+			i = (i + 1) & table_mask;
+		}
+	} else {
+		GEqualFunc equal = hash_table->equal_func;
+		for (;;) {
+			if (!kvs [i].key)
+				return NULL; /*key not found*/
+
+			if (kvs [i].key != TOMBSTONE && equal (key, kvs [i].key)) {
+				gpointer value = kvs [i].value;
+				kvs [i].value = NULL;
+				mono_memory_barrier (); 
+				kvs [i].key = TOMBSTONE;
+
+				mono_mutex_unlock (hash_table->mutex);
+				return value;
+			}
+
+			i = (i + 1) & table_mask;
+		}
+	}	
+}
+/**
+ * mono_conc_hashtable_insert
+ *
+ * @Returns the old value if key is already present or null
+ */
+gpointer
 mono_conc_hashtable_insert (MonoConcurrentHashTable *hash_table, gpointer key, gpointer value)
 {
 	conc_table *table;
 	key_value_pair *kvs;
 	int hash, i, table_mask;
 
-	hash = mix_hash (hash_table->hash_func (key));
+	g_assert (key != NULL && key != TOMBSTONE);
+	g_assert (value != NULL);
 
+	hash = mix_hash (hash_table->hash_func (key));
 	mono_mutex_lock (hash_table->mutex);
 
 	if (hash_table->element_count >= hash_table->overflow_count)
@@ -203,36 +273,38 @@ mono_conc_hashtable_insert (MonoConcurrentHashTable *hash_table, gpointer key, g
 
 	if (!hash_table->equal_func) {
 		for (;;) {
-			if (!kvs [i].key) {
+			if (!kvs [i].key || kvs [i].key == TOMBSTONE) {
 				kvs [i].value = value;
 				/* The write to values must happen after the write to keys */
 				mono_memory_barrier (); 
 				kvs [i].key = key;
 				++hash_table->element_count;
 				mono_mutex_unlock (hash_table->mutex);
-				return TRUE;
+				return NULL;
 			}
 			if (key == kvs [i].key) {
+				gpointer value = kvs [i].value;
 				mono_mutex_unlock (hash_table->mutex);
-				return FALSE;
+				return value;
 			}
 			i = (i + 1) & table_mask;
 		}
 	} else {
 		GEqualFunc equal = hash_table->equal_func;
 		for (;;) {
-			if (!kvs [i].key) {
+			if (!kvs [i].key || kvs [i].key == TOMBSTONE) {
 				kvs [i].value = value;
 				/* The write to values must happen after the write to keys */
 				mono_memory_barrier (); 
 				kvs [i].key = key;
 				++hash_table->element_count;
 				mono_mutex_unlock (hash_table->mutex);
-				return TRUE;
+				return NULL;
 			}
 			if (equal (key, kvs [i].key)) {
+				gpointer value = kvs [i].value;
 				mono_mutex_unlock (hash_table->mutex);
-				return FALSE;
+				return value;
 			}
 			i = (i + 1) & table_mask;
 		}
