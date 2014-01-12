@@ -238,8 +238,10 @@ mono_conc_hashtable_remove (MonoConcurrentHashTable *hash_table, gpointer key)
 
 	if (!hash_table->equal_func) {
 		for (;;) {
-			if (!kvs [i].key)
+			if (!kvs [i].key) {
+				mono_mutex_unlock (hash_table->mutex);
 				return NULL; /*key not found*/
+			}
 
 			if (key == kvs [i].key) {
 				gpointer value = kvs [i].value;
@@ -260,8 +262,10 @@ mono_conc_hashtable_remove (MonoConcurrentHashTable *hash_table, gpointer key)
 	} else {
 		GEqualFunc equal = hash_table->equal_func;
 		for (;;) {
-			if (!kvs [i].key)
+			if (!kvs [i].key) {
+				mono_mutex_unlock (hash_table->mutex);
 				return NULL; /*key not found*/
+			}
 
 			if (kvs [i].key != TOMBSTONE && equal (key, kvs [i].key)) {
 				gpointer old_key = kvs [i].key;

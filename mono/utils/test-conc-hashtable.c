@@ -67,7 +67,7 @@ pw_sr_thread (void *arg)
 	int i, idx = 1000 * GPOINTER_TO_INT (arg);
 	mono_thread_info_attach ((gpointer)&arg);
 
-	for (i = 0; i < 1000; ++i)
+	for (i = 1; i < 1000; ++i)
 		mono_conc_hashtable_insert (hash, GINT_TO_POINTER (i + idx), GINT_TO_POINTER (i));
 	return NULL;
 }
@@ -90,7 +90,7 @@ parallel_writers_single_reader (void)
 	pthread_join (b, NULL);
 	pthread_join (c, NULL);
 
-	for (i = 0; i < 1000; ++i) {
+	for (i = 1; i < 1000; ++i) {
 		for (j = 0; j < 3; ++j) {
 			if (mono_conc_hashtable_lookup (hash, GINT_TO_POINTER (j * 1000 + i)) != GINT_TO_POINTER (i)) {
 				res = j + 1;
@@ -210,10 +210,10 @@ main (void)
 	mono_threads_init (&cb, sizeof (MonoThreadInfo));
 	mono_thread_info_attach ((gpointer)&cb);
 
-	benchmark_conc ();
+	//benchmark_conc ();
 	//benchmark_glib ();
-	// res |= serial_test ();
-	// res |= parallel_writers_single_reader ();
-	// res |= parallel_reader_single_writer ();
+	res |= serial_test ();
+	res |= parallel_writers_single_reader ();
+	res |= parallel_reader_single_writer ();
 	return res;
 }
