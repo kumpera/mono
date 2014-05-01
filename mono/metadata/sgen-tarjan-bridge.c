@@ -354,18 +354,28 @@ class_kind (MonoClass *class)
 }
 
 //enable unsage logging
-//#define DUMP_GRAPH 1
+// #define DUMP_GRAPH 1
+// #define DUMP_OBJS 1
+
+enum {
+	INITIAL,
+	SCANNED,
+	FINISHED_ON_STACK,
+	FINISHED_OFF_STACK
+};
 
 typedef struct {
 	MonoObject *obj; //XXX this can be eliminated.
 
 	int index;
 	int low_index;
-	int color : 28;
+	int color : 29;
 
-	gboolean is_scanned : 1;
-	gboolean on_loop_stack : 1;
-	gboolean is_marked : 1;
+	unsigned state : 2;
+	// gboolean is_scanned : 1;
+	// gboolean on_loop_stack : 1;
+	// gboolean is_marked : 1;
+
 	gboolean is_bridge : 1;
 } ScanData;
 
@@ -381,7 +391,7 @@ typedef struct {
 	gboolean visited_for_xrefs : 1;
 } ColorData;
 
-static SgenHashTable hash_table = SGEN_HASH_TABLE_INIT (INTERNAL_MEM_BRIDGE_HASH_TABLE, INTERNAL_MEM_BRIDGE_HASH_TABLE_ENTRY, sizeof (ScanData), mono_aligned_addr_hash, NULL);
+static SgenHashTable hash_table = SGEN_HASH_TABLE_INIT (INTERNAL_MEM_TARJAN_BRIDGE_HASH_TABLE, INTERNAL_MEM_TARJAN_BRIDGE_HASH_TABLE_ENTRY, sizeof (ScanData), mono_aligned_addr_hash, NULL);
 
 static DynPtrArray scan_stack, loop_stack, registered_bridges, color_table;
 static DynIntArray low_color, xref_merge_array;
@@ -460,6 +470,10 @@ push_object (MonoObject *obj)
 	if (fwd)
 		obj = fwd;
 
+#if DUMP_OBJS
+	printf ("\t%p %s\n", obj, sgen_safe_name (obj));
+#endif
+
 #if DUMP_GRAPH
 	printf ("\t= pushing %p %s -> ", obj, sgen_safe_name (obj));
 #endif
@@ -474,7 +488,7 @@ push_object (MonoObject *obj)
 	data = sgen_hash_table_lookup (&hash_table, obj);
 
 	/* Already marked - XXX must be done this way as the bridge themselves are alive. */
-	if (data && data->is_marked) {
+	if (data && data->state != INITIAL) {
 #if DUMP_GRAPH
 		printf ("already marked\n");
 #endif
@@ -493,10 +507,10 @@ push_object (MonoObject *obj)
 	printf ("pushed!\n");
 #endif
 
-	data = get_scan_data (obj);
-	data->is_marked = TRUE;
-	data->on_loop_stack = TRUE;
-	data->low_index = data->index = object_index++;
+	if (!data)
+		data = get_scan_data (obj);
+	g_assert (data->state == INITIAL);
+	g_assert (data->index == -1);
 	dyn_array_ptr_push (&scan_stack, data);
 }
 
@@ -515,6 +529,10 @@ push_all (ScanData *data)
 #if DUMP_GRAPH
 	printf ("**scanning %p %s\n", obj, sgen_safe_name (obj));
 #endif
+
+#if DUMP_OBJS
+	printf ("> %p %s\n", obj, sgen_safe_name (obj));
+#endif
 	#include "sgen-scan-object.h"
 }
 
@@ -530,16 +548,14 @@ compute_low_index (ScanData *data, MonoObject *obj)
 	other = sgen_hash_table_lookup (&hash_table, obj);
 
 #if DUMP_GRAPH
-	printf ("\tcompute low %p ->%p (%s) %p\n", data->obj, obj, sgen_safe_name (obj), other);
+	printf ("\tcompute low %p ->%p (%s) %p (%d / %d)\n", data->obj, obj, sgen_safe_name (obj), other, other->index, other->low_index);
 #endif
 	if (!other)
 		return;
 
-	g_assert (other->is_marked);
-	g_assert (other->index != -1);
-	g_assert (other->low_index != -1);
+	g_assert (other->state != INITIAL);
 
-	if (other->on_loop_stack && data->low_index > other->low_index)
+	if ((other->state == SCANNED || other->state == FINISHED_ON_STACK) && data->low_index > other->low_index)
 		data->low_index = other->low_index;
 
 	/* Compute the low color */
@@ -580,6 +596,74 @@ reduce_color (ColorData **outcolor)
 }
 
 static void
+create_scc (ScanData *data)
+{
+	int i, color;
+	gboolean found = FALSE;
+	gboolean found_bridge = FALSE;
+	ColorData *color_data = NULL;
+
+	for (i = dyn_array_ptr_size (&loop_stack) - 1; i >= 0; --i) {
+		ScanData *other = dyn_array_ptr_get (&loop_stack, i);
+		found_bridge |= other->is_bridge;
+		if (found_bridge || other == data)
+			break;
+	}
+
+#if DUMP_GRAPH
+	printf ("|SCC rooted in %s (%p) has bridge %d\n", sgen_safe_name (data->obj), data->obj, found_bridge);
+	printf ("\tpoints-to-colors: ");
+	for (i = 0; i < dyn_array_int_size (&low_color); ++i)
+		printf ("%d ", dyn_array_int_get (&low_color, i));
+	printf ("\n");
+
+	printf ("loop stack: ");
+	for (i = 0; i < dyn_array_ptr_size (&loop_stack); ++i) {
+		ScanData *other = dyn_array_ptr_get (&loop_stack, i);
+		printf ("(%d/%d)", other->index, other->low_index);
+	}
+	printf ("\n");
+#endif
+	if (found_bridge) {
+		color = new_color (TRUE, &color_data);
+		++num_colors_with_bridges;
+	} else {
+		color = reduce_color (&color_data);
+	}
+
+	while (dyn_array_ptr_size (&loop_stack) > 0) {
+		ScanData *other = dyn_array_ptr_pop (&loop_stack);
+
+#if DUMP_GRAPH
+		printf ("\tmember %s (%p) index %d low-index %d color %d state %d\n", sgen_safe_name (other->obj), other->obj, other->index, other->low_index, other->color, other->state);
+#endif
+
+		other->color = color;
+		switch (other->state) {
+		case FINISHED_ON_STACK:
+			other->state = FINISHED_OFF_STACK;
+			break;
+		case FINISHED_OFF_STACK:
+			break;
+		default:
+			g_error ("Invalid state when building SCC %d", other->state);
+		}
+
+		if (other->is_bridge)
+			dyn_array_ptr_add (&color_data->bridges, other->obj);
+
+		if (other == data) {
+			found = TRUE;
+			break;
+		}
+	}
+	g_assert (found);
+
+	dyn_array_int_set_size (&low_color, 0);
+	found_bridge = FALSE;
+}
+
+static void
 dfs (void)
 {
 	g_assert (dyn_array_ptr_size (&scan_stack) == 1);
@@ -589,77 +673,54 @@ dfs (void)
 
 	while (dyn_array_ptr_size (&scan_stack) > 0) {
 		ScanData *data = dyn_array_ptr_pop (&scan_stack);
-		g_assert (data->is_marked);
-		/*
-		 * If the object is not on the loop stack, flag it and push its children .
-		 * Otherwise finish it computing loop info, scc and colors.
+
+		/**
+		 * Ignore finished objects on stack, they happen due to loops. For example:
+		 * A -> C
+		 * A -> B
+		 * B -> C
+		 * C -> A
+		 *
+		 * We start scanning from A and push C before B. So, after the first iteration, the scan stack will have: A C B.
+		 * We then visit B, which will find C in its initial state and push again.
+		 * Finally after finish with C and B, the stack will be left with "A C" and at this point C should be ignored.
+         *
+         * The above explains FINISHED_ON_STACK, to explain FINISHED_OFF_STACK, consider if the root was D, which pointed
+		 * to A and C. A is processed first, leaving C on stack after that in the mentioned state.
 		 */
-		if (!data->is_scanned) {
-			data->is_scanned = TRUE;
+		if (data->state == FINISHED_ON_STACK || data->state == FINISHED_OFF_STACK)
+			continue;
+
+		if (data->state == INITIAL) {
+			g_assert (data->index == -1);
+			g_assert (data->low_index == -1);
+
+			data->state = SCANNED;
+			data->low_index = data->index = object_index++;
 			dyn_array_ptr_push (&scan_stack, data);
 			dyn_array_ptr_push (&loop_stack, data);
+
 #if DUMP_GRAPH
 			printf ("+scanning %s (%p) index %d color %d\n", sgen_safe_name (data->obj), data->obj, data->index, data->color);
 #endif
 			/*push all refs */
 			push_all (data);
 		} else {
+			g_assert (data->state == SCANNED);
+			data->state = FINISHED_ON_STACK;
+
 #if DUMP_GRAPH
 			printf ("-finishing %s (%p) index %d low-index %d color %d\n", sgen_safe_name (data->obj), data->obj, data->index, data->low_index, data->color);
 #endif
+
 			/* Compute low index */
 			compute_low (data);
 #if DUMP_GRAPH
 			printf ("-finished %s (%p) index %d low-index %d color %d\n", sgen_safe_name (data->obj), data->obj, data->index, data->low_index, data->color);
 #endif
 			//SCC root
-			if (data->index == data->low_index) {
-				int i, color;
-				gboolean found = FALSE;
-				gboolean found_bridge = FALSE;
-				ColorData *color_data = NULL;
-
-				for (i = dyn_array_ptr_size (&loop_stack) - 1; i >= 0; --i) {
-					ScanData *other = dyn_array_ptr_get (&loop_stack, i);
-					found_bridge |= other->is_bridge;
-					if (found_bridge || other == data)
-						break;
-				}
-
-#if DUMP_GRAPH
-				printf ("|SCC rooted in %s (%p) has bridge %d\n", sgen_safe_name (data->obj), data->obj, found_bridge);
-				printf ("\tpoints-to-colors: ");
-				for (i = 0; i < dyn_array_int_size (&low_color); ++i)
-					printf ("%d ", dyn_array_int_get (&low_color, i));
-				printf ("\n");
-#endif
-				if (found_bridge) {
-					color = new_color (TRUE, &color_data);
-					++num_colors_with_bridges;
-				} else {
-					color = reduce_color (&color_data);
-				}
-
-				while (dyn_array_ptr_size (&loop_stack) > 0) {
-					ScanData *other = dyn_array_ptr_pop (&loop_stack);
-					other->color = color;
-					other->on_loop_stack = FALSE;
-					if (other->is_bridge)
-						dyn_array_ptr_add (&color_data->bridges, other->obj);
-
-#if DUMP_GRAPH
-					printf ("\tmember %s (%p) index %d low-index %d color %d\n", sgen_safe_name (other->obj), other->obj, other->index, other->low_index, other->color);
-#endif
-					if (other == data) {
-						found = TRUE;
-						break;
-					}
-				}
-				g_assert (found);
-
-				dyn_array_int_set_size (&low_color, 0);
-				found_bridge = FALSE;
-			}
+			if (data->index == data->low_index)
+				create_scc (data);
 		}
 	}
 }
@@ -683,7 +744,9 @@ cleanup (void)
 	int i;
 
 	for (i = 0; i <  dyn_array_ptr_size (&color_table); ++i) {
-		void *color_data = dyn_array_ptr_get (&color_table, i);
+		ColorData *color_data = dyn_array_ptr_get (&color_table, i);
+		dyn_array_int_uninit (&color_data->other_colors);
+		dyn_array_ptr_uninit (&color_data->bridges);
 		sgen_free_internal_dynamic (color_data, sizeof (ColorData), INTERNAL_MEM_BRIDGE_DATA);
 	}
 	dyn_array_ptr_set_size (&scan_stack, 0);
@@ -742,7 +805,7 @@ processing_stw_step (void)
 	if (!dyn_array_ptr_size (&registered_bridges))
 		return;
 
-#if DUMP_GRAPH
+#if defined (DUMP_GRAPH) || defined (DUMP_OBJS)
 	printf ("-----------------\n");
 #endif
 	/*
@@ -761,18 +824,17 @@ processing_stw_step (void)
 
 	for (i = 0; i < bridge_count; ++i) {
 		ScanData *sd = get_scan_data (dyn_array_ptr_get (&registered_bridges, i));
-		if (!sd->is_marked) {
-			sd->is_marked = TRUE;
-			sd->on_loop_stack = TRUE;
-			sd->low_index = sd->index = object_index++;
+		if (sd->state == INITIAL) {
 			dyn_array_ptr_push (&scan_stack, sd);
 			dfs ();
+		} else {
+			g_assert (sd->state == FINISHED_OFF_STACK);
 		}
 	}
 
 	tarjan_time = step_timer (&curtime);
 
-#if DUMP_GRAPH
+#if defined (DUMP_GRAPH) || defined (DUMP_OBJS)
 	printf ("----summary----\n");
 	printf ("bridges:\n");
 	for (i = 0; i < bridge_count; ++i) {
@@ -845,7 +907,7 @@ processing_build_callback_data (int generation)
 
 	/*create API objects */
 
-#if DUMP_GRAPH
+#if defined (DUMP_GRAPH) || defined (DUMP_OBJS)
 	printf ("***** API *****\n");
 	printf ("number of SCCs %d\n", num_colors_with_bridges);
 #endif
@@ -888,7 +950,7 @@ processing_build_callback_data (int generation)
 
 	gather_xref_time = step_timer (&curtime);
 
-#if DUMP_GRAPH
+#if defined (DUMP_GRAPH) || defined (DUMP_OBJS)
 	printf ("TOTAL XREFS %d\n", xref_count);
 	dump_color_table (" after xref pass", TRUE);
 #endif
@@ -913,7 +975,7 @@ processing_build_callback_data (int generation)
 	g_assert (xref_count == api_index);
 	xref_setup_time = step_timer (&curtime);
 
-#if DUMP_GRAPH
+#if defined (DUMP_GRAPH) || defined (DUMP_OBJS)
 	printf ("---xrefs:\n");
 	for (i = 0; i < xref_count; ++i)
 		printf ("\t%d -> %d\n", api_xrefs [i].src_scc_index, api_xrefs [i].dst_scc_index);
@@ -942,7 +1004,7 @@ processing_after_callback (int generation)
 
 	cleanup_time = step_timer (&curtime);
 
-	mono_trace (G_LOG_LEVEL_INFO, MONO_TRACE_GC, "GC_BRIDGE bridges %d objects %d colors %d ignored %d sccs %d xref %d setup %.2fms tarjan %.2fms scc-setup %.2fms gather-xref %.2fms xref-setup %.2fms cleanup %.2fms",
+	mono_trace (G_LOG_LEVEL_INFO, MONO_TRACE_GC, "GC_TAR_BRIDGE bridges %d objects %d colors %d ignored %d sccs %d xref %d setup %.2fms tarjan %.2fms scc-setup %.2fms gather-xref %.2fms xref-setup %.2fms cleanup %.2fms",
 		bridge_count, object_count, color_count,
 		ignored_objects, scc_count, xref_count,
 		setup_time / 10000.0f,
