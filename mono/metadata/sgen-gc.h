@@ -850,6 +850,7 @@ typedef struct {
 
 void sgen_old_bridge_init (SgenBridgeProcessor *collector) MONO_INTERNAL;
 void sgen_new_bridge_init (SgenBridgeProcessor *collector) MONO_INTERNAL;
+void sgen_tarjan_bridge_init (SgenBridgeProcessor *collector) MONO_INTERNAL;
 void sgen_set_bridge_implementation (const char *name) MONO_INTERNAL;
 void sgen_bridge_set_dump_prefix (const char *prefix) MONO_INTERNAL;
 

@@ -69,7 +69,6 @@ mono_gc_wait_for_bridge_processing (void)
 	sgen_gc_unlock ();
 }
 
-
 void
 mono_gc_register_bridge_callbacks (MonoGCBridgeCallbacks *callbacks)
 {
@@ -91,6 +90,9 @@ init_bridge_processor (SgenBridgeProcessor *processor, const char *name)
 	} else if (!strcmp ("new", name)) {
 		memset (processor, 0, sizeof (SgenBridgeProcessor));
 		sgen_new_bridge_init (processor);
+	} else if (!strcmp ("tarjan", name)) {
+		memset (processor, 0, sizeof (SgenBridgeProcessor));
+		sgen_tarjan_bridge_init (processor);
 	} else {
 		return FALSE;
 	}
