@@ -79,6 +79,8 @@ mono_mempool_new (void)
 	return mono_mempool_new_size (MONO_MEMPOOL_PAGESIZE);
 }
 
+#define ALIGN_UP(s)	((void*)((((ssize_t)s)+(MEM_ALIGN-1)) & ~(MEM_ALIGN-1)))
+
 MonoMemPool *
 mono_mempool_new_size (int initial_size)
 {
@@ -94,7 +96,10 @@ mono_mempool_new_size (int initial_size)
 	pool->pos = (guint8*)pool + sizeof (MonoMemPool);
 	pool->end = pool->pos + initial_size - sizeof (MonoMemPool);
 	pool->d.allocated = pool->size = initial_size;
+	pool->pos = ALIGN_UP (pool->pos);
 	total_bytes_allocated += initial_size;
+	printf ("aligning %p to %p\n", pool->pos, ALIGN_UP (pool->pos));
+
 	return pool;
 #endif
 }
@@ -167,6 +172,7 @@ mono_mempool_empty (MonoMemPool *pool)
 #else
 	pool->pos = (guint8*)pool + sizeof (MonoMemPool);
 	pool->end = pool->pos + pool->size - sizeof (MonoMemPool);
+	pool->pos = ALIGN_UP (pool->pos);
 #endif
 }
 
@@ -265,6 +271,7 @@ mono_mempool_alloc (MonoMemPool *pool, guint size)
 {
 	gpointer rval;
 	
+	g_assert ((((int)pool->pos) & 7) == 0);
 	size = (size + MEM_ALIGN - 1) & ~(MEM_ALIGN - 1);
 
 #ifdef MALLOC_ALLOCATION
@@ -312,14 +319,16 @@ mono_mempool_alloc (MonoMemPool *pool, guint size)
 			pool->end = pool->pos + new_size - sizeof (MonoMemPool);
 			pool->d.allocated += new_size;
 			total_bytes_allocated += new_size;
-
+			pool->pos = ALIGN_UP (pool->pos);
 			rval = pool->pos;
 			pool->pos += size;
 		}
 	}
 #endif
 
+	g_assert ((((int)rval) & 7) == 0);
 	return rval;
+
 }
 
 /**
@@ -332,6 +341,7 @@ mono_mempool_alloc0 (MonoMemPool *pool, guint size)
 {
 	gpointer rval;
 
+	g_assert ((((int)pool->pos) & 7) == 0);
 #ifdef MALLOC_ALLOCATION
 	rval = mono_mempool_alloc (pool, size);
 #else
