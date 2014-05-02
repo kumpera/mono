@@ -366,17 +366,15 @@ enum {
 
 typedef struct {
 	MonoObject *obj; //XXX this can be eliminated.
+	mword lock_word;
 
 	int index;
 	int low_index;
-	int color : 29;
+	int color : 27;
 
 	unsigned state : 2;
-	// gboolean is_scanned : 1;
-	// gboolean on_loop_stack : 1;
-	// gboolean is_marked : 1;
-
-	gboolean is_bridge : 1;
+	unsigned is_bridge : 1;
+	unsigned obj_state : 2;
 } ScanData;
 
 /*
@@ -403,53 +401,137 @@ static int xref_count;
 static size_t setup_time, tarjan_time, scc_setup_time, gather_xref_time, xref_setup_time, cleanup_time;
 static SgenBridgeProcessor *bridge_processor;
 
+#define GET_OBJ_STATE(o) (((mword)o) & SGEN_VTABLE_BITS_MASK)
 
-static SgenHashTable _hash_table = SGEN_HASH_TABLE_INIT (INTERNAL_MEM_TARJAN_BRIDGE_HASH_TABLE, INTERNAL_MEM_TARJAN_BRIDGE_HASH_TABLE_ENTRY, sizeof (ScanData), mono_aligned_addr_hash, NULL);
+#define BUCKET_SIZE 8184
+#define NUM_SCAN_ENTRIES ((BUCKET_SIZE - SIZEOF_VOID_P * 2) / sizeof (ScanData))
+
+typedef struct _ObjectBucket ObjectBucket;
+struct _ObjectBucket {
+	ObjectBucket *next;
+	ScanData *next_data;
+	ScanData data [NUM_SCAN_ENTRIES];
+};
+
+static ObjectBucket *root_alloc;
+static ObjectBucket *cur_alloc;
+static int scan_object_count;
+
+static ObjectBucket*
+new_bucket (void)
+{
+	ObjectBucket *res = sgen_alloc_internal (INTERNAL_MEM_TARJAN_OBJ_BUCKET);
+	res->next_data = &res->data [0];
+	return res;
+}
+
+static void
+obj_alloc_init (void)
+{
+	root_alloc = cur_alloc = new_bucket ();
+}
+
+static ScanData*
+alloc_data (void)
+{
+	ScanData *res;
+retry:
+
+	/* next_data points to the first free entry */
+	res = cur_alloc->next_data;
+	if (res >= &cur_alloc->data [NUM_SCAN_ENTRIES]) {
+		ObjectBucket *b = new_bucket ();
+		cur_alloc->next = b;
+		cur_alloc = b;
+		goto retry;
+	}
+	cur_alloc->next_data = res + 1;
+	scan_object_count++;
+	return res;
+}
 
 static ScanData*
 create_data (MonoObject *obj)
 {
-	ScanData new_entry;
+	mword *o = (mword*)obj;
+	ScanData *res = alloc_data ();
+	res->obj = obj;
+	res->index = res->low_index = res->color = -1;
+	res->obj_state = GET_OBJ_STATE (obj);
+	res->lock_word = o [1];
 
-	memset (&new_entry, 0, sizeof (ScanData));
-
-	new_entry.obj = obj;
-	new_entry.index = new_entry.low_index = new_entry.color = -1;
-
-	g_assert (sgen_hash_table_replace (&_hash_table, obj, &new_entry, NULL));
-
-	return sgen_hash_table_lookup (&_hash_table, obj);
+	o [0] |= SGEN_VTABLE_BITS_MASK;
+	o [1] = (mword)res;
+	return res;
 }
 
 static ScanData*
 find_data (MonoObject *obj)
 {
-	return sgen_hash_table_lookup (&_hash_table, obj);
+	ScanData *a = NULL;
+	mword *o = (mword*)obj;
+	if ((o [0] & SGEN_VTABLE_BITS_MASK) == SGEN_VTABLE_BITS_MASK)
+		a = (ScanData*)o [1];
+	return a;
 }
 
 static void
 clear_after_processing (void)	
 {
-	
+	ObjectBucket *cur;
+
+	for (cur = root_alloc; cur; cur = cur->next) {
+		ScanData *sd;
+		for (sd = &cur->data [0]; sd < cur->next_data; ++sd) {
+			mword *o = (mword*)sd->obj;
+			o [0] &= ~SGEN_VTABLE_BITS_MASK;
+			o [0] |= sd->obj_state;
+			o [1] = sd->lock_word;		
+		}
+	}
 }
+
+static MonoObject*
+bridge_object_forward (MonoObject *obj)
+{
+	MonoObject *fwd;
+	mword *o = (mword*)obj;
+	if ((o [0] & SGEN_VTABLE_BITS_MASK) == SGEN_VTABLE_BITS_MASK)
+		return obj;
+
+	fwd = SGEN_OBJECT_IS_FORWARDED (obj);
+	return fwd ? fwd : obj;
+}
+
 
 static void
 clear_data (void)	
 {
-	sgen_hash_table_clean (&_hash_table);
+	ObjectBucket *cur = root_alloc;
+
+	scan_object_count = 0;
+
+	while (cur) {
+		ObjectBucket *tmp = cur->next;
+		sgen_free_internal (cur, INTERNAL_MEM_TARJAN_OBJ_BUCKET);
+		cur = tmp;
+	}
+
+	root_alloc = cur_alloc = NULL;
 }
 
 static int
 object_data_count (void)
 {
-	return _hash_table.num_entries;
+	return scan_object_count;
 }
 
 
 static const char*
 safe_name_bridge (MonoObject *obj)
 {
-	return sgen_safe_name (obj);
+	MonoVTable *vt = (MonoVTable*)SGEN_LOAD_VTABLE (obj);
+	return vt->klass->name;
 }
 
 static ScanData*
@@ -506,9 +588,10 @@ static void
 push_object (MonoObject *obj)
 {
 	ScanData *data;
-	MonoObject *fwd = SGEN_OBJECT_IS_FORWARDED (obj);
-	if (fwd)
-		obj = fwd;
+	// MonoObject *fwd = SGEN_OBJECT_IS_FORWARDED (obj);
+	// if (fwd)
+	// 	obj = fwd;
+	obj = bridge_object_forward (obj);
 
 #if DUMP_OBJS
 	printf ("\t%p %s\n", obj, safe_name_bridge (obj));
@@ -582,9 +665,10 @@ static void
 compute_low_index (ScanData *data, MonoObject *obj)
 {
 	ScanData *other;
-	MonoObject *fwd = SGEN_OBJECT_IS_FORWARDED (obj);
-	if (fwd)
-		obj = fwd;
+	// MonoObject *fwd = SGEN_OBJECT_IS_FORWARDED (obj);
+	// if (fwd)
+	// 	obj = fwd;
+	obj = bridge_object_forward (obj);
 
 	other = find_data (obj);
 
@@ -615,7 +699,7 @@ compute_low (ScanData *data)
 {
 	MonoObject *obj = data->obj;
 	char *start = (char*)obj;
-
+	
 	#include "sgen-scan-object.h"
 }
 
@@ -857,6 +941,8 @@ processing_stw_step (void)
 
 	SGEN_TV_GETTIME (curtime);
 
+	obj_alloc_init ();
+
 	bridge_count = dyn_array_ptr_size (&registered_bridges);
 	for (i = 0; i < bridge_count ; ++i)
 		register_bridge_object (dyn_array_ptr_get (&registered_bridges, i));
@@ -1096,6 +1182,8 @@ sgen_tarjan_bridge_init (SgenBridgeProcessor *collector)
 	collector->enable_accounting = enable_accounting;
 	// collector->set_dump_prefix = set_dump_prefix;
 
+	sgen_register_fixed_internal_mem_type (INTERNAL_MEM_TARJAN_OBJ_BUCKET, BUCKET_SIZE);
+	g_assert (sizeof (ObjectBucket) <= BUCKET_SIZE);
 	bridge_processor = collector;
 }
 
