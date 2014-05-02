@@ -354,7 +354,7 @@ class_kind (MonoClass *class)
 }
 
 //enable unsage logging
-// #define DUMP_GRAPH 1
+#define DUMP_GRAPH 1
 // #define DUMP_OBJS 1
 
 enum {
@@ -391,7 +391,6 @@ typedef struct {
 	gboolean visited_for_xrefs : 1;
 } ColorData;
 
-static SgenHashTable _hash_table = SGEN_HASH_TABLE_INIT (INTERNAL_MEM_TARJAN_BRIDGE_HASH_TABLE, INTERNAL_MEM_TARJAN_BRIDGE_HASH_TABLE_ENTRY, sizeof (ScanData), mono_aligned_addr_hash, NULL);
 
 static DynPtrArray scan_stack, loop_stack, registered_bridges, color_table;
 static DynIntArray low_color, xref_merge_array;
@@ -403,6 +402,8 @@ static int xref_count;
 
 static size_t setup_time, tarjan_time, scc_setup_time, gather_xref_time, xref_setup_time, cleanup_time;
 static SgenBridgeProcessor *bridge_processor;
+
+static SgenHashTable _hash_table = SGEN_HASH_TABLE_INIT (INTERNAL_MEM_TARJAN_BRIDGE_HASH_TABLE, INTERNAL_MEM_TARJAN_BRIDGE_HASH_TABLE_ENTRY, sizeof (ScanData), mono_aligned_addr_hash, NULL);
 
 static ScanData*
 create_data (MonoObject *obj)
@@ -426,6 +427,12 @@ find_data (MonoObject *obj)
 }
 
 static void
+clear_after_processing (void)	
+{
+	
+}
+
+static void
 clear_data (void)	
 {
 	sgen_hash_table_clean (&_hash_table);
@@ -446,6 +453,13 @@ find_or_create_data (MonoObject *obj)
 	return entry;
 }
 
+static const char*
+safe_name_bridge (MonoObject *obj)
+{
+	return sgen_safe_name (obj);
+}
+
+//----------
 	
 static int
 new_color (gboolean force_new, ColorData **outcolor)
@@ -495,11 +509,11 @@ push_object (MonoObject *obj)
 		obj = fwd;
 
 #if DUMP_OBJS
-	printf ("\t%p %s\n", obj, sgen_safe_name (obj));
+	printf ("\t%p %s\n", obj, safe_name_bridge (obj));
 #endif
 
 #if DUMP_GRAPH
-	printf ("\t= pushing %p %s -> ", obj, sgen_safe_name (obj));
+	printf ("\t= pushing %p %s -> ", obj, safe_name_bridge (obj));
 #endif
 	/* Object types we can ignore */
 	if (is_opaque_object (obj)) {
@@ -552,11 +566,11 @@ push_all (ScanData *data)
 	char *start = (char*)obj;
 
 #if DUMP_GRAPH
-	printf ("**scanning %p %s\n", obj, sgen_safe_name (obj));
+	printf ("**scanning %p %s\n", obj, safe_name_bridge (obj));
 #endif
 
 #if DUMP_OBJS
-	printf ("> %p %s\n", obj, sgen_safe_name (obj));
+	printf ("> %p %s\n", obj, safe_name_bridge (obj));
 #endif
 	#include "sgen-scan-object.h"
 }
@@ -573,7 +587,7 @@ compute_low_index (ScanData *data, MonoObject *obj)
 	other = find_data (obj);
 
 #if DUMP_GRAPH
-	printf ("\tcompute low %p ->%p (%s) %p (%d / %d)\n", data->obj, obj, sgen_safe_name (obj), other, other->index, other->low_index);
+	printf ("\tcompute low %p ->%p (%s) %p (%d / %d)\n", data->obj, obj, safe_name_bridge (obj), other, other->index, other->low_index);
 #endif
 	if (!other)
 		return;
@@ -636,7 +650,7 @@ create_scc (ScanData *data)
 	}
 
 #if DUMP_GRAPH
-	printf ("|SCC rooted in %s (%p) has bridge %d\n", sgen_safe_name (data->obj), data->obj, found_bridge);
+	printf ("|SCC rooted in %s (%p) has bridge %d\n", safe_name_bridge (data->obj), data->obj, found_bridge);
 	printf ("\tpoints-to-colors: ");
 	for (i = 0; i < dyn_array_int_size (&low_color); ++i)
 		printf ("%d ", dyn_array_int_get (&low_color, i));
@@ -660,7 +674,7 @@ create_scc (ScanData *data)
 		ScanData *other = dyn_array_ptr_pop (&loop_stack);
 
 #if DUMP_GRAPH
-		printf ("\tmember %s (%p) index %d low-index %d color %d state %d\n", sgen_safe_name (other->obj), other->obj, other->index, other->low_index, other->color, other->state);
+		printf ("\tmember %s (%p) index %d low-index %d color %d state %d\n", safe_name_bridge (other->obj), other->obj, other->index, other->low_index, other->color, other->state);
 #endif
 
 		other->color = color;
@@ -726,7 +740,7 @@ dfs (void)
 			dyn_array_ptr_push (&loop_stack, data);
 
 #if DUMP_GRAPH
-			printf ("+scanning %s (%p) index %d color %d\n", sgen_safe_name (data->obj), data->obj, data->index, data->color);
+			printf ("+scanning %s (%p) index %d color %d\n", safe_name_bridge (data->obj), data->obj, data->index, data->color);
 #endif
 			/*push all refs */
 			push_all (data);
@@ -735,13 +749,13 @@ dfs (void)
 			data->state = FINISHED_ON_STACK;
 
 #if DUMP_GRAPH
-			printf ("-finishing %s (%p) index %d low-index %d color %d\n", sgen_safe_name (data->obj), data->obj, data->index, data->low_index, data->color);
+			printf ("-finishing %s (%p) index %d low-index %d color %d\n", safe_name_bridge (data->obj), data->obj, data->index, data->low_index, data->color);
 #endif
 
 			/* Compute low index */
 			compute_low (data);
 #if DUMP_GRAPH
-			printf ("-finished %s (%p) index %d low-index %d color %d\n", sgen_safe_name (data->obj), data->obj, data->index, data->low_index, data->color);
+			printf ("-finished %s (%p) index %d low-index %d color %d\n", safe_name_bridge (data->obj), data->obj, data->index, data->low_index, data->color);
 #endif
 			//SCC root
 			if (data->index == data->low_index)
@@ -865,11 +879,13 @@ processing_stw_step (void)
 	printf ("bridges:\n");
 	for (i = 0; i < bridge_count; ++i) {
 		ScanData *sd = find_or_create_data (dyn_array_ptr_get (&registered_bridges, i));
-		printf ("\t%s (%p) index %d color %d\n", sgen_safe_name (sd->obj), sd->obj, sd->index, sd->color);
+		printf ("\t%s (%p) index %d color %d\n", safe_name_bridge (sd->obj), sd->obj, sd->index, sd->color);
 	}
 
 	dump_color_table (" after tarjan", FALSE);
 #endif
+
+	clear_after_processing ();
 }
 
 
