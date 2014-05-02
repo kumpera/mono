@@ -307,7 +307,7 @@ typedef struct {
 
 
 static DynPtrArray scan_stack, loop_stack, registered_bridges, color_table;
-static DynIntArray low_color, xref_merge_array;
+static DynIntArray color_merge_array;
 
 static int ignored_objects;
 static int object_index;
@@ -470,7 +470,7 @@ new_color (gboolean force_new, ColorData **outcolor)
 
 	cd = sgen_alloc_internal_dynamic (sizeof (ColorData), INTERNAL_MEM_BRIDGE_DATA, TRUE);
 	cd->api_index = -1;
-	dyn_array_int_set_all (&cd->other_colors, &low_color);
+	dyn_array_int_set_all (&cd->other_colors, &color_merge_array);
 
 	dyn_array_ptr_add (&color_table, cd);
 	*outcolor = cd;
@@ -596,7 +596,7 @@ compute_low_index (ScanData *data, MonoObject *obj)
 
 	cd = dyn_array_ptr_get (&color_table, other->color);
 	if (!cd->visited) {
-		dyn_array_int_add (&low_color, other->color);
+		dyn_array_int_add (&color_merge_array, other->color);
 		cd->visited = TRUE;
 	}
 }
@@ -620,12 +620,12 @@ static int
 reduce_color (ColorData **outcolor)
 {
 	int color;
-	int size = dyn_array_int_size (&low_color);
+	int size = dyn_array_int_size (&color_merge_array);
 
 	if (size == 0)
 		color = -1;
 	else if (size == 1) {
-		color = dyn_array_int_get (&low_color, 0);
+		color = dyn_array_int_get (&color_merge_array, 0);
 		*outcolor = dyn_array_ptr_get (&color_table, color);
 	} else
 		color = new_color (FALSE, outcolor);
@@ -651,8 +651,8 @@ create_scc (ScanData *data)
 #if DUMP_GRAPH
 	printf ("|SCC rooted in %s (%p) has bridge %d\n", safe_name_bridge (data->obj), data->obj, found_bridge);
 	printf ("\tpoints-to-colors: ");
-	for (i = 0; i < dyn_array_int_size (&low_color); ++i)
-		printf ("%d ", dyn_array_int_get (&low_color, i));
+	for (i = 0; i < dyn_array_int_size (&color_merge_array); ++i)
+		printf ("%d ", dyn_array_int_get (&color_merge_array, i));
 	printf ("\n");
 
 	printf ("loop stack: ");
@@ -697,12 +697,12 @@ create_scc (ScanData *data)
 	}
 	g_assert (found);
 
-	for (i = 0; i < dyn_array_int_size (&low_color); ++i) {
-		ColorData *cd = dyn_array_ptr_get (&color_table, dyn_array_int_get (&low_color, i));
+	for (i = 0; i < dyn_array_int_size (&color_merge_array); ++i) {
+		ColorData *cd = dyn_array_ptr_get (&color_table, dyn_array_int_get (&color_merge_array, i));
 		g_assert (cd->visited);
 		cd->visited = FALSE;
 	}
-	dyn_array_int_set_size (&low_color, 0);
+	dyn_array_int_set_size (&color_merge_array, 0);
 	found_bridge = FALSE;
 }
 
@@ -712,7 +712,7 @@ dfs (void)
 	g_assert (dyn_array_ptr_size (&scan_stack) == 1);
 	g_assert (dyn_array_ptr_size (&loop_stack) == 0);
 
-	dyn_array_int_set_size (&low_color, 0);
+	dyn_array_int_set_size (&color_merge_array, 0);
 
 	while (dyn_array_ptr_size (&scan_stack) > 0) {
 		ScanData *data = dyn_array_ptr_pop (&scan_stack);
@@ -906,7 +906,7 @@ gather_xrefs (ColorData *color)
 			continue;
 		src->visited = TRUE;
 		if (dyn_array_ptr_size (&src->bridges))
-			dyn_array_int_add (&xref_merge_array, index);
+			dyn_array_int_add (&color_merge_array, index);
 		else
 			gather_xrefs (src);
 	}
@@ -989,10 +989,10 @@ processing_build_callback_data (int generation)
 		if (!bridges)
 			continue;
 
-		dyn_array_int_set_size (&xref_merge_array, 0);
+		dyn_array_int_set_size (&color_merge_array, 0);
 		gather_xrefs (cd);
 		reset_xrefs (cd);
-		dyn_array_int_set_all (&cd->other_colors, &xref_merge_array);
+		dyn_array_int_set_all (&cd->other_colors, &color_merge_array);
 		xref_count += dyn_array_int_size (&cd->other_colors);
 	}
 
