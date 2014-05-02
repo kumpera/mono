@@ -391,7 +391,7 @@ typedef struct {
 	gboolean visited_for_xrefs : 1;
 } ColorData;
 
-static SgenHashTable hash_table = SGEN_HASH_TABLE_INIT (INTERNAL_MEM_TARJAN_BRIDGE_HASH_TABLE, INTERNAL_MEM_TARJAN_BRIDGE_HASH_TABLE_ENTRY, sizeof (ScanData), mono_aligned_addr_hash, NULL);
+static SgenHashTable _hash_table = SGEN_HASH_TABLE_INIT (INTERNAL_MEM_TARJAN_BRIDGE_HASH_TABLE, INTERNAL_MEM_TARJAN_BRIDGE_HASH_TABLE_ENTRY, sizeof (ScanData), mono_aligned_addr_hash, NULL);
 
 static DynPtrArray scan_stack, loop_stack, registered_bridges, color_table;
 static DynIntArray low_color, xref_merge_array;
@@ -404,7 +404,49 @@ static int xref_count;
 static size_t setup_time, tarjan_time, scc_setup_time, gather_xref_time, xref_setup_time, cleanup_time;
 static SgenBridgeProcessor *bridge_processor;
 
+static ScanData*
+create_data (MonoObject *obj)
+{
+	ScanData new_entry;
 
+	memset (&new_entry, 0, sizeof (ScanData));
+
+	new_entry.obj = obj;
+	new_entry.index = new_entry.low_index = new_entry.color = -1;
+
+	g_assert (sgen_hash_table_replace (&_hash_table, obj, &new_entry, NULL));
+
+	return sgen_hash_table_lookup (&_hash_table, obj);
+}
+
+static ScanData*
+find_data (MonoObject *obj)
+{
+	return sgen_hash_table_lookup (&_hash_table, obj);
+}
+
+static void
+clear_data (void)	
+{
+	sgen_hash_table_clean (&_hash_table);
+}
+
+static int
+object_data_count (void)
+{
+	return _hash_table.num_entries;
+}
+
+static ScanData*
+find_or_create_data (MonoObject *obj)
+{
+	ScanData *entry = find_data (obj);
+	if (!entry)
+		entry = create_data (obj);
+	return entry;
+}
+
+	
 static int
 new_color (gboolean force_new, ColorData **outcolor)
 {
@@ -425,30 +467,12 @@ new_color (gboolean force_new, ColorData **outcolor)
 }
 
 
-static ScanData*
-get_scan_data (MonoObject *obj)
-{
-	ScanData *entry = sgen_hash_table_lookup (&hash_table, obj);
-	ScanData new_entry;
-
-	if (entry)
-		return entry;
-
-	memset (&new_entry, 0, sizeof (ScanData));
-
-	new_entry.obj = obj;
-	new_entry.index = new_entry.low_index = new_entry.color = -1;
-
-	sgen_hash_table_replace (&hash_table, obj, &new_entry, NULL);
-
-	return sgen_hash_table_lookup (&hash_table, obj);
-}
-
 
 static void
 register_bridge_object (MonoObject *obj)
 {
-	get_scan_data (obj)->is_bridge = TRUE;
+	// create_data (obj)->is_bridge = TRUE;
+	find_or_create_data (obj)->is_bridge = TRUE;
 }
 
 static gboolean
@@ -485,7 +509,7 @@ push_object (MonoObject *obj)
 		return;
 	}
 
-	data = sgen_hash_table_lookup (&hash_table, obj);
+	data = find_data (obj);
 
 	/* Already marked - XXX must be done this way as the bridge themselves are alive. */
 	if (data && data->state != INITIAL) {
@@ -508,7 +532,8 @@ push_object (MonoObject *obj)
 #endif
 
 	if (!data)
-		data = get_scan_data (obj);
+//		data = create_data (obj);
+		data = find_or_create_data (obj);
 	g_assert (data->state == INITIAL);
 	g_assert (data->index == -1);
 	dyn_array_ptr_push (&scan_stack, data);
@@ -545,7 +570,7 @@ compute_low_index (ScanData *data, MonoObject *obj)
 	if (fwd)
 		obj = fwd;
 
-	other = sgen_hash_table_lookup (&hash_table, obj);
+	other = find_data (obj);
 
 #if DUMP_GRAPH
 	printf ("\tcompute low %p ->%p (%s) %p (%d / %d)\n", data->obj, obj, sgen_safe_name (obj), other, other->index, other->low_index);
@@ -753,7 +778,7 @@ cleanup (void)
 	dyn_array_ptr_set_size (&loop_stack, 0);
 	dyn_array_ptr_set_size (&registered_bridges, 0);
 	dyn_array_ptr_set_size (&color_table, 0);
-	sgen_hash_table_clean (&hash_table);
+	clear_data ();
 	object_index = 0;
 	num_colors_with_bridges = 0;
 }
@@ -777,7 +802,7 @@ dump_color_table (const char *why, gboolean do_index)
 			printf (" bridges: ");
 			for (j = 0; j < dyn_array_ptr_size (&cd->bridges); ++j) {
 				MonoObject *obj = dyn_array_ptr_get (&cd->bridges, j);
-				ScanData *data = get_scan_data (obj);
+				ScanData *data = find_or_create_data (obj);
 				printf ("%d ", data->index);
 			}
 		}
@@ -823,7 +848,8 @@ processing_stw_step (void)
 	setup_time = step_timer (&curtime);
 
 	for (i = 0; i < bridge_count; ++i) {
-		ScanData *sd = get_scan_data (dyn_array_ptr_get (&registered_bridges, i));
+		ScanData *sd = find_or_create_data (dyn_array_ptr_get (&registered_bridges, i));
+		// ScanData *sd = find_data (dyn_array_ptr_get (&registered_bridges, i));
 		if (sd->state == INITIAL) {
 			dyn_array_ptr_push (&scan_stack, sd);
 			dfs ();
@@ -838,7 +864,7 @@ processing_stw_step (void)
 	printf ("----summary----\n");
 	printf ("bridges:\n");
 	for (i = 0; i < bridge_count; ++i) {
-		ScanData *sd = get_scan_data (dyn_array_ptr_get (&registered_bridges, i));
+		ScanData *sd = find_or_create_data (dyn_array_ptr_get (&registered_bridges, i));
 		printf ("\t%s (%p) index %d color %d\n", sgen_safe_name (sd->obj), sd->obj, sd->index, sd->color);
 	}
 
@@ -993,7 +1019,7 @@ processing_after_callback (int generation)
 {
 	gint64 curtime;
 	int bridge_count = dyn_array_ptr_size (&registered_bridges);
-	int object_count = hash_table.num_entries;
+	int object_count = object_data_count ();
 	int color_count = dyn_array_ptr_size (&color_table);
 	int scc_count = num_colors_with_bridges;
 
