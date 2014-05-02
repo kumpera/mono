@@ -309,7 +309,7 @@ bridge_test_cross_reference (int num_sccs, MonoGCBridgeSCC **sccs, int num_xrefs
 	//	g_print ("--- SCC %d\n", i);
 		for (j = 0; j < sccs [i]->num_objs; ++j) {
 	//		g_print ("  %s\n", sgen_safe_name (sccs [i]->objs [j]));
-			if (i & 1) /*retain half of the bridged objects */
+			// if (i & 1) /*retain half of the bridged objects */
 				sccs [i]->is_alive = TRUE;
 		}
 	}
