@@ -354,7 +354,7 @@ class_kind (MonoClass *class)
 }
 
 //enable unsage logging
-#define DUMP_GRAPH 1
+// #define DUMP_GRAPH 1
 // #define DUMP_OBJS 1
 
 enum {
@@ -403,6 +403,7 @@ static int xref_count;
 static size_t setup_time, tarjan_time, scc_setup_time, gather_xref_time, xref_setup_time, cleanup_time;
 static SgenBridgeProcessor *bridge_processor;
 
+
 static SgenHashTable _hash_table = SGEN_HASH_TABLE_INIT (INTERNAL_MEM_TARJAN_BRIDGE_HASH_TABLE, INTERNAL_MEM_TARJAN_BRIDGE_HASH_TABLE_ENTRY, sizeof (ScanData), mono_aligned_addr_hash, NULL);
 
 static ScanData*
@@ -444,6 +445,13 @@ object_data_count (void)
 	return _hash_table.num_entries;
 }
 
+
+static const char*
+safe_name_bridge (MonoObject *obj)
+{
+	return sgen_safe_name (obj);
+}
+
 static ScanData*
 find_or_create_data (MonoObject *obj)
 {
@@ -451,12 +459,6 @@ find_or_create_data (MonoObject *obj)
 	if (!entry)
 		entry = create_data (obj);
 	return entry;
-}
-
-static const char*
-safe_name_bridge (MonoObject *obj)
-{
-	return sgen_safe_name (obj);
 }
 
 //----------
