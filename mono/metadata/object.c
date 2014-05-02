@@ -1935,11 +1935,14 @@ mono_class_create_runtime_vtable (MonoDomain *domain, MonoClass *class, gboolean
 	mono_stats.used_class_count++;
 	mono_stats.class_vtable_size += vtable_size;
 	interface_offsets = mono_domain_alloc0 (domain, vtable_size);
+	g_assert ( (((int)interface_offsets) & 7) == 0);
 
 	if (ARCH_USE_IMT)
 		vt = (MonoVTable*) ((char*)interface_offsets + imt_table_bytes);
 	else
 		vt = (MonoVTable*) (interface_offsets + class->max_interface_id + 1);
+
+	g_assert ( (((int)vt) & 7) == 0);
 	vt->klass = class;
 	vt->rank = class->rank;
 	vt->domain = domain;
