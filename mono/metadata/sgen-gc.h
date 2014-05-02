@@ -317,7 +317,9 @@ typedef struct {
  */
 #define SGEN_FORWARDED_BIT 1
 #define SGEN_PINNED_BIT 2
-#define SGEN_VTABLE_BITS_MASK 0x3
+#define SGEN_BRIDGED_BIT 4
+
+#define SGEN_VTABLE_BITS_MASK 0x7
 
 /* returns NULL if not forwarded, or the forwarded address */
 #define SGEN_OBJECT_IS_FORWARDED(obj) (((mword*)(obj))[0] & SGEN_FORWARDED_BIT ? (void*)(((mword*)(obj))[0] & ~SGEN_VTABLE_BITS_MASK) : NULL)
@@ -333,7 +335,6 @@ typedef struct {
 #define SGEN_UNPIN_OBJECT(obj) do {	\
 		((mword*)(obj))[0] &= ~SGEN_PINNED_BIT;	\
 	} while (0)
-
 /*
  * Since we set bits in the vtable, use the macro to load it from the pointer to
  * an object that is potentially pinned.

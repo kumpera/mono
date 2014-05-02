@@ -366,6 +366,7 @@ enum {
 
 typedef struct {
 	MonoObject *obj; //XXX this can be eliminated.
+	mword lock_word;
 
 	int index;
 	int low_index;
@@ -391,7 +392,7 @@ typedef struct {
 	gboolean visited_for_xrefs : 1;
 } ColorData;
 
-static SgenHashTable _hash_table = SGEN_HASH_TABLE_INIT (INTERNAL_MEM_TARJAN_BRIDGE_HASH_TABLE, INTERNAL_MEM_TARJAN_BRIDGE_HASH_TABLE_ENTRY, sizeof (ScanData), mono_aligned_addr_hash, NULL);
+// static SgenHashTable _hash_table = SGEN_HASH_TABLE_INIT (INTERNAL_MEM_TARJAN_BRIDGE_HASH_TABLE, INTERNAL_MEM_TARJAN_BRIDGE_HASH_TABLE_ENTRY, sizeof (ScanData), mono_aligned_addr_hash, NULL);
 
 static DynPtrArray scan_stack, loop_stack, registered_bridges, color_table;
 static DynIntArray low_color, xref_merge_array;
@@ -404,37 +405,80 @@ static int xref_count;
 static size_t setup_time, tarjan_time, scc_setup_time, gather_xref_time, xref_setup_time, cleanup_time;
 static SgenBridgeProcessor *bridge_processor;
 
+static DynArray scan_data_array;
+
+
+static int
+dyn_array_sd_size (DynArray *array)
+{
+	return array->size;
+}
+
+static void
+dyn_array_sd_set_size (DynArray *array, int size)
+{
+	array->size = size;
+}
+
+static ScanData*
+dyn_array_sd_add (DynArray *array)
+{
+	return dyn_array_add (array, sizeof (ScanData));
+}
+
+static ScanData*
+dyn_array_sd_get (DynArray *array, int x)
+{
+	return &((ScanData*)array->data)[x];
+}
+
+
+#define SGEN_OBJECT_IS_BRIDGE(obj) (((mword*)(obj))[0] & SGEN_BRIDGED_BIT)
+#define SGEN_OBJECT_GET_BRIDGE(obj) (void*)(((mword*)(obj))[1])
+
+
 static ScanData*
 create_data (MonoObject *obj)
 {
-	ScanData new_entry;
+	mword *op = (mword*)obj;
+	ScanData *new_entry = dyn_array_sd_add (&scan_data_array);
 
-	memset (&new_entry, 0, sizeof (ScanData));
+	new_entry->obj = obj;
+	new_entry->lock_word = op [1];
 
-	new_entry.obj = obj;
-	new_entry.index = new_entry.low_index = new_entry.color = -1;
+	new_entry->obj = obj;
+	new_entry->index = new_entry->low_index = new_entry->color = -1;
 
-	g_assert (sgen_hash_table_replace (&_hash_table, obj, &new_entry, NULL));
-
-	return sgen_hash_table_lookup (&_hash_table, obj);
+	op [1] = (mword)new_entry;
+	op [0] |= SGEN_BRIDGED_BIT;
+	return new_entry;
 }
 
 static ScanData*
 find_data (MonoObject *obj)
 {
-	return sgen_hash_table_lookup (&_hash_table, obj);
+	if (SGEN_OBJECT_IS_BRIDGE (obj))
+		return SGEN_OBJECT_GET_BRIDGE (obj);
+	return NULL;
 }
 
 static void
 clear_data (void)	
 {
-	sgen_hash_table_clean (&_hash_table);
+	int i;
+	for (i = 0; i < scan_data_array.size; ++i) {
+		ScanData *sd = dyn_array_sd_get (&scan_data_array, i);
+		mword *op = (mword*)sd->obj;
+		op [0] &= ~(mword)SGEN_BRIDGED_BIT;
+		op [1] = sd->lock_word;
+	}
+	dyn_array_sd_set_size (&scan_data_array, 0);
 }
 
 static int
 object_data_count (void)
 {
-	return _hash_table.num_entries;
+	return scan_data_array.size;
 }
 
 static ScanData*
