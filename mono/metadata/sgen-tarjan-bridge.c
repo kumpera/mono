@@ -232,90 +232,6 @@ dyn_array_ptr_pop (DynPtrArray *da)
 	return p;
 }
 
-/* Merge code*/
-
-static DynIntArray merge_array;
-
-static gboolean
-dyn_array_int_contains (DynIntArray *da, int x)
-{
-	int i;
-	for (i = 0; i < dyn_array_int_size (da); ++i)
-		if (dyn_array_int_get (da, i) == x)
-			return TRUE;
-	return FALSE;
-}
-
-
-static void
-dyn_array_int_merge (DynIntArray *dst, DynIntArray *src)
-{
-	int i, j;
-
-	dyn_array_int_ensure_capacity (&merge_array, dyn_array_int_size (dst) + dyn_array_int_size (src));
-	dyn_array_int_set_size (&merge_array, 0);
-
-	for (i = j = 0; i < dyn_array_int_size (dst) || j < dyn_array_int_size (src); ) {
-		if (i < dyn_array_int_size (dst) && j < dyn_array_int_size (src)) {
-			int a = dyn_array_int_get (dst, i); 
-			int b = dyn_array_int_get (src, j); 
-			if (a < b) {
-				dyn_array_int_add (&merge_array, a);
-				++i;
-			} else if (a == b) {
-				dyn_array_int_add (&merge_array, a);
-				++i;
-				++j;	
-			} else {
-				dyn_array_int_add (&merge_array, b);
-				++j;
-			}
-		} else if (i < dyn_array_int_size (dst)) {
-			dyn_array_int_add (&merge_array, dyn_array_int_get (dst, i));
-			++i;
-		} else {
-			dyn_array_int_add (&merge_array, dyn_array_int_get (src, j));
-			++j;
-		}
-	}
-
-	if (dyn_array_int_size (&merge_array) > dyn_array_int_size (dst)) {
-		dyn_array_int_set_all (dst, &merge_array);
-	}
-}
-
-static void
-dyn_array_int_merge_one (DynIntArray *array, int value)
-{
-	int i;
-	int tmp;
-	int size = dyn_array_int_size (array);
-
-	for (i = 0; i < size; ++i) {
-		if (dyn_array_int_get (array, i) == value)
-			return;
-		else if (dyn_array_int_get (array, i) > value)
-			break;
-	}
-
-	dyn_array_int_ensure_capacity (array, size + 1);
-
-	if (i < size) {
-		tmp = dyn_array_int_get (array, i);
-		for (; i < size; ++i) {
-			dyn_array_int_set (array, i, value);
-			value = tmp;
-			tmp = dyn_array_int_get (array, i + 1);
-		}
-		dyn_array_int_set (array, size, value);
-	} else {
-		dyn_array_int_set (array, size, value);
-	}
-
-	dyn_array_int_set_size (array, size + 1);
-}
-
-
 static void
 enable_accounting (void)
 {
@@ -385,8 +301,8 @@ Optimizations:
 typedef struct {
 	DynIntArray other_colors;
 	DynPtrArray bridges;
-	int api_index              : 31;
-	gboolean visited_for_xrefs : 1;
+	int api_index    : 31;
+	unsigned visited : 1;
 } ColorData;
 
 
@@ -658,6 +574,7 @@ static void
 compute_low_index (ScanData *data, MonoObject *obj)
 {
 	ScanData *other;
+	ColorData *cd;
 	obj = bridge_object_forward (obj);
 
 	other = find_data (obj);
@@ -677,7 +594,11 @@ compute_low_index (ScanData *data, MonoObject *obj)
 	if (other->color == -1)
 		return;
 
-		dyn_array_int_merge_one (&low_color, other->color);
+	cd = dyn_array_ptr_get (&color_table, other->color);
+	if (!cd->visited) {
+		dyn_array_int_add (&low_color, other->color);
+		cd->visited = TRUE;
+	}
 }
 
 #undef HANDLE_PTR
@@ -776,6 +697,11 @@ create_scc (ScanData *data)
 	}
 	g_assert (found);
 
+	for (i = 0; i < dyn_array_int_size (&low_color); ++i) {
+		ColorData *cd = dyn_array_ptr_get (&color_table, dyn_array_int_get (&low_color, i));
+		g_assert (cd->visited);
+		cd->visited = FALSE;
+	}
 	dyn_array_int_set_size (&low_color, 0);
 	found_bridge = FALSE;
 }
@@ -976,9 +902,9 @@ gather_xrefs (ColorData *color)
 	for (i = 0; i < dyn_array_int_size (&color->other_colors); ++i) {
 		int index = dyn_array_int_get (&color->other_colors, i);
 		ColorData *src = dyn_array_ptr_get (&color_table, index);
-		if (src->visited_for_xrefs)
+		if (src->visited)
 			continue;
-		src->visited_for_xrefs = TRUE;
+		src->visited = TRUE;
 		if (dyn_array_ptr_size (&src->bridges))
 			dyn_array_int_add (&xref_merge_array, index);
 		else
@@ -993,9 +919,9 @@ reset_xrefs (ColorData *color)
 	for (i = 0; i < dyn_array_int_size (&color->other_colors); ++i) {
 		int index = dyn_array_int_get (&color->other_colors, i);
 		ColorData *src = dyn_array_ptr_get (&color_table, index);
-		if (!src->visited_for_xrefs)
+		if (!src->visited)
 			continue;
-		src->visited_for_xrefs = FALSE;
+		src->visited = FALSE;
 		if (!dyn_array_ptr_size (&src->bridges))
 			reset_xrefs (src);
 	}
