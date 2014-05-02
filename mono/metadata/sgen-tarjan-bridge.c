@@ -401,8 +401,6 @@ static int xref_count;
 static size_t setup_time, tarjan_time, scc_setup_time, gather_xref_time, xref_setup_time, cleanup_time;
 static SgenBridgeProcessor *bridge_processor;
 
-#define GET_OBJ_STATE(o) (((mword)o) & SGEN_VTABLE_BITS_MASK)
-
 #define BUCKET_SIZE 8184
 #define NUM_SCAN_ENTRIES ((BUCKET_SIZE - SIZEOF_VOID_P * 2) / sizeof (ScanData))
 
@@ -457,7 +455,7 @@ create_data (MonoObject *obj)
 	ScanData *res = alloc_data ();
 	res->obj = obj;
 	res->index = res->low_index = res->color = -1;
-	res->obj_state = GET_OBJ_STATE (obj);
+	res->obj_state = o [0] & SGEN_VTABLE_BITS_MASK;
 	res->lock_word = o [1];
 
 	o [0] |= SGEN_VTABLE_BITS_MASK;
@@ -569,7 +567,6 @@ new_color (gboolean force_new, ColorData **outcolor)
 static void
 register_bridge_object (MonoObject *obj)
 {
-	// create_data (obj)->is_bridge = TRUE;
 	find_or_create_data (obj)->is_bridge = TRUE;
 }
 
@@ -588,9 +585,6 @@ static void
 push_object (MonoObject *obj)
 {
 	ScanData *data;
-	// MonoObject *fwd = SGEN_OBJECT_IS_FORWARDED (obj);
-	// if (fwd)
-	// 	obj = fwd;
 	obj = bridge_object_forward (obj);
 
 #if DUMP_OBJS
@@ -631,7 +625,6 @@ push_object (MonoObject *obj)
 #endif
 
 	if (!data)
-//		data = create_data (obj);
 		data = find_or_create_data (obj);
 	g_assert (data->state == INITIAL);
 	g_assert (data->index == -1);
@@ -665,9 +658,6 @@ static void
 compute_low_index (ScanData *data, MonoObject *obj)
 {
 	ScanData *other;
-	// MonoObject *fwd = SGEN_OBJECT_IS_FORWARDED (obj);
-	// if (fwd)
-	// 	obj = fwd;
 	obj = bridge_object_forward (obj);
 
 	other = find_data (obj);
@@ -684,7 +674,9 @@ compute_low_index (ScanData *data, MonoObject *obj)
 		data->low_index = other->low_index;
 
 	/* Compute the low color */
-	if (other->color != -1)
+	if (other->color == -1)
+		return;
+
 		dyn_array_int_merge_one (&low_color, other->color);
 }
 
