@@ -472,17 +472,17 @@ new_color (gboolean force_new, ColorData **outcolor)
 	ColorData *cd;
 	/* XXX Try to find an equal one and return it */
 	if (!force_new) {
-		int i = 0;
-		int hash = 0;
-		for (i = 0 ; i < dyn_array_int_size (&color_merge_array); ++i) {
-			hash += mix_hash (1 + dyn_array_int_get (&color_merge_array, i));
-		}
-		printf ("size %d hash %x\n", dyn_array_int_size (&color_merge_array), hash);
-		printf("\tcolors: ");
-		for (i = 0 ; i < dyn_array_int_size (&color_merge_array); ++i) {
-		    printf ("%d ", dyn_array_int_get (&color_merge_array, i));
-		}
-		printf ("\n");
+		// int i = 0;
+		// int hash = 0;
+		// for (i = 0 ; i < dyn_array_int_size (&color_merge_array); ++i) {
+		// 	hash += mix_hash (1 + dyn_array_int_get (&color_merge_array, i));
+		// }
+		// printf ("size %d hash %x\n", dyn_array_int_size (&color_merge_array), hash);
+		// printf("\tcolors: ");
+		// for (i = 0 ; i < dyn_array_int_size (&color_merge_array); ++i) {
+		//     printf ("%d ", dyn_array_int_get (&color_merge_array, i));
+		// }
+		// printf ("\n");
 	}
 
 	cd = sgen_alloc_internal_dynamic (sizeof (ColorData), INTERNAL_MEM_BRIDGE_DATA, TRUE);
