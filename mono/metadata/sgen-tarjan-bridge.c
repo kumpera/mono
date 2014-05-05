@@ -506,8 +506,9 @@ register_bridge_object (MonoObject *obj)
 static gboolean
 is_opaque_object (MonoObject *obj)
 {
-	if ((obj->vtable->gc_bits & SGEN_GC_BIT_BRIDGE_OPAQUE_OBJECT) == SGEN_GC_BIT_BRIDGE_OPAQUE_OBJECT) {
-		SGEN_LOG (6, "ignoring %s\n", obj->vtable->klass->name);
+	MonoVTable *vt = (MonoVTable*)SGEN_LOAD_VTABLE (obj);
+	if ((vt->gc_bits & SGEN_GC_BIT_BRIDGE_OPAQUE_OBJECT) == SGEN_GC_BIT_BRIDGE_OPAQUE_OBJECT) {
+		SGEN_LOG (6, "ignoring %s\n", vt->klass->name);
 		++ignored_objects;
 		return TRUE;
 	}
