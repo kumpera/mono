@@ -124,64 +124,6 @@ dyn_array_add (DynArray *da, int elem_size)
 	return p;
 }
 
-/* int */
-static void
-dyn_array_int_init (DynIntArray *da)
-{
-	dyn_array_init (&da->array);
-}
-
-static void
-dyn_array_int_uninit (DynIntArray *da)
-{
-	dyn_array_uninit (&da->array, sizeof (int));
-}
-
-static int
-dyn_array_int_size (DynIntArray *da)
-{
-	return da->array.size;
-}
-
-static void
-dyn_array_int_set_size (DynIntArray *da, int size)
-{
-	da->array.size = size;
-}
-
-static void
-dyn_array_int_add (DynIntArray *da, int x)
-{
-	int *p = dyn_array_add (&da->array, sizeof (int));
-	*p = x;
-}
-
-static int
-dyn_array_int_get (DynIntArray *da, int x)
-{
-	return ((int*)da->array.data)[x];
-}
-
-static void
-dyn_array_int_set (DynIntArray *da, int idx, int val)
-{
-	((int*)da->array.data)[idx] = val;
-}
-
-static void
-dyn_array_int_ensure_capacity (DynIntArray *da, int capacity)
-{
-	dyn_array_ensure_capacity (&da->array, capacity, sizeof (int));
-}
-
-static void
-dyn_array_int_set_all (DynIntArray *dst, DynIntArray *src)
-{
-	dyn_array_int_ensure_capacity (dst, src->array.size);
-	memcpy (dst->array.data, src->array.data, src->array.size * sizeof (int));
-	dst->array.size = src->array.size;
-}
-
 /* ptr */
 
 static void
