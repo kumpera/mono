@@ -607,7 +607,7 @@ new_color (gboolean force_new)
 static void
 register_bridge_object (MonoObject *obj)
 {
-	find_or_create_data (obj)->is_bridge = TRUE;
+	create_data (obj)->is_bridge = TRUE;
 }
 
 static gboolean
@@ -663,7 +663,7 @@ push_object (MonoObject *obj)
 #endif
 
 	if (!data)
-		data = find_or_create_data (obj);
+		data = create_data (obj);
 	g_assert (data->state == INITIAL);
 	g_assert (data->index == -1);
 	dyn_array_ptr_push (&scan_stack, data);
@@ -986,8 +986,7 @@ processing_stw_step (void)
 	setup_time = step_timer (&curtime);
 
 	for (i = 0; i < bridge_count; ++i) {
-		ScanData *sd = find_or_create_data (dyn_array_ptr_get (&registered_bridges, i));
-		// ScanData *sd = find_data (dyn_array_ptr_get (&registered_bridges, i));
+		ScanData *sd = find_data (dyn_array_ptr_get (&registered_bridges, i));
 		if (sd->state == INITIAL) {
 			dyn_array_ptr_push (&scan_stack, sd);
 			dfs ();
@@ -1002,7 +1001,7 @@ processing_stw_step (void)
 	printf ("----summary----\n");
 	printf ("bridges:\n");
 	for (i = 0; i < bridge_count; ++i) {
-		ScanData *sd = find_or_create_data (dyn_array_ptr_get (&registered_bridges, i));
+		ScanData *sd = find_data (dyn_array_ptr_get (&registered_bridges, i));
 		printf ("\t%s (%p) index %d color %p\n", safe_name_bridge (sd->obj), sd->obj, sd->index, sd->color);
 	}
 
@@ -1188,6 +1187,7 @@ processing_after_callback (int generation)
 		cleanup_time / 10000.0f);
 
 	cache_hits = cache_misses = 0;
+	ignored_objects = 0;
 	bridge_processing_in_progress = FALSE;
 }
 
