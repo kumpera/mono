@@ -484,37 +484,121 @@ find_or_create_data (MonoObject *obj)
 	return entry;
 }
 
+
 //----------
-	
+typedef struct {
+	ColorData *color;
+	int hash;
+} HashEntry;
+
+/*
+We tried 2/32, 2/128, 4/32, 4/128, 6/128 and 8/128.
+
+The performance cost between 4/128 and 8/128 is so small since cache movement happens completely in the same cacheline,
+making the extra space pretty much free.
+
+The cost between 32 and 128 itens is minimal too, it's mostly a fixed, setup cost.
+
+Memory wise, 4/32 takes 512 and 8/128 takes 8k, so it's quite reasonable.
+*/
+
+#define ELEMENTS_PER_BUCKET 8
+#define COLOR_CACHE_SIZE 128
+static HashEntry merge_cache [COLOR_CACHE_SIZE][ELEMENTS_PER_BUCKET];
+
 static int 
-mix_hash (int hash)
+mix_hash (size_t hash)
 {
 	return ((hash * 215497) >> 16) ^ (hash * 1823231) + hash;
 }
 
+static void
+reset_cache (void)
+{
+	memset (merge_cache, 0, sizeof (merge_cache));
+}
 
+
+static gboolean
+dyn_array_ptr_contains (DynPtrArray *da, void *x)
+{
+	int i;
+	for (i = 0; i < dyn_array_ptr_size (da); ++i)
+		if (dyn_array_ptr_get (da, i) == x)
+			return TRUE;
+	return FALSE;
+}
+
+static gboolean
+match_colors (DynPtrArray *a, DynPtrArray *b)
+{
+	int i;
+	if (dyn_array_ptr_size (a) != dyn_array_ptr_size (b))
+		return FALSE;
+
+	for (i = 0; i < dyn_array_ptr_size (a); ++i) {
+		if (!dyn_array_ptr_contains (b, dyn_array_ptr_get (a, i)))
+			return FALSE;
+	}
+	return TRUE;
+}
+
+static int cache_hits, cache_misses;
+
+static ColorData*
+find_in_cache (int *insert_index)
+{
+	HashEntry *bucket;
+	int i, hash, size, index;
+
+	size = dyn_array_ptr_size (&color_merge_array);
+	/* Cache checking is very ineficient with a lot of elements*/
+	if (size > 3)
+		return NULL;
+
+	hash = 0;
+	for (i = 0 ; i < size; ++i)
+		hash += mix_hash ((size_t)dyn_array_ptr_get (&color_merge_array, i));
+	if (!hash)
+		hash = 1;
+
+	index = hash & (COLOR_CACHE_SIZE - 1);
+	bucket = merge_cache [index];
+	for (i = 0; i < ELEMENTS_PER_BUCKET; ++i) {
+		if (bucket [i].hash != hash)
+			continue;
+		if (match_colors (&bucket [i].color->other_colors, &color_merge_array)) {
+			++cache_hits;
+			return bucket [i].color;
+		}
+	}
+
+	//move elements to the back
+	for (i = ELEMENTS_PER_BUCKET - 1; i > 0; --i)
+		bucket [i] = bucket [i - 1];
+	++cache_misses;
+	*insert_index = index;
+	bucket [0].hash = hash;
+	return NULL;
+}
 static ColorData*
 new_color (gboolean force_new)
 {
+	int i = -1;
 	ColorData *cd;
 	/* XXX Try to find an equal one and return it */
 	if (!force_new) {
-		// int i = 0;
-		// int hash = 0;
-		// for (i = 0 ; i < dyn_array_int_size (&color_merge_array); ++i) {
-		// 	hash += mix_hash (1 + dyn_array_int_get (&color_merge_array, i));
-		// }
-		// printf ("size %d hash %x\n", dyn_array_int_size (&color_merge_array), hash);
-		// printf("\tcolors: ");
-		// for (i = 0 ; i < dyn_array_int_size (&color_merge_array); ++i) {
-		//     printf ("%d ", dyn_array_int_get (&color_merge_array, i));
-		// }
-		// printf ("\n");
+		cd = find_in_cache (&i);
+		if (cd)
+			return cd;
 	}
 
 	cd = alloc_color_data ();
 	cd->api_index = -1;
 	dyn_array_ptr_set_all (&cd->other_colors, &color_merge_array);
+	/* if i >= 0, it means we prepared a given slot to receive the new color */
+	if (i >= 0)
+		merge_cache [i][0].color = cd;
 
 	return cd;
 }
@@ -825,6 +909,7 @@ cleanup (void)
 	dyn_array_ptr_set_size (&registered_bridges, 0);
 	free_object_buckets ();
 	free_color_buckets ();
+	reset_cache ();
 	object_index = 0;
 	num_colors_with_bridges = 0;
 }
@@ -1091,9 +1176,10 @@ processing_after_callback (int generation)
 
 	cleanup_time = step_timer (&curtime);
 
-	mono_trace (G_LOG_LEVEL_INFO, MONO_TRACE_GC, "GC_TAR_BRIDGE bridges %d objects %d colors %d ignored %d sccs %d xref %d setup %.2fms tarjan %.2fms scc-setup %.2fms gather-xref %.2fms xref-setup %.2fms cleanup %.2fms",
+	mono_trace (G_LOG_LEVEL_INFO, MONO_TRACE_GC, "GC_TAR_BRIDGE bridges %d objects %d colors %d ignored %d sccs %d xref %d cache %d/%d setup %.2fms tarjan %.2fms scc-setup %.2fms gather-xref %.2fms xref-setup %.2fms cleanup %.2fms",
 		bridge_count, object_count, color_count,
 		ignored_objects, scc_count, xref_count,
+		cache_hits, cache_misses,
 		setup_time / 10000.0f,
 		tarjan_time / 10000.0f,
 		scc_setup_time / 10000.0f,
@@ -1101,6 +1187,7 @@ processing_after_callback (int generation)
 		xref_setup_time / 10000.0f,
 		cleanup_time / 10000.0f);
 
+	cache_hits = cache_misses = 0;
 	bridge_processing_in_progress = FALSE;
 }
 
