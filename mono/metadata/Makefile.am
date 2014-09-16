@@ -165,6 +165,8 @@ common_sources = \
 	number-formatter.h	\
 	object-internals.h	\
 	opcodes.c		\
+	property-bag.h	\
+	property-bag.c	\
 	socket-io.c		\
 	socket-io.h		\
 	process.c		\
