@@ -97,6 +97,7 @@ common_sources = \
 	char-conversions.h	\
 	cil-coff.h		\
 	class.c			\
+	class-accessors.c	\
 	class-internals.h	\
 	cominterop.c		\
 	cominterop.h		\
