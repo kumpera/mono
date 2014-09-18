@@ -10187,6 +10187,7 @@ mono_class_setup_interface_id (MonoClass *class)
  * mono_class_alloc_ext:
  *
  *   Allocate klass->ext if not already done.
+ *   FIXME we should make this return the new allocated ext
  */
 void
 mono_class_alloc_ext (MonoClass *klass)
@@ -10197,11 +10198,8 @@ mono_class_alloc_ext (MonoClass *klass)
 		return;
 
 	ext = mono_class_alloc0 (klass, sizeof (MonoClassExt));
-	mono_image_lock (klass->image);
-	mono_memory_barrier ();
 	mono_class_set_ext (klass, ext);
 	class_ext_size += sizeof (MonoClassExt);
-	mono_image_unlock (klass->image);
 }
 
 /*

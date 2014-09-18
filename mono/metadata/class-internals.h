@@ -8,6 +8,7 @@
 #include <mono/metadata/object.h>
 #include <mono/metadata/mempool.h>
 #include <mono/metadata/metadata-internals.h>
+#include <mono/metadata/property-bag.h>
 #include <mono/io-layer/io-layer.h>
 #include "mono/utils/mono-compiler.h"
 #include "mono/utils/mono-error.h"
@@ -163,6 +164,7 @@ typedef struct {
 } MonoMarshalField;
 
 typedef struct {
+	MonoPropertyBagItem head;
 	guint32 native_size, min_align;
 	guint32 num_fields;
 	MonoMethod *ptr_to_str;
@@ -231,6 +233,7 @@ typedef struct {
  * be used for fields which are only used in like 5% of all classes.
  */
 typedef struct {
+	MonoPropertyBagItem head;
 	struct {
 #if MONO_SMALL_CONFIG
 		guint16 first, count;
@@ -376,9 +379,6 @@ struct _MonoClass {
 	/* A GC handle pointing to the corresponding type builder/generic param builder */
 	guint32 ref_info_handle;
 
-	/* loaded on demand */
-	MonoMarshalType *marshal_info;
-
 	/*
 	 * Field information: Type and location from object base
 	 */
@@ -403,8 +403,8 @@ struct _MonoClass {
 	/* Generic vtable. Initialized by a call to mono_class_setup_vtable () */
 	MonoMethod **vtable;
 
-	/* Rarely used fields of classes */
-	MonoClassExt *ext;
+	/* Infrequently used items */
+	MonoPropertyBag infrequent_data;
 };
 
 #ifdef COMPRESSED_INTERFACE_BITMAP

@@ -3,32 +3,33 @@
  */
 #include <mono/metadata/class-internals.h>
 
+enum {
+	PROP_MARSHAL_INFO = 1,
+	PROP_EXT = 2,
+};
+
 MonoMarshalType*
 mono_class_get_marshal_info (MonoClass *class)
 {
-	return class->marshal_info;
+	return mono_property_bag_get (&class->infrequent_data, PROP_MARSHAL_INFO);
 }
 
 MonoMarshalType *
 mono_class_set_marshal_info (MonoClass *class, MonoMarshalType *info)
 {
-	if (class->marshal_info)
-		return class->marshal_info;
-	class->marshal_info = info;
-	return info;
+	info->head.tag = PROP_MARSHAL_INFO;
+	return mono_property_bag_add (&class->infrequent_data, info);
 }
 
 MonoClassExt *
 mono_class_get_ext (MonoClass *class)
 {
-	return class->ext;
+	return mono_property_bag_get (&class->infrequent_data, PROP_EXT);
 }
 
 MonoClassExt *
 mono_class_set_ext (MonoClass *class, MonoClassExt *ext)
 {
-	if (class->ext)
-		return class->ext;
-	class->ext = ext;
-	return ext;
+	ext->head.tag = PROP_EXT;
+	return mono_property_bag_add (&class->infrequent_data, ext);
 }
