@@ -1400,4 +1400,11 @@ mono_class_get_marshal_info (MonoClass *class) MONO_INTERNAL;
 MonoMarshalType *
 mono_class_set_marshal_info (MonoClass *class, MonoMarshalType *info) MONO_INTERNAL;
 
+MonoClassExt *
+mono_class_get_ext (MonoClass *class) MONO_INTERNAL;
+
+MonoClassExt *
+mono_class_set_ext (MonoClass *class, MonoClassExt *ext) MONO_INTERNAL;
+
+
 #endif /* __MONO_METADATA_CLASS_INTERBALS_H__ */

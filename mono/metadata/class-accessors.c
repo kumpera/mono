@@ -17,3 +17,18 @@ mono_class_set_marshal_info (MonoClass *class, MonoMarshalType *info)
 	class->marshal_info = info;
 	return info;
 }
+
+MonoClassExt *
+mono_class_get_ext (MonoClass *class)
+{
+	return class->ext;
+}
+
+MonoClassExt *
+mono_class_set_ext (MonoClass *class, MonoClassExt *ext)
+{
+	if (class->ext)
+		return class->ext;
+	class->ext = ext;
+	return ext;
+}
