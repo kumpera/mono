@@ -376,9 +376,6 @@ struct _MonoClass {
 #endif
 	} field, method;
 
-	/* A GC handle pointing to the corresponding type builder/generic param builder */
-	guint32 ref_info_handle;
-
 	/*
 	 * Field information: Type and location from object base
 	 */
@@ -1405,6 +1402,12 @@ mono_class_get_ext (MonoClass *class) MONO_INTERNAL;
 
 MonoClassExt *
 mono_class_set_ext (MonoClass *class, MonoClassExt *ext) MONO_INTERNAL;
+
+guint32
+mono_class_get_ref_info_handle (MonoClass *class) MONO_INTERNAL;
+
+guint32
+mono_class_set_ref_info_handle (MonoClass *class, guint32 value) MONO_INTERNAL;
 
 gpointer
 mono_class_alloc (MonoClass *class, int size) MONO_INTERNAL;

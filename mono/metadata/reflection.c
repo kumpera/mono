@@ -628,26 +628,28 @@ default_class_from_mono_type (MonoType *type)
 gpointer
 mono_class_get_ref_info (MonoClass *klass)
 {
-	if (klass->ref_info_handle == 0)
+	guint32 handle = mono_class_get_ref_info_handle (klass);
+	if (handle == 0)
 		return NULL;
 	else
-		return mono_gchandle_get_target (klass->ref_info_handle);
+		return mono_gchandle_get_target (handle);
 }
 
 void
 mono_class_set_ref_info (MonoClass *klass, gpointer obj)
 {
-	klass->ref_info_handle = mono_gchandle_new ((MonoObject*)obj, FALSE);
-	g_assert (klass->ref_info_handle != 0);
+	guint32 candidate_handle = mono_gchandle_new ((MonoObject*)obj, FALSE);
+	guint32 handle = mono_class_set_ref_info_handle (klass, candidate_handle);
+	if (handle != candidate_handle)
+		mono_gchandle_free (candidate_handle);
 }
 
 void
 mono_class_free_ref_info (MonoClass *klass)
 {
-	if (klass->ref_info_handle) {
-		mono_gchandle_free (klass->ref_info_handle);
-		klass->ref_info_handle = 0;
-	}
+	guint32 handle = mono_class_get_ref_info_handle (klass);
+	if (handle)
+		mono_gchandle_free (handle);
 }
 
 static void

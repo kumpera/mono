@@ -6524,9 +6524,9 @@ mono_bounded_array_class_get (MonoClass *eclass, guint32 rank, gboolean bounded)
 		/*Arrays of those two types are invalid.*/
 		mono_class_set_failure (class, MONO_EXCEPTION_TYPE_LOAD, NULL);
 	} else if (eclass->enumtype && !mono_class_enum_basetype (eclass)) {
-		if (!eclass->ref_info_handle || eclass->wastypebuilder) {
+		if (!mono_class_get_ref_info_handle (eclass) || eclass->wastypebuilder) {
 			g_warning ("Only incomplete TypeBuilder objects are allowed to be an enum without base_type");
-			g_assert (eclass->ref_info_handle && !eclass->wastypebuilder);
+			g_assert (mono_class_get_ref_info_handle (eclass) && !eclass->wastypebuilder);
 		}
 		/* element_size -1 is ok as this is not an instantitable type*/
 		class->sizes.element_size = -1;
@@ -7977,7 +7977,7 @@ mono_class_is_assignable_from (MonoClass *klass, MonoClass *oklass)
 		}
 
 		/* interface_offsets might not be set for dynamic classes */
-		if (oklass->ref_info_handle && !oklass->interface_bitmap)
+		if (mono_class_get_ref_info_handle (oklass) && !oklass->interface_bitmap)
 			/* 
 			 * oklass might be a generic type parameter but they have 
 			 * interface_offsets set.
