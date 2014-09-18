@@ -1406,5 +1406,14 @@ mono_class_get_ext (MonoClass *class) MONO_INTERNAL;
 MonoClassExt *
 mono_class_set_ext (MonoClass *class, MonoClassExt *ext) MONO_INTERNAL;
 
+gpointer
+mono_class_alloc (MonoClass *class, int size) MONO_INTERNAL;
+
+gpointer
+mono_class_alloc0 (MonoClass *class, int size) MONO_INTERNAL;
+
+#define mono_class_new0(class,struct_type, n_structs)		\
+    ((struct_type *) mono_class_alloc0 ((class), ((gsize) sizeof (struct_type)) * ((gsize) (n_structs))))
+
 
 #endif /* __MONO_METADATA_CLASS_INTERBALS_H__ */

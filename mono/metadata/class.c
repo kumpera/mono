@@ -1357,7 +1357,7 @@ mono_type_has_exceptions (MonoType *type)
  *   Allocate memory for some data belonging to CLASS, either from its image's mempool,
  * or from the heap.
  */
-static gpointer
+gpointer
 mono_class_alloc (MonoClass *class, int size)
 {
 	if (class->generic_class)
@@ -1366,7 +1366,7 @@ mono_class_alloc (MonoClass *class, int size)
 		return mono_image_alloc (class->image, size);
 }
 
-static gpointer
+gpointer
 mono_class_alloc0 (MonoClass *class, int size)
 {
 	gpointer res;
@@ -1375,9 +1375,6 @@ mono_class_alloc0 (MonoClass *class, int size)
 	memset (res, 0, size);
 	return res;
 }
-
-#define mono_class_new0(class,struct_type, n_structs)		\
-    ((struct_type *) mono_class_alloc0 ((class), ((gsize) sizeof (struct_type)) * ((gsize) (n_structs))))
 
 /**
  * mono_class_setup_basic_field_info:
