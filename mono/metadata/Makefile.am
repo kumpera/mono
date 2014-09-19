@@ -99,6 +99,7 @@ common_sources = \
 	class.c			\
 	class-accessors.c	\
 	class-internals.h	\
+	class-inlines.h		\
 	cominterop.c		\
 	cominterop.h		\
 	console-io.h		\
