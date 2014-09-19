@@ -4708,14 +4708,17 @@ mono_metadata_generic_param_equal (MonoGenericParam *p1, MonoGenericParam *p2, g
 static gboolean
 mono_metadata_class_equal (MonoClass *c1, MonoClass *c2, gboolean signature_only)
 {
+	MonoGenericClass *c1_gclass = mono_class_try_get_generic_class (c1);
+	MonoGenericClass *c2_gclass = mono_class_try_get_generic_class (c2);
+
 	if (c1 == c2)
 		return TRUE;
-	if (c1->generic_class && c2->generic_class)
-		return _mono_metadata_generic_class_equal (c1->generic_class, c2->generic_class, signature_only);
-	if (c1->generic_class && c2->generic_container)
-		return _mono_metadata_generic_class_container_equal (c1->generic_class, c2, signature_only);
-	if (c1->generic_container && c2->generic_class)
-		return _mono_metadata_generic_class_container_equal (c2->generic_class, c1, signature_only);
+	if (c1_gclass && c2_gclass)
+		return _mono_metadata_generic_class_equal (c1_gclass, c2_gclass, signature_only);
+	if (c1_gclass && c2->generic_container)
+		return _mono_metadata_generic_class_container_equal (c1_gclass, c2, signature_only);
+	if (c1->generic_container && c2_gclass)
+		return _mono_metadata_generic_class_container_equal (c2_gclass, c1, signature_only);
 	if ((c1->byval_arg.type == MONO_TYPE_VAR) && (c2->byval_arg.type == MONO_TYPE_VAR))
 		return mono_metadata_generic_param_equal (
 			c1->byval_arg.data.generic_param, c2->byval_arg.data.generic_param, signature_only);
@@ -6333,10 +6336,10 @@ mono_metadata_get_corresponding_field_from_generic_type_definition (MonoClassFie
 	MonoClass *gtd;
 	int offset;
 
-	if (!field->parent->generic_class)
+	if (!mono_class_is_ginst (field->parent))
 		return field;
 
-	gtd = field->parent->generic_class->container_class;
+	gtd = mono_class_get_generic_class (field->parent)->container_class;
 	offset = field - field->parent->fields;
 	return gtd->fields + offset;
 }
@@ -6351,10 +6354,10 @@ mono_metadata_get_corresponding_event_from_generic_type_definition (MonoEvent *e
 	MonoClass *gtd;
 	int offset;
 
-	if (!event->parent->generic_class)
+	if (!mono_class_is_ginst (event->parent))
 		return event;
 
-	gtd = event->parent->generic_class->container_class;
+	gtd = mono_class_get_generic_class (event->parent)->container_class;
 	offset = event - mono_class_get_ext (event->parent)->events;
 	return mono_class_get_ext (gtd)->events + offset;
 }
@@ -6369,10 +6372,10 @@ mono_metadata_get_corresponding_property_from_generic_type_definition (MonoPrope
 	MonoClass *gtd;
 	int offset;
 
-	if (!property->parent->generic_class)
+	if (!mono_class_is_ginst (property->parent))
 		return property;
 
-	gtd = property->parent->generic_class->container_class;
+	gtd = mono_class_get_generic_class (property->parent)->container_class;
 	offset = property - mono_class_get_ext (property->parent)->properties;
 	return mono_class_get_ext (gtd)->properties + offset;
 }

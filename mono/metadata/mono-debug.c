@@ -876,7 +876,7 @@ mono_debug_add_type (MonoClass *klass)
 	guint32 size, total_size, max_size;
 	int base_offset = 0;
 
-	if (klass->generic_class || klass->rank ||
+	if (mono_class_is_ginst (klass) || klass->rank ||
 	    (klass->byval_arg.type == MONO_TYPE_VAR) || (klass->byval_arg.type == MONO_TYPE_MVAR))
 		return;
 

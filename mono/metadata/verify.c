@@ -597,7 +597,7 @@ is_valid_generic_instantiation (MonoGenericContainer *gc, MonoGenericContext *co
 			return FALSE;
 
 		/*it's not safe to call mono_class_init from here*/
-		if (paramClass->generic_class && !paramClass->inited) {
+		if (mono_class_is_ginst (paramClass) && !paramClass->inited) {
 			if (!mono_class_is_valid_generic_instantiation (NULL, paramClass))
 				return FALSE;
 		}
@@ -748,8 +748,8 @@ verifier_get_generic_param_from_type (VerifyContext *ctx, MonoType *type)
 
 	if (type->type == MONO_TYPE_VAR) {
 		MonoClass *gtd = method->klass;
-		if (gtd->generic_class)
-			gtd = gtd->generic_class->container_class;
+		if (mono_class_is_ginst (gtd))
+			gtd = mono_class_get_generic_class (gtd)->container_class;
 		gc = gtd->generic_container;
 	} else { //MVAR
 		MonoMethod *gmd = method;
@@ -825,7 +825,7 @@ mono_method_repect_method_constraints (VerifyContext *ctx, MonoMethod *method)
 static gboolean
 mono_class_repect_method_constraints (VerifyContext *ctx, MonoClass *klass)
 {
-	MonoGenericClass *gklass = klass->generic_class;
+	MonoGenericClass *gklass = mono_class_get_generic_class (klass);
 	MonoGenericInst *ginst = gklass->context.class_inst;
 	MonoGenericContainer *gc = gklass->container_class->generic_container;
 	return !gc || generic_arguments_respect_constraints (ctx, gc, &gklass->context, ginst);
@@ -848,7 +848,7 @@ mono_method_is_valid_generic_instantiation (VerifyContext *ctx, MonoMethod *meth
 static gboolean
 mono_class_is_valid_generic_instantiation (VerifyContext *ctx, MonoClass *klass)
 {
-	MonoGenericClass *gklass = klass->generic_class;
+	MonoGenericClass *gklass = mono_class_get_generic_class (klass);
 	MonoGenericInst *ginst = gklass->context.class_inst;
 	MonoGenericContainer *gc = gklass->container_class->generic_container;
 	if (ctx && !is_valid_generic_instantiation_in_context (ctx, ginst, TRUE))
@@ -881,7 +881,7 @@ mono_type_is_valid_in_context (VerifyContext *ctx, MonoType *type)
 	klass = mono_class_from_mono_type (type);
 	mono_class_init (klass);
 	if (mono_loader_get_last_error () || klass->exception_type != MONO_EXCEPTION_NONE) {
-		if (klass->generic_class && !mono_class_is_valid_generic_instantiation (NULL, klass))
+		if (mono_class_is_ginst (klass) && !mono_class_is_valid_generic_instantiation (NULL, klass))
 			ADD_VERIFY_ERROR2 (ctx, g_strdup_printf ("Invalid generic instantiation of type %s.%s at 0x%04x", klass->name_space, klass->name, ctx->ip_offset), MONO_EXCEPTION_TYPE_LOAD);
 		else
 			ADD_VERIFY_ERROR2 (ctx, g_strdup_printf ("Could not load type %s.%s at 0x%04x", klass->name_space, klass->name, ctx->ip_offset), MONO_EXCEPTION_TYPE_LOAD);
@@ -889,12 +889,12 @@ mono_type_is_valid_in_context (VerifyContext *ctx, MonoType *type)
 		return FALSE;
 	}
 
-	if (klass->generic_class && klass->generic_class->container_class->exception_type != MONO_EXCEPTION_NONE) {
+	if (mono_class_is_ginst (klass) && mono_class_get_generic_class (klass)->container_class->exception_type != MONO_EXCEPTION_NONE) {
 		ADD_VERIFY_ERROR2 (ctx, g_strdup_printf ("Could not load type %s.%s at 0x%04x", klass->name_space, klass->name, ctx->ip_offset), MONO_EXCEPTION_TYPE_LOAD);
 		return FALSE;
 	}
 
-	if (!klass->generic_class)
+	if (!mono_class_is_ginst (klass))
 		return TRUE;
 
 	if (!mono_class_is_valid_generic_instantiation (ctx, klass)) {
@@ -2189,14 +2189,14 @@ verifier_class_is_assignable_from (MonoClass *target, MonoClass *candidate)
 	if (mono_class_is_assignable_from (target, candidate))
 		return TRUE;
 
-	if (!MONO_CLASS_IS_INTERFACE (target) || !target->generic_class || candidate->rank != 1)
+	if (!MONO_CLASS_IS_INTERFACE (target) || !mono_class_is_ginst (target) || candidate->rank != 1)
 		return FALSE;
 
-	iface_gtd = target->generic_class->container_class;
+	iface_gtd = mono_class_get_generic_class (target)->container_class;
 	if (iface_gtd != mono_defaults.generic_ilist_class && iface_gtd != get_icollection_class () && iface_gtd != get_ienumerable_class ())
 		return FALSE;
 
-	target = mono_class_from_mono_type (target->generic_class->context.class_inst->type_argv [0]);
+	target = mono_class_from_mono_type (mono_class_get_generic_class (target)->context.class_inst->type_argv [0]);
 	candidate = candidate->element_class;
 
 	return TRUE;
@@ -6255,7 +6255,7 @@ verify_generic_parameters (MonoClass *class)
 
 			if (mono_type_is_generic_argument (constraint_type) && !recursive_mark_constraint_args (used_args, gc, constraint_type))
 				goto fail;
-			if (ctr->generic_class && !mono_class_is_valid_generic_instantiation (NULL, ctr))
+			if (mono_class_is_ginst (ctr) && !mono_class_is_valid_generic_instantiation (NULL, ctr))
 				goto fail;
 		}
 	}
@@ -6288,9 +6288,9 @@ mono_verifier_verify_class (MonoClass *class)
 	if (class->parent) {
 		if (MONO_CLASS_IS_INTERFACE (class->parent))
 			return FALSE;
-		if (!class->generic_class && class->parent->generic_container)
+		if (!mono_class_is_ginst (class) && class->parent->generic_container)
 			return FALSE;
-		if (class->parent->generic_class && !class->generic_class) {
+		if (mono_class_is_ginst (class->parent) && !mono_class_is_ginst (class)) {
 			MonoGenericContext *context = mono_class_get_context (class);
 			if (class->generic_container)
 				context = &class->generic_container->context;
@@ -6304,9 +6304,9 @@ mono_verifier_verify_class (MonoClass *class)
 		return FALSE;
 	if (!verify_class_for_overlapping_reference_fields (class))
 		return FALSE;
-	if (class->generic_class && !mono_class_is_valid_generic_instantiation (NULL, class))
+	if (mono_class_is_ginst (class) && !mono_class_is_valid_generic_instantiation (NULL, class))
 		return FALSE;
-	if (class->generic_class == NULL && !verify_class_fields (class))
+	if (!mono_class_is_ginst (class) && !verify_class_fields (class))
 		return FALSE;
 	if (class->valuetype && !verify_valuetype_layout (class))
 		return FALSE;

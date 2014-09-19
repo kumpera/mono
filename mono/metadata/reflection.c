@@ -1676,7 +1676,7 @@ type_get_qualified_name (MonoType *type, MonoAssembly *ass) {
 		return mono_type_get_name_full (type, MONO_TYPE_NAME_FORMAT_REFLECTION);
 	ta = klass->image->assembly;
 	if (assembly_is_dynamic (ta) || (ta == ass)) {
-		if (klass->generic_class || klass->generic_container)
+		if (mono_class_is_ginst (klass) || klass->generic_container)
 			/* For generic type definitions, we want T, while REFLECTION returns T<K> */
 			return mono_type_get_name_full (type, MONO_TYPE_NAME_FORMAT_FULL_NAME);
 		else
@@ -1840,7 +1840,7 @@ handle_enum:
 		return idx;
 	}
 	case MONO_TYPE_GENERICINST:
-		*ret_type = val->vtable->klass->generic_class->container_class->byval_arg.type;
+		*ret_type = mono_class_get_generic_class (val->vtable->klass)->container_class->byval_arg.type;
 		goto handle_enum;
 	default:
 		g_error ("we don't encode constant type 0x%02x yet", *ret_type);
@@ -2705,7 +2705,7 @@ mono_image_get_ctorbuilder_token (MonoDynamicImage *assembly, MonoReflectionCtor
 static gboolean
 is_field_on_inst (MonoClassField *field)
 {
-	return (field->parent->generic_class && field->parent->generic_class->is_dynamic && ((MonoDynamicGenericClass*)field->parent->generic_class)->fields);
+	return (mono_class_is_ginst (field->parent) && mono_class_get_generic_class (field->parent)->is_dynamic && ((MonoDynamicGenericClass*)mono_class_get_generic_class (field->parent))->fields);
 }
 
 /*
@@ -2720,7 +2720,7 @@ get_field_on_inst_generic_type (MonoClassField *field)
 
 	g_assert (is_field_on_inst (field));
 
-	dgclass = (MonoDynamicGenericClass*)field->parent->generic_class;
+	dgclass = (MonoDynamicGenericClass*)mono_class_get_generic_class (field->parent);
 
 	if (field >= dgclass->fields && field - dgclass->fields < dgclass->count_fields) {
 		field_index = field - dgclass->fields;
@@ -2728,7 +2728,7 @@ get_field_on_inst_generic_type (MonoClassField *field)
 	}
 
 	class = field->parent;
-	gtd = class->generic_class->container_class;
+	gtd = mono_class_get_generic_class (class)->container_class;
 
 	if (field >= class->fields && field - class->fields < class->field.count) {
 		field_index = field - class->fields;
@@ -2753,9 +2753,9 @@ mono_image_get_fieldref_token (MonoDynamicImage *assembly, MonoObject *f, MonoCl
 	if (token)
 		return token;
 
-	if (field->parent->generic_class && field->parent->generic_class->container_class && field->parent->generic_class->container_class->fields) {
+	if (mono_class_is_ginst (field->parent) && mono_class_get_generic_class (field->parent)->container_class && mono_class_get_generic_class (field->parent)->container_class->fields) {
 		int index = field - field->parent->fields;
-		type = mono_field_get_type (&field->parent->generic_class->container_class->fields [index]);
+		type = mono_field_get_type (&mono_class_get_generic_class (field->parent)->container_class->fields [index]);
 	} else {
 		if (is_field_on_inst (field))
 			type = get_field_on_inst_generic_type (field);
@@ -2897,7 +2897,7 @@ mono_reflection_method_on_tb_inst_get_handle (MonoReflectionMethodOnTypeBuilderI
 	ginst = mono_metadata_get_generic_inst (count, type_argv);
 	g_free (type_argv);
 
-	tmp_context.class_inst = klass->generic_class ? klass->generic_class->context.class_inst : NULL;
+	tmp_context.class_inst = mono_class_is_ginst (klass) ? mono_class_get_generic_class (klass)->context.class_inst : NULL;
 	tmp_context.method_inst = ginst;
 
 	inflated = mono_class_inflate_generic_method (method, &tmp_context);
@@ -4273,7 +4273,7 @@ fixup_method (MonoReflectionILGen *ilgen, gpointer value, MonoDynamicImage *asse
 				   !strcmp (iltoken->member->vtable->klass->name, "MonoGenericMethod") ||
 				   !strcmp (iltoken->member->vtable->klass->name, "MonoGenericCMethod")) {
 				MonoMethod *m = ((MonoReflectionMethod*)iltoken->member)->method;
-				g_assert (m->klass->generic_class || m->klass->generic_container);
+				g_assert (mono_class_is_ginst (m->klass) || m->klass->generic_container);
 				continue;
 			} else if (!strcmp (iltoken->member->vtable->klass->name, "FieldBuilder")) {
 				continue;
@@ -4995,7 +4995,7 @@ mono_image_create_token (MonoDynamicImage *assembly, MonoObject *obj,
 			else
 				token = mono_image_get_inflated_method_token (assembly, m->method);
 		} else if ((m->method->klass->image == &assembly->image) &&
-			 !m->method->klass->generic_class) {
+			 !mono_class_is_ginst (m->method->klass)) {
 			static guint32 method_table_idx = 0xffffff;
 			if (m->method->klass->wastypebuilder) {
 				/* we use the same token as the one that was assigned
@@ -7765,7 +7765,7 @@ mono_reflection_get_token (MonoObject *obj)
 		MonoReflectionField *f = (MonoReflectionField*)obj;
 
 		if (is_field_on_inst (f->field)) {
-			MonoDynamicGenericClass *dgclass = (MonoDynamicGenericClass*)f->field->parent->generic_class;
+			MonoDynamicGenericClass *dgclass = (MonoDynamicGenericClass*)mono_class_get_generic_class (f->field->parent);
 			int field_index = f->field - dgclass->fields;
 			MonoObject *obj;
 
@@ -8762,8 +8762,8 @@ mono_custom_attrs_from_class (MonoClass *klass)
 {
 	guint32 idx;
 
-	if (klass->generic_class)
-		klass = klass->generic_class->container_class;
+	if (mono_class_is_ginst (klass))
+		klass = mono_class_get_generic_class (klass)->container_class;
 
 	if (image_is_dynamic (klass->image))
 		return lookup_custom_attr (klass->image, klass);
@@ -10273,7 +10273,7 @@ reflection_methodbuilder_to_mono_method (MonoClass *klass,
 	image = dynamic ? NULL : klass->image;
 
 	if (!dynamic)
-		g_assert (!klass->generic_class);
+		g_assert (!mono_class_is_ginst (klass));
 
 	mono_loader_lock ();
 
@@ -10705,7 +10705,7 @@ mono_reflection_bind_generic_method_parameters (MonoReflectionMethod *rmethod, M
 	ginst = mono_metadata_get_generic_inst (count, type_argv);
 	g_free (type_argv);
 
-	tmp_context.class_inst = klass->generic_class ? klass->generic_class->context.class_inst : NULL;
+	tmp_context.class_inst = mono_class_is_ginst (klass) ? mono_class_get_generic_class (klass)->context.class_inst : NULL;
 	tmp_context.method_inst = ginst;
 
 	inflated = mono_class_inflate_generic_method (method, &tmp_context);
@@ -10743,7 +10743,7 @@ inflate_mono_method (MonoClass *klass, MonoMethod *method, MonoObject *obj)
 	 * This can happen because classes inflated with their own
 	 * type arguments are "normalized" to the uninflated class.
 	 */
-	if (!klass->generic_class)
+	if (!mono_class_is_ginst (klass))
 		return method;
 
 	context = mono_class_get_context (klass);
@@ -10893,17 +10893,17 @@ mono_reflection_free_dynamic_generic_class (MonoGenericClass *gclass)
 static void
 fix_partial_generic_class (MonoClass *klass)
 {
-	MonoClass *gklass = klass->generic_class->container_class;
+	MonoClass *gklass = mono_class_get_generic_class (klass)->container_class;
 	MonoDynamicGenericClass *dgclass;
 	int i;
 
 	if (klass->wastypebuilder)
 		return;
 
-	dgclass = (MonoDynamicGenericClass *)  klass->generic_class;
+	dgclass = (MonoDynamicGenericClass *)  mono_class_get_generic_class (klass);
 	if (klass->parent != gklass->parent) {
 		MonoError error;
-		MonoType *parent_type = mono_class_inflate_generic_type_checked (&gklass->parent->byval_arg, &klass->generic_class->context, &error);
+		MonoType *parent_type = mono_class_inflate_generic_type_checked (&gklass->parent->byval_arg, &mono_class_get_generic_class (klass)->context, &error);
 		if (mono_error_ok (&error)) {
 			MonoClass *parent = mono_class_from_mono_type (parent_type);
 			mono_metadata_free_type (parent_type);
@@ -10969,7 +10969,7 @@ fix_partial_generic_class (MonoClass *klass)
 static void
 ensure_generic_class_runtime_vtable (MonoClass *klass)
 {
-	MonoClass *gklass = klass->generic_class->container_class;
+	MonoClass *gklass = mono_class_get_generic_class (klass)->container_class;
 
 	ensure_runtime_vtable (gklass);	
 
@@ -10982,7 +10982,7 @@ ensure_runtime_vtable (MonoClass *klass)
 	MonoReflectionTypeBuilder *tb = mono_class_get_ref_info (klass);
 	int i, num, j;
 
-	if (!image_is_dynamic (klass->image) || (!tb && !klass->generic_class) || klass->wastypebuilder)
+	if (!image_is_dynamic (klass->image) || (!tb && !mono_class_is_ginst (klass)) || klass->wastypebuilder)
 		return;
 	if (klass->parent)
 		ensure_runtime_vtable (klass->parent);
@@ -11010,7 +11010,7 @@ ensure_runtime_vtable (MonoClass *klass)
 			}
 			klass->interfaces_inited = 1;
 		}
-	} else if (klass->generic_class){
+	} else if (mono_class_is_ginst (klass)){
 		ensure_generic_class_runtime_vtable (klass);
 	}
 
@@ -11880,8 +11880,8 @@ ensure_complete_type (MonoClass *klass)
 		//g_assert (klass->wastypebuilder);
 	}
 
-	if (klass->generic_class) {
-		MonoGenericInst *inst = klass->generic_class->context.class_inst;
+	if (mono_class_is_ginst (klass)) {
+		MonoGenericInst *inst = mono_class_get_generic_class (klass)->context.class_inst;
 		int i;
 
 		for (i = 0; i < inst->type_argc; ++i) {

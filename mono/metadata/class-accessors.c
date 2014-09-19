@@ -56,3 +56,25 @@ mono_class_set_ref_info_handle (MonoClass *class, guint32 value)
 	prop = mono_property_bag_add (&class->infrequent_data, prop);
 	return prop->value;
 }
+
+/* Accessors based on class kind*/
+/*
+ * mono_class_get_generic_class:
+ *
+ *   Return the MonoGenericClass of KLASS, which should be a generic instance.
+ */
+MonoGenericClass*
+mono_class_get_generic_class (MonoClass *klass)
+{
+	g_assert (mono_class_is_ginst (klass));
+
+	return ((MonoClassGenericInst*)klass)->generic_class;
+}
+
+MonoGenericClass*
+mono_class_try_get_generic_class (MonoClass *klass)
+{
+	if (mono_class_is_ginst (klass))
+		return ((MonoClassGenericInst*)klass)->generic_class;
+	return NULL;
+}

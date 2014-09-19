@@ -521,22 +521,22 @@ get_generic_context_from_stack_frame (MonoJitInfo *ji, gpointer generic_info)
 	}
 
 	//g_assert (!method->klass->generic_container);
-	if (method->klass->generic_class)
-		method_container_class = method->klass->generic_class->container_class;
+	if (mono_class_is_ginst (method->klass))
+		method_container_class = mono_class_get_generic_class (method->klass)->container_class;
 	else
 		method_container_class = method->klass;
 
 	/* class might refer to a subclass of method's class */
-	while (!(class == method->klass || (class->generic_class && class->generic_class->container_class == method_container_class))) {
+	while (!(class == method->klass || (mono_class_is_ginst (class) && mono_class_get_generic_class (class)->container_class == method_container_class))) {
 		class = class->parent;
 		g_assert (class);
 	}
 
-	if (class->generic_class || class->generic_container)
+	if (mono_class_is_ginst (class) || class->generic_container)
 		context.class_inst = mini_class_get_context (class)->class_inst;
 
-	if (class->generic_class)
-		g_assert (mono_class_has_parent_and_ignore_generics (class->generic_class->container_class, method_container_class));
+	if (mono_class_is_ginst (class))
+		g_assert (mono_class_has_parent_and_ignore_generics (mono_class_get_generic_class (class)->container_class, method_container_class));
 	else
 		g_assert (mono_class_has_parent_and_ignore_generics (class, method_container_class));
 

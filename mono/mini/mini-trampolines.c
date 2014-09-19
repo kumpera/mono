@@ -187,8 +187,8 @@ __attribute__ ((noinline))
 			/* imt_method->slot might not be set */
 			impl = mono_class_get_vtable_entry (vt->klass, interface_offset + mono_method_get_declaring_generic_method (imt_method)->slot);
 
-			if (impl->klass->generic_class)
-				context.class_inst = impl->klass->generic_class->context.class_inst;
+			if (mono_class_is_ginst (impl->klass))
+				context.class_inst = mono_class_get_generic_class (impl->klass)->context.class_inst;
 			context.method_inst = ((MonoMethodInflated*)imt_method)->context.method_inst;
 			impl = mono_class_inflate_generic_method (impl, &context);
 		} else {
@@ -474,8 +474,8 @@ common_call_trampoline (mgreg_t *regs, guint8 *code, MonoMethod *m, guint8* tram
 		else
 			declaring = m;
 
-		if (m->klass->generic_class)
-			context.class_inst = m->klass->generic_class->context.class_inst;
+		if (mono_class_is_ginst (m->klass))
+			context.class_inst = mono_class_get_generic_class (m->klass)->context.class_inst;
 		else
 			g_assert (!m->klass->generic_container);
 
@@ -551,8 +551,8 @@ common_call_trampoline (mgreg_t *regs, guint8 *code, MonoMethod *m, guint8* tram
 			else
 				declaring = m;
 
-			if (klass->generic_class)
-				context.class_inst = klass->generic_class->context.class_inst;
+			if (mono_class_is_ginst (klass))
+				context.class_inst = mono_class_get_generic_class (klass)->context.class_inst;
 			else if (klass->generic_container)
 				context.class_inst = klass->generic_container->context.class_inst;
 			context.method_inst = method_inst;
@@ -800,8 +800,8 @@ mono_generic_virtual_remoting_trampoline (mgreg_t *regs, guint8 *code, MonoMetho
 	else
 		declaring = m;
 
-	if (m->klass->generic_class)
-		context.class_inst = m->klass->generic_class->context.class_inst;
+	if (mono_class_is_ginst (m->klass))
+		context.class_inst = mono_class_get_generic_class (m->klass)->context.class_inst;
 	else
 		g_assert (!m->klass->generic_container);
 

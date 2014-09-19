@@ -643,7 +643,7 @@ decode_type (MonoAotModule *module, guint8 *buf, guint8 **endbuf)
 			return NULL;
 		type = mono_class_inflate_generic_type (&gclass->byval_arg, &ctx);
 		klass = mono_class_from_mono_type (type);
-		t->data.generic_class = klass->generic_class;
+		t->data.generic_class = mono_class_get_generic_class (klass);
 		break;
 	}
 	case MONO_TYPE_ARRAY: {
@@ -1184,8 +1184,8 @@ decode_method_ref_with_target (MonoAotModule *module, MethodRef *ref, MonoMethod
 
 		memset (&ctx, 0, sizeof (ctx));
 
-		if (FALSE && klass->generic_class) {
-			ctx.class_inst = klass->generic_class->context.class_inst;
+		if (FALSE && mono_class_is_ginst (klass)) {
+			ctx.class_inst = mono_class_get_generic_class (klass)->context.class_inst;
 			ctx.method_inst = NULL;
  
 			ref->method = mono_class_inflate_generic_method_full (ref->method, klass, &ctx);

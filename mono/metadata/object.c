@@ -1334,7 +1334,7 @@ build_imt_slots (MonoClass *klass, MonoVTable *vt, MonoDomain *domain, gpointer*
 				 * avoid inflating methods which will be discarded by 
 				 * add_imt_builder_entry anyway.
 				 */
-				method = mono_class_get_method_by_index (iface->generic_class->container_class, method_slot_in_interface);
+				method = mono_class_get_method_by_index (mono_class_get_generic_class (iface)->container_class, method_slot_in_interface);
 				if (mono_method_get_imt_slot (method) != slot_num) {
 					vt_slot ++;
 					continue;
@@ -1913,7 +1913,7 @@ mono_class_create_runtime_vtable (MonoDomain *domain, MonoClass *class, gboolean
 	if (!class->vtable_size)
 		mono_class_setup_vtable (class);
 
-	if (class->generic_class && !class->vtable)
+	if (mono_class_is_ginst (class) && !class->vtable)
 		mono_class_check_vtable_constraints (class, NULL);
 
 	/* Initialize klass->has_finalize */

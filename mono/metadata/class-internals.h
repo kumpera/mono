@@ -15,7 +15,7 @@
 
 #define MONO_CLASS_IS_ARRAY(c) ((c)->rank)
 
-#define MONO_CLASS_HAS_STATIC_METADATA(klass) ((klass)->type_token && !(klass)->image->dynamic && !(klass)->generic_class)
+#define MONO_CLASS_HAS_STATIC_METADATA(klass) ((klass)->type_token && !(klass)->image->dynamic && !mono_class_is_ginst (klass))
 
 #define MONO_DEFAULT_SUPERTABLE_SIZE 6
 
@@ -395,7 +395,7 @@ struct _MonoClass {
 	MonoType this_arg;
 	MonoType byval_arg;
 
-	MonoGenericClass *generic_class;
+	// MonoGenericClass *generic_class;
 	MonoGenericContainer *generic_container;
 
 	void *gc_descr;
@@ -422,6 +422,7 @@ typedef struct {
 
 typedef struct {
 	MonoClass class;
+	MonoGenericClass *generic_class;
 } MonoClassGenericInst;
 
 typedef struct {
@@ -1361,8 +1362,12 @@ mono_class_setup_interface_id (MonoClass *klass) MONO_INTERNAL;
 MonoGenericContainer*
 mono_class_get_generic_container (MonoClass *klass) MONO_INTERNAL;
 
+/* monodis needs this :( */
 MonoGenericClass*
-mono_class_get_generic_class (MonoClass *klass) MONO_INTERNAL;
+mono_class_get_generic_class (MonoClass *klass);
+
+MonoGenericClass*
+mono_class_try_get_generic_class (MonoClass *klass) MONO_INTERNAL;
 
 void
 mono_class_alloc_ext (MonoClass *klass) MONO_INTERNAL;
