@@ -5664,7 +5664,15 @@ mono_class_create_from_typedef (MonoImage *image, guint32 type_token, MonoError 
 	name = mono_metadata_string_heap (image, cols [MONO_TYPEDEF_NAME]);
 	nspace = mono_metadata_string_heap (image, cols [MONO_TYPEDEF_NAMESPACE]);
 
-	class = mono_image_alloc0 (image, sizeof (MonoClass));
+	if (mono_metadata_has_generic_params (image, type_token)) {
+		class = mono_image_alloc0 (image, sizeof (MonoClassGtd));
+		class->class_kind = MONO_CLASS_GTD;
+		classes_size += sizeof (MonoClassGtd);
+	} else {
+		class = mono_image_alloc0 (image, sizeof (MonoClassBoring));
+		class->class_kind = MONO_CLASS_BORING;
+		classes_size += sizeof (MonoClassBoring);
+	}
 
 	class->name = name;
 	class->name_space = nspace;
@@ -5677,15 +5685,12 @@ mono_class_create_from_typedef (MonoImage *image, guint32 type_token, MonoError 
 
 	mono_internal_hash_table_insert (&image->class_cache, GUINT_TO_POINTER (type_token), class);
 
-	classes_size += sizeof (MonoClass);
-
 	/*
 	 * Check whether we're a generic type definition.
 	 */
 	class->generic_container = mono_metadata_load_generic_params (image, class->type_token, NULL);
-	class->class_kind = MONO_CLASS_BORING;
+	
 	if (class->generic_container) {
-		class->class_kind = MONO_CLASS_GTD;
 		class->generic_container->owner.klass = class;
 		context = &class->generic_container->context;
 	}
@@ -5915,7 +5920,7 @@ mono_generic_class_get_class (MonoGenericClass *gclass)
 		return gclass->cached_class;
 	}
 
-	klass = mono_image_set_alloc0 (gclass->owner, sizeof (MonoClass));
+	klass = mono_image_set_alloc0 (gclass->owner, sizeof (MonoClassGenericInst));
 
 	gklass = gclass->container_class;
 
@@ -5982,7 +5987,7 @@ mono_generic_class_get_class (MonoGenericClass *gclass)
 	mono_profiler_class_loaded (klass, MONO_PROFILE_OK);
 
 	inflated_classes ++;
-	inflated_classes_size += sizeof (MonoClass);
+	inflated_classes_size += sizeof (MonoClassGenericInst);
 	
 	mono_loader_unlock ();
 
@@ -6000,8 +6005,9 @@ make_generic_param_class (MonoGenericParam *param, MonoImage *image, gboolean is
 		/* FIXME: */
 		image = mono_defaults.corlib;
 
-	klass = mono_image_alloc0 (image, sizeof (MonoClass));
-	classes_size += sizeof (MonoClass);
+	klass = mono_image_alloc0 (image, sizeof (MonoClassGenericParam));
+	classes_size += sizeof (MonoClassGenericParam);
+	klass->class_kind = MONO_CLASS_GPARAM;
 
 	if (pinfo) {
 		klass->name = pinfo->name;
@@ -6224,9 +6230,9 @@ mono_ptr_class_get (MonoType *type)
 		mono_loader_unlock ();
 		return result;
 	}
-	result = mono_image_alloc0 (image, sizeof (MonoClass));
+	result = mono_image_alloc0 (image, sizeof (MonoClassDerived));
 
-	classes_size += sizeof (MonoClass);
+	classes_size += sizeof (MonoClassDerived);
 
 	result->parent = NULL; /* no parent for PTR types */
 	result->name_space = el_class->name_space;
@@ -6497,7 +6503,7 @@ mono_bounded_array_class_get (MonoClass *eclass, guint32 rank, gboolean bounded)
 			mono_class_init (parent);
 	}
 
-	class = mono_image_alloc0 (image, sizeof (MonoClass));
+	class = mono_image_alloc0 (image, sizeof (MonoClassDerived));
 
 	class->image = image;
 	class->name_space = eclass->name_space;
@@ -6517,7 +6523,7 @@ mono_bounded_array_class_get (MonoClass *eclass, guint32 rank, gboolean bounded)
 
 	mono_profiler_class_event (class, MONO_PROFILE_START_LOAD);
 
-	classes_size += sizeof (MonoClass);
+	classes_size += sizeof (MonoClassDerived);
 
 	class->type_token = 0;
 	/* all arrays are marked serializable and sealed, bug #42779 */

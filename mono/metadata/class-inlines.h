@@ -25,6 +25,12 @@ mono_class_is_ginst (MonoClass *class)
 }
 
 static inline gboolean
+mono_class_is_gparam (MonoClass *class)
+{
+	return class->class_kind == MONO_CLASS_GPARAM;
+}
+
+static inline gboolean
 mono_class_is_array (MonoClass *class)
 {
 	return class->class_kind == MONO_CLASS_ARRAY;

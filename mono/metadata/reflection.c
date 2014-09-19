@@ -9957,7 +9957,9 @@ mono_reflection_setup_internal_class (MonoReflectionTypeBuilder *tb)
 		return;
 	}
 
-	klass = mono_image_alloc0 (&tb->module->dynamic_image->image, sizeof (MonoClass));
+	/*FIXME don't do two stage construction */
+	klass = mono_image_alloc0 (&tb->module->dynamic_image->image, MAX (sizeof (MonoClassBoring), sizeof (MonoClassGtd)));
+	klass->class_kind = MONO_CLASS_BORING;
 
 	klass->image = &tb->module->dynamic_image->image;
 

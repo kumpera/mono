@@ -262,6 +262,7 @@ enum {
 	MONO_CLASS_BORING,
 	MONO_CLASS_GTD,
 	MONO_CLASS_GINST,
+	MONO_CLASS_GPARAM,
 	MONO_CLASS_ARRAY,
 	MONO_CLASS_POINTER,
 };
@@ -410,6 +411,27 @@ struct _MonoClass {
 	/* Infrequently used items */
 	MonoPropertyBag infrequent_data;
 };
+
+typedef struct {
+	MonoClass class;
+} MonoClassBoring;
+
+typedef struct {
+	MonoClass class;
+} MonoClassGtd;
+
+typedef struct {
+	MonoClass class;
+} MonoClassGenericInst;
+
+typedef struct {
+	MonoClass class;
+} MonoClassGenericParam;
+
+/* For array and pointer */
+typedef struct {
+	MonoClass class;
+} MonoClassDerived;
 
 #ifdef COMPRESSED_INTERFACE_BITMAP
 int mono_compress_bitmap (uint8_t *dest, const uint8_t *bitmap, int size) MONO_INTERNAL;
