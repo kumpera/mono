@@ -258,6 +258,14 @@ typedef struct {
 	GList      *nested_classes;
 } MonoClassExt;
 
+enum {
+	MONO_CLASS_BORING,
+	MONO_CLASS_GTD,
+	MONO_CLASS_GINST,
+	MONO_CLASS_ARRAY,
+	MONO_CLASS_POINTER,
+};
+
 struct _MonoClass {
 	/* element class for arrays and enum basetype for enums */
 	MonoClass *element_class; 
@@ -319,10 +327,9 @@ struct _MonoClass {
 	guint nested_classes_inited : 1; /* Whenever nested_class is initialized */
 
 	/* next byte*/
+	guint class_kind : 3; /* regular, gtd, ginst, etc. must be the beginning of a byte to be fast to retrive. */
 	guint interfaces_inited : 1; /* interfaces is initialized */
 	guint simd_type : 1; /* class is a simd intrinsic type */
-	guint is_generic : 1; /* class is a generic type definition */
-	guint is_inflated : 1; /* class is a generic instance */
 	guint has_finalize_inited    : 1; /* has_finalize is initialized */
 	guint fields_inited : 1; /* fields is initialized */
 	guint setup_fields_called : 1; /* to prevent infinite loops in setup_fields */

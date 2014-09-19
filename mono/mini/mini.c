@@ -4852,7 +4852,7 @@ mini_get_shared_method_full (MonoMethod *method, gboolean all_vt, gboolean is_gs
     res = mono_class_inflate_generic_method (declaring_method, &shared_context);
 	if (!partial) {
 		/* The result should be an inflated method whose parent is not inflated */
-		g_assert (!res->klass->is_inflated);
+		g_assert (res->klass->class_kind != MONO_CLASS_GINST);
 	}
 	return res;
 }

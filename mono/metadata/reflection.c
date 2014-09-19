@@ -10083,7 +10083,7 @@ mono_reflection_create_generic_class (MonoReflectionTypeBuilder *tb)
 	klass->generic_container->type_argc = count;
 	klass->generic_container->type_params = mono_image_alloc0 (klass->image, sizeof (MonoGenericParamFull) * count);
 
-	klass->is_generic = 1;
+	klass->class_kind = MONO_CLASS_GTD;
 
 	for (i = 0; i < count; i++) {
 		MonoReflectionGenericParam *gparam = mono_array_get (tb->generic_params, gpointer, i);
