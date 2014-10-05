@@ -1452,6 +1452,8 @@ mono_class_alloc0 (MonoClass *class, int size) MONO_INTERNAL;
 #define mono_class_new0(class,struct_type, n_structs)		\
     ((struct_type *) mono_class_alloc0 ((class), ((gsize) sizeof (struct_type)) * ((gsize) (n_structs))))
 
+void
+mono_class_set_flags (MonoClass *klass, uint32_t flags) MONO_INTERNAL;
 
 /*Now that everything has been defined, let's include the inline functions */
 #include <mono/metadata/class-inlines.h>

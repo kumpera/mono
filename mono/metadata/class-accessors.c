@@ -78,3 +78,26 @@ mono_class_try_get_generic_class (MonoClass *klass)
 		return ((MonoClassGenericInst*)klass)->generic_class;
 	return NULL;
 }
+
+
+/**
+ * mono_class_get_flags:
+ * @klass: the MonoClass to act on
+ *
+ * The type flags from the TypeDef table from the metadata.
+ * see the TYPE_ATTRIBUTE_* definitions on tabledefs.h for the
+ * different values.
+ *
+ * Returns: the flags from the TypeDef table.
+ */
+guint32
+mono_class_get_flags (MonoClass *klass)
+{
+	return klass->flags;
+}
+
+void
+mono_class_set_flags (MonoClass *klass, guint32 flags)
+{
+	klass->flags = flags;
+}

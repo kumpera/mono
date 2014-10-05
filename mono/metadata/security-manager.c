@@ -297,7 +297,7 @@ ves_icall_System_Security_SecurityManager_GetLinkDemandSecurity (MonoReflectionM
 	mono_class_init (method->klass);
 
 	/* if either the method or it's class has security (any type) */
-	if ((method->flags & METHOD_ATTRIBUTE_HAS_SECURITY) || (method->klass->flags & TYPE_ATTRIBUTE_HAS_SECURITY)) {
+	if ((method->flags & METHOD_ATTRIBUTE_HAS_SECURITY) || (mono_class_get_flags (method->klass) & TYPE_ATTRIBUTE_HAS_SECURITY)) {
 		memset (kactions, 0, sizeof (MonoDeclSecurityActions));
 		memset (mactions, 0, sizeof (MonoDeclSecurityActions));
 

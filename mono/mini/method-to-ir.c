@@ -1704,7 +1704,7 @@ mini_emit_castclass_inst (MonoCompile *cfg, int obj_reg, int klass_reg, MonoClas
 			mini_emit_class_check (cfg, eclass_reg, mono_defaults.enum_class);
 		} else if (klass->cast_class == mono_defaults.enum_class) {
 			mini_emit_class_check (cfg, eclass_reg, mono_defaults.enum_class);
-		} else if (klass->cast_class->flags & TYPE_ATTRIBUTE_INTERFACE) {
+		} else if (mono_class_get_flags (klass->cast_class) & TYPE_ATTRIBUTE_INTERFACE) {
 			mini_emit_iface_class_cast (cfg, eclass_reg, klass->cast_class, NULL, NULL);
 		} else {
 			// Pass -1 as obj_reg to skip the check below for arrays of arrays
@@ -2726,7 +2726,7 @@ mono_emit_method_call_full (MonoCompile *cfg, MonoMethod *method, MonoMethodSign
 	}
 #endif
 
-	need_unbox_trampoline = method->klass == mono_defaults.object_class || (method->klass->flags & TYPE_ATTRIBUTE_INTERFACE);
+	need_unbox_trampoline = method->klass == mono_defaults.object_class || (mono_class_get_flags (method->klass) & TYPE_ATTRIBUTE_INTERFACE);
 
 	call = mono_emit_call_args (cfg, sig, args, FALSE, virtual, tail, rgctx_arg ? TRUE : FALSE, need_unbox_trampoline);
 
@@ -2808,7 +2808,7 @@ mono_emit_method_call_full (MonoCompile *cfg, MonoMethod *method, MonoMethodSign
 		} else {
 			vtable_reg = alloc_preg (cfg);
 			MONO_EMIT_NEW_LOAD_MEMBASE_FAULT (cfg, vtable_reg, this_reg, MONO_STRUCT_OFFSET (MonoObject, vtable));
-			if (method->klass->flags & TYPE_ATTRIBUTE_INTERFACE) {
+			if (mono_class_get_flags (method->klass) & TYPE_ATTRIBUTE_INTERFACE) {
 				slot_reg = -1;
 				if (mono_use_imt) {
 					guint32 imt_slot = mono_method_get_imt_slot (method);
@@ -4046,7 +4046,7 @@ mini_class_has_reference_variant_generic_argument (MonoCompile *cfg, MonoClass *
 }
 
 // FIXME: This doesn't work yet (class libs tests fail?)
-#define is_complex_isinst(klass) (TRUE || (klass->flags & TYPE_ATTRIBUTE_INTERFACE) || klass->rank || mono_class_is_nullable (klass) || mono_class_is_marshalbyref (klass) || (klass->flags & TYPE_ATTRIBUTE_SEALED) || klass->byval_arg.type == MONO_TYPE_VAR || klass->byval_arg.type == MONO_TYPE_MVAR)
+#define is_complex_isinst(klass) (TRUE || (mono_class_get_flags (klass) & TYPE_ATTRIBUTE_INTERFACE) || klass->rank || mono_class_is_nullable (klass) || mono_class_is_marshalbyref (klass) || (mono_class_get_flags (klass) & TYPE_ATTRIBUTE_SEALED) || klass->byval_arg.type == MONO_TYPE_VAR || klass->byval_arg.type == MONO_TYPE_MVAR)
 
 static MonoInst*
 emit_castclass_with_cache (MonoCompile *cfg, MonoClass *klass, MonoInst **args, MonoBasicBlock **out_bblock)
@@ -4104,7 +4104,7 @@ handle_castclass (MonoCompile *cfg, MonoClass *klass, MonoInst *src, int context
 
 	save_cast_details (cfg, klass, obj_reg, FALSE, NULL);
 
-	if (klass->flags & TYPE_ATTRIBUTE_INTERFACE) {
+	if (mono_class_get_flags (klass) & TYPE_ATTRIBUTE_INTERFACE) {
 		MONO_EMIT_NEW_LOAD_MEMBASE (cfg, vtable_reg, obj_reg, MONO_STRUCT_OFFSET (MonoObject, vtable));
 		mini_emit_iface_cast (cfg, vtable_reg, klass, NULL, NULL);
 	} else {
@@ -4112,7 +4112,7 @@ handle_castclass (MonoCompile *cfg, MonoClass *klass, MonoInst *src, int context
 
 		MONO_EMIT_NEW_LOAD_MEMBASE (cfg, vtable_reg, obj_reg, MONO_STRUCT_OFFSET (MonoObject, vtable));
 
-		if (!klass->rank && !cfg->compile_aot && !(cfg->opt & MONO_OPT_SHARED) && (klass->flags & TYPE_ATTRIBUTE_SEALED)) {
+		if (!klass->rank && !cfg->compile_aot && !(cfg->opt & MONO_OPT_SHARED) && (mono_class_get_flags (klass) & TYPE_ATTRIBUTE_SEALED)) {
 			/* the remoting code is broken, access the class for now */
 			if (0) { /*FIXME what exactly is broken? This change refers to r39380 from 2005 and mention some remoting fixes were due.*/
 				MonoVTable *vt = mono_class_vtable (cfg->domain, klass);
@@ -4191,7 +4191,7 @@ handle_isinst (MonoCompile *cfg, MonoClass *klass, MonoInst *src, int context_us
 
 	MONO_EMIT_NEW_LOAD_MEMBASE (cfg, vtable_reg, obj_reg, MONO_STRUCT_OFFSET (MonoObject, vtable));
 
-	if (klass->flags & TYPE_ATTRIBUTE_INTERFACE) {
+	if (mono_class_get_flags (klass) & TYPE_ATTRIBUTE_INTERFACE) {
 		g_assert (!context_used);
 		/* the is_null_bb target simply copies the input register to the output */
 		mini_emit_iface_cast (cfg, vtable_reg, klass, false_bb, is_null_bb);
@@ -4221,7 +4221,7 @@ handle_isinst (MonoCompile *cfg, MonoClass *klass, MonoInst *src, int context_us
 			} else if (klass->cast_class == mono_defaults.enum_class) {
 				mini_emit_class_check_branch (cfg, eclass_reg, mono_defaults.enum_class, OP_PBEQ, is_null_bb);
 				MONO_EMIT_NEW_BRANCH_BLOCK (cfg, OP_BR, false_bb);
-			} else if (klass->cast_class->flags & TYPE_ATTRIBUTE_INTERFACE) {
+			} else if (mono_class_get_flags (klass->cast_class) & TYPE_ATTRIBUTE_INTERFACE) {
 				mini_emit_iface_class_cast (cfg, eclass_reg, klass->cast_class, false_bb, is_null_bb);
 			} else {
 				if ((klass->rank == 1) && (klass->byval_arg.type == MONO_TYPE_SZARRAY)) {
@@ -4241,7 +4241,7 @@ handle_isinst (MonoCompile *cfg, MonoClass *klass, MonoInst *src, int context_us
 			/* the is_null_bb target simply copies the input register to the output */
 			mini_emit_isninst_cast (cfg, klass_reg, klass->cast_class, false_bb, is_null_bb);
 		} else {
-			if (!cfg->compile_aot && !(cfg->opt & MONO_OPT_SHARED) && (klass->flags & TYPE_ATTRIBUTE_SEALED)) {
+			if (!cfg->compile_aot && !(cfg->opt & MONO_OPT_SHARED) && (mono_class_get_flags (klass) & TYPE_ATTRIBUTE_SEALED)) {
 				g_assert (!context_used);
 				/* the remoting code is broken, access the class for now */
 				if (0) {/*FIXME what exactly is broken? This change refers to r39380 from 2005 and mention some remoting fixes were due.*/
@@ -4310,7 +4310,7 @@ handle_cisinst (MonoCompile *cfg, MonoClass *klass, MonoInst *src)
 	MONO_EMIT_NEW_BIALU_IMM (cfg, OP_COMPARE_IMM, -1, obj_reg, 0);
 	MONO_EMIT_NEW_BRANCH_BLOCK (cfg, OP_PBEQ, false_bb);
 
-	if (klass->flags & TYPE_ATTRIBUTE_INTERFACE) {
+	if (mono_class_get_flags (klass) & TYPE_ATTRIBUTE_INTERFACE) {
 #ifndef DISABLE_REMOTING
 		NEW_BBLOCK (cfg, interface_fail_bb);
 #endif
@@ -4414,7 +4414,7 @@ handle_ccastclass (MonoCompile *cfg, MonoClass *klass, MonoInst *src)
 
 	save_cast_details (cfg, klass, obj_reg, FALSE, NULL);
 
-	if (klass->flags & TYPE_ATTRIBUTE_INTERFACE) {
+	if (mono_class_get_flags (klass) & TYPE_ATTRIBUTE_INTERFACE) {
 #ifndef DISABLE_REMOTING
 		NEW_BBLOCK (cfg, interface_fail_bb);
 	
@@ -4712,7 +4712,7 @@ mono_method_check_inlining (MonoCompile *cfg, MonoMethod *method)
 				return FALSE;
 			if (!cfg->compile_aot)
 				mono_runtime_class_init (vtable);
-		} else if (method->klass->flags & TYPE_ATTRIBUTE_BEFORE_FIELD_INIT) {
+		} else if (mono_class_get_flags (method->klass) & TYPE_ATTRIBUTE_BEFORE_FIELD_INIT) {
 			if (cfg->run_cctors && method->klass->has_cctor) {
 				/*FIXME it would easier and lazier to just use mono_class_try_get_vtable */
 				if (!method->klass->runtime_info)
@@ -4744,7 +4744,7 @@ mono_method_check_inlining (MonoCompile *cfg, MonoMethod *method)
 		 * the cctor will need to be run at aot method load time, for example,
 		 * or at the end of the compilation of the inlining method.
 		 */
-		if (mono_class_needs_cctor_run (method->klass, NULL) && !((method->klass->flags & TYPE_ATTRIBUTE_BEFORE_FIELD_INIT)))
+		if (mono_class_needs_cctor_run (method->klass, NULL) && !((mono_class_get_flags (method->klass) & TYPE_ATTRIBUTE_BEFORE_FIELD_INIT)))
 			return FALSE;
 	}
 
@@ -4778,7 +4778,7 @@ mini_field_access_needs_cctor_run (MonoCompile *cfg, MonoMethod *method, MonoCla
 			return FALSE;
 	}
 
-	if (klass->flags & TYPE_ATTRIBUTE_BEFORE_FIELD_INIT) {
+	if (mono_class_get_flags (klass) & TYPE_ATTRIBUTE_BEFORE_FIELD_INIT) {
 		if (cfg->method == method)
 			return FALSE;
 	}
@@ -8024,9 +8024,9 @@ mono_method_to_ir (MonoCompile *cfg, MonoMethod *method, MonoBasicBlock *start_b
 					 */
 					if ((cmethod->klass != mono_defaults.object_class) && constrained_call->valuetype && cmethod->klass->valuetype) {
 						/* The 'Own method' case below */
-					} else if (cmethod->klass->image != mono_defaults.corlib && !(cmethod->klass->flags & TYPE_ATTRIBUTE_INTERFACE) && !cmethod->klass->valuetype) {
+					} else if (cmethod->klass->image != mono_defaults.corlib && !(mono_class_get_flags (cmethod->klass) & TYPE_ATTRIBUTE_INTERFACE) && !cmethod->klass->valuetype) {
 						/* 'The type parameter is instantiated as a reference type' case below. */
-					} else if (((cmethod->klass == mono_defaults.object_class) || (cmethod->klass->flags & TYPE_ATTRIBUTE_INTERFACE) || (!cmethod->klass->valuetype && cmethod->klass->image != mono_defaults.corlib)) &&
+					} else if (((cmethod->klass == mono_defaults.object_class) || (mono_class_get_flags (cmethod->klass) & TYPE_ATTRIBUTE_INTERFACE) || (!cmethod->klass->valuetype && cmethod->klass->image != mono_defaults.corlib)) &&
 							   (MONO_TYPE_IS_VOID (fsig->ret) || MONO_TYPE_IS_PRIMITIVE (fsig->ret) || MONO_TYPE_IS_REFERENCE (fsig->ret) || MONO_TYPE_ISSTRUCT (fsig->ret) || mini_is_gsharedvt_type (cfg, fsig->ret)) &&
 							   (fsig->param_count == 0 || (!fsig->hasthis && fsig->param_count == 1) || (fsig->param_count == 1 && (MONO_TYPE_IS_REFERENCE (fsig->params [0]) || mini_is_gsharedvt_type (cfg, fsig->params [0]))))) {
 						MonoInst *args [16];
@@ -8182,7 +8182,7 @@ mono_method_to_ir (MonoCompile *cfg, MonoMethod *method, MonoBasicBlock *start_b
 
 				context_used = mini_method_check_context_used (cfg, cmethod);
 
-				if (context_used && (cmethod->klass->flags & TYPE_ATTRIBUTE_INTERFACE)) {
+				if (context_used && (mono_class_get_flags (cmethod->klass) & TYPE_ATTRIBUTE_INTERFACE)) {
 					/* Generic method interface
 					   calls are resolved via a
 					   helper function and don't
@@ -8420,7 +8420,7 @@ mono_method_to_ir (MonoCompile *cfg, MonoMethod *method, MonoBasicBlock *start_b
 				MonoRgctxInfoType info_type;
 
 				if (virtual) {
-					//if (cmethod->klass->flags & TYPE_ATTRIBUTE_INTERFACE)
+					//if (mono_class_get_flags (cmethod->klass) & TYPE_ATTRIBUTE_INTERFACE)
 						//GSHAREDVT_FAILURE (*ip);
 					// disable for possible remoting calls
 					if (fsig->hasthis && (mono_class_is_marshalbyref (method->klass) || method->klass == mono_defaults.object_class))
@@ -8434,7 +8434,7 @@ mono_method_to_ir (MonoCompile *cfg, MonoMethod *method, MonoBasicBlock *start_b
 														 cmethod, MONO_RGCTX_INFO_METHOD);
 						/* This is not needed, as the trampoline code will pass one, and it might be passed in the same reg as the imt arg */
 						vtable_arg = NULL;
-					} else if ((cmethod->klass->flags & TYPE_ATTRIBUTE_INTERFACE) && !imt_arg) {
+					} else if ((mono_class_get_flags (cmethod->klass) & TYPE_ATTRIBUTE_INTERFACE) && !imt_arg) {
 						/* This can happen when we call a fully instantiated iface method */
 						imt_arg = emit_get_rgctx_method (cfg, context_used,
 														 cmethod, MONO_RGCTX_INFO_METHOD);
@@ -9769,7 +9769,7 @@ mono_method_to_ir (MonoCompile *cfg, MonoMethod *method, MonoBasicBlock *start_b
 				*sp++ = emit_castclass_with_cache (cfg, klass, args, &bblock);
 				ip += 5;
 				inline_costs += 2;
-			} else if (!context_used && (mono_class_is_marshalbyref (klass) || klass->flags & TYPE_ATTRIBUTE_INTERFACE)) {
+			} else if (!context_used && (mono_class_is_marshalbyref (klass) || mono_class_get_flags (klass) & TYPE_ATTRIBUTE_INTERFACE)) {
 				MonoMethod *mono_castclass;
 				MonoInst *iargs [1];
 				int costs;
@@ -9831,7 +9831,7 @@ mono_method_to_ir (MonoCompile *cfg, MonoMethod *method, MonoBasicBlock *start_b
 				*sp++ = mono_emit_method_call (cfg, mono_isinst, args, NULL);
 				ip += 5;
 				inline_costs += 2;
-			} else if (!context_used && (mono_class_is_marshalbyref (klass) || klass->flags & TYPE_ATTRIBUTE_INTERFACE)) {
+			} else if (!context_used && (mono_class_is_marshalbyref (klass) || mono_class_get_flags (klass) & TYPE_ATTRIBUTE_INTERFACE)) {
 				MonoMethod *mono_isinst;
 				MonoInst *iargs [1];
 				int costs;
@@ -9904,7 +9904,7 @@ mono_method_to_ir (MonoCompile *cfg, MonoMethod *method, MonoBasicBlock *start_b
 					*sp++ = emit_castclass_with_cache (cfg, klass, args, &bblock);
 					ip += 5;
 					inline_costs += 2;
-				} else if (!context_used && (mono_class_is_marshalbyref (klass) || klass->flags & TYPE_ATTRIBUTE_INTERFACE)) {
+				} else if (!context_used && (mono_class_is_marshalbyref (klass) || mono_class_get_flags (klass) & TYPE_ATTRIBUTE_INTERFACE)) {
 					MonoMethod *mono_castclass;
 					MonoInst *iargs [1];
 					int costs;

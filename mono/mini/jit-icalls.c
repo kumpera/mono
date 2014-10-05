@@ -1170,7 +1170,7 @@ constrained_gsharedvt_call_setup (gpointer mp, MonoMethod *cmethod, MonoClass *k
 	MonoMethod *m;
 	int vt_slot;
 
-	if (klass->flags & TYPE_ATTRIBUTE_INTERFACE)
+	if (mono_class_get_flags (klass) & TYPE_ATTRIBUTE_INTERFACE)
 		mono_raise_exception (mono_get_exception_execution_engine ("Not yet supported."));
 
 	if (mono_method_signature (cmethod)->pinvoke) {
@@ -1181,7 +1181,7 @@ constrained_gsharedvt_call_setup (gpointer mp, MonoMethod *cmethod, MonoClass *k
 		mono_class_setup_vtable (klass);
 		g_assert (klass->vtable);
 		vt_slot = mono_method_get_vtable_slot (cmethod);
-		if (cmethod->klass->flags & TYPE_ATTRIBUTE_INTERFACE) {
+		if (mono_class_get_flags (cmethod->klass) & TYPE_ATTRIBUTE_INTERFACE) {
 			int iface_offset;
 
 			iface_offset = mono_class_interface_offset (klass, cmethod->klass);

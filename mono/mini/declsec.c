@@ -29,7 +29,7 @@ mono_method_has_declsec (MonoMethod *method)
 	} else if (method->wrapper_type != MONO_WRAPPER_NONE)
 		return FALSE;
 
-	if ((method->klass->flags & TYPE_ATTRIBUTE_HAS_SECURITY) || (method->flags & METHOD_ATTRIBUTE_HAS_SECURITY)) {
+	if ((mono_class_get_flags (method->klass) & TYPE_ATTRIBUTE_HAS_SECURITY) || (method->flags & METHOD_ATTRIBUTE_HAS_SECURITY)) {
 		/* ignore static constructors */
 		if (strcmp (method->name, ".cctor"))
 			return TRUE;
@@ -212,7 +212,7 @@ mono_declsec_linkdemand_aptc (MonoDomain *domain, MonoMethod *caller, MonoMethod
 		return FALSE;
 
 	/* B - Applicable if we're calling a public/protected method from a public class */
-	if (!(callee->klass->flags & TYPE_ATTRIBUTE_PUBLIC) || !(callee->flags & FIELD_ATTRIBUTE_PUBLIC))
+	if (!(mono_class_get_flags (callee->klass) & TYPE_ATTRIBUTE_PUBLIC) || !(callee->flags & FIELD_ATTRIBUTE_PUBLIC))
 		return FALSE;
 
 	/* C - Applicable if the callee's assembly is strongnamed */

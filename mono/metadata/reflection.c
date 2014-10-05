@@ -1188,7 +1188,7 @@ custom_attr_visible (MonoImage *image, MonoReflectionCustomAttr *cattr)
 {
 	/* FIXME: Need to do more checks */
 	if (cattr->ctor->method && (cattr->ctor->method->klass->image != image)) {
-		int visibility = cattr->ctor->method->klass->flags & TYPE_ATTRIBUTE_VISIBILITY_MASK;
+		int visibility = mono_class_get_flags (cattr->ctor->method->klass) & TYPE_ATTRIBUTE_VISIBILITY_MASK;
 
 		if ((visibility != TYPE_ATTRIBUTE_PUBLIC) && (visibility != TYPE_ATTRIBUTE_NESTED_PUBLIC))
 			return FALSE;
@@ -3734,7 +3734,7 @@ mono_image_fill_export_table_from_class (MonoDomain *domain, MonoClass *klass,
 	guint32 *values;
 	guint32 visib, res;
 
-	visib = klass->flags & TYPE_ATTRIBUTE_VISIBILITY_MASK;
+	visib = mono_class_get_flags (klass) & TYPE_ATTRIBUTE_VISIBILITY_MASK;
 	if (! ((visib & TYPE_ATTRIBUTE_PUBLIC) || (visib & TYPE_ATTRIBUTE_NESTED_PUBLIC)))
 		return 0;
 
@@ -3743,7 +3743,7 @@ mono_image_fill_export_table_from_class (MonoDomain *domain, MonoClass *klass,
 	alloc_table (table, table->rows);
 	values = table->values + table->next_idx * MONO_EXP_TYPE_SIZE;
 
-	values [MONO_EXP_TYPE_FLAGS] = klass->flags;
+	values [MONO_EXP_TYPE_FLAGS] = mono_class_get_flags (klass);
 	values [MONO_EXP_TYPE_TYPEDEF] = klass->type_token;
 	if (klass->nested_in)
 		values [MONO_EXP_TYPE_IMPLEMENTATION] = (parent_index << MONO_IMPLEMENTATION_BITS) + MONO_IMPLEMENTATION_EXP_TYPE;
@@ -3806,7 +3806,7 @@ mono_image_fill_export_table_from_module (MonoDomain *domain, MonoReflectionModu
 		MonoClass *klass = mono_class_get_checked (image, mono_metadata_make_token (MONO_TABLE_TYPEDEF, i + 1), &error);
 		g_assert (mono_error_ok (&error)); /* FIXME don't swallow the error */
 
-		if (klass->flags & TYPE_ATTRIBUTE_PUBLIC)
+		if (mono_class_get_flags (klass) & TYPE_ATTRIBUTE_PUBLIC)
 			mono_image_fill_export_table_from_class (domain, klass, module_index, 0, assembly);
 	}
 }
@@ -9971,7 +9971,7 @@ mono_reflection_setup_internal_class (MonoReflectionTypeBuilder *tb)
 	if (!mono_error_ok (&error))
 		goto failure;
 	klass->type_token = MONO_TOKEN_TYPE_DEF | tb->table_idx;
-	klass->flags = tb->attrs;
+	mono_class_set_flags (klass, tb->attrs);
 	
 	mono_profiler_class_event (klass, MONO_PROFILE_START_LOAD);
 
@@ -11014,7 +11014,7 @@ ensure_runtime_vtable (MonoClass *klass)
 		ensure_generic_class_runtime_vtable (klass);
 	}
 
-	if (klass->flags & TYPE_ATTRIBUTE_INTERFACE) {
+	if (mono_class_get_flags (klass) & TYPE_ATTRIBUTE_INTERFACE) {
 		int slot_num = 0;
 		for (i = 0; i < klass->method.count; ++i) {
 			MonoMethod *im = klass->methods [i];
@@ -11466,7 +11466,7 @@ mono_reflection_create_runtime_class (MonoReflectionTypeBuilder *tb)
 	 * Fields to set in klass:
 	 * the various flags: delegate/unicode/contextbound etc.
 	 */
-	klass->flags = tb->attrs;
+	mono_class_set_flags (klass, tb->attrs);
 	klass->has_cctor = 1;
 	klass->has_finalize = 1;
 	klass->has_finalize_inited = 1;
@@ -12426,7 +12426,7 @@ mono_declsec_flags_from_method (MonoMethod *method)
 guint32
 mono_declsec_flags_from_class (MonoClass *klass)
 {
-	if (klass->flags & TYPE_ATTRIBUTE_HAS_SECURITY) {
+	if (mono_class_get_flags (klass) & TYPE_ATTRIBUTE_HAS_SECURITY) {
 		MonoClassExt *ext = mono_class_get_ext (klass);
 		if (!ext || !ext->declsec_flags) {
 			guint32 idx;
