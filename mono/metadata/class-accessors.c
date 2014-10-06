@@ -2,6 +2,7 @@
  * Copyright 2014 Xamarin Inc
  */
 #include <mono/metadata/class-internals.h>
+#include <mono/metadata/tabledefs.h>
 
 enum {
 	PROP_MARSHAL_INFO = 1,
@@ -93,11 +94,26 @@ mono_class_try_get_generic_class (MonoClass *klass)
 guint32
 mono_class_get_flags (MonoClass *klass)
 {
-	return klass->flags;
+	switch (klass->class_kind) {
+	case MONO_CLASS_BORING:
+	case MONO_CLASS_GTD:
+		return ((MonoClassBoring*)klass)->flags;
+	case MONO_CLASS_GINST:
+		return mono_class_get_flags (((MonoClassGenericInst*)klass)->generic_class->container_class);
+	case MONO_CLASS_GPARAM:
+		return TYPE_ATTRIBUTE_PUBLIC;
+	case MONO_CLASS_ARRAY:
+		/* all arrays are marked serializable and sealed, bug #42779 */
+		return TYPE_ATTRIBUTE_CLASS | TYPE_ATTRIBUTE_SERIALIZABLE | TYPE_ATTRIBUTE_SEALED | TYPE_ATTRIBUTE_PUBLIC;
+	case MONO_CLASS_POINTER:
+		return TYPE_ATTRIBUTE_CLASS | (mono_class_get_flags (klass->element_class) & TYPE_ATTRIBUTE_VISIBILITY_MASK);
+	}
+	g_assert_not_reached ();
 }
 
 void
 mono_class_set_flags (MonoClass *klass, guint32 flags)
 {
-	klass->flags = flags;
+	g_assert (klass->class_kind == MONO_CLASS_BORING || klass->class_kind == MONO_CLASS_GTD);
+	((MonoClassBoring*)klass)->flags = flags;
 }

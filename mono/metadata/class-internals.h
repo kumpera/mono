@@ -375,7 +375,7 @@ struct _MonoClass {
 	/*
 	 * From the TypeDef table
 	 */
-	guint32    flags;
+	//guint32    flags;
 	struct {
 #if MONO_SMALL_CONFIG
 		guint16 first, count;
@@ -414,10 +414,11 @@ struct _MonoClass {
 
 typedef struct {
 	MonoClass class;
+	guint32 flags; /* From the typedef table */
 } MonoClassBoring;
 
 typedef struct {
-	MonoClass class;
+	MonoClassBoring class;
 } MonoClassGtd;
 
 typedef struct {

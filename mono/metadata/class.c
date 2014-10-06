@@ -5932,7 +5932,6 @@ mono_generic_class_get_class (MonoGenericClass *gclass)
 	mono_profiler_class_event (klass, MONO_PROFILE_START_LOAD);
 	
 	klass->image = gklass->image;
-	mono_class_set_flags (klass, mono_class_get_flags (gklass));
 	klass->type_token = gklass->type_token;
 	klass->field.count = gklass->field.count;
 
@@ -6052,7 +6051,6 @@ make_generic_param_class (MonoGenericParam *param, MonoImage *image, gboolean is
 
 	klass->inited = TRUE;
 	klass->cast_class = klass->element_class = klass;
-	mono_class_set_flags (klass, TYPE_ATTRIBUTE_PUBLIC);
 
 	klass->this_arg.type = klass->byval_arg.type = is_mvar ? MONO_TYPE_MVAR : MONO_TYPE_VAR;
 	klass->this_arg.data.generic_param = klass->byval_arg.data.generic_param = param;
@@ -6239,7 +6237,6 @@ mono_ptr_class_get (MonoType *type)
 
 	result->image = el_class->image;
 	result->inited = TRUE;
-	mono_class_set_flags (result, TYPE_ATTRIBUTE_CLASS | (mono_class_get_flags (el_class) & TYPE_ATTRIBUTE_VISIBILITY_MASK));
 	/* Can pointers get boxed? */
 	result->instance_size = sizeof (gpointer);
 	result->cast_class = result->element_class = el_class;
@@ -6288,7 +6285,7 @@ mono_fnptr_class_get (MonoMethodSignature *sig)
 
 	result->image = mono_defaults.corlib; /* need to fix... */
 	result->inited = TRUE;
-	mono_class_set_flags (result, TYPE_ATTRIBUTE_CLASS); /* | (mono_class_get_flags (el_class) & TYPE_ATTRIBUTE_VISIBILITY_MASK); */
+
 	/* Can pointers get boxed? */
 	result->instance_size = sizeof (gpointer);
 	result->cast_class = result->element_class = result;
@@ -6520,8 +6517,6 @@ mono_bounded_array_class_get (MonoClass *eclass, guint32 rank, gboolean bounded)
 	classes_size += sizeof (MonoClassDerived);
 
 	class->type_token = 0;
-	/* all arrays are marked serializable and sealed, bug #42779 */
-	mono_class_set_flags (class, TYPE_ATTRIBUTE_CLASS | TYPE_ATTRIBUTE_SERIALIZABLE | TYPE_ATTRIBUTE_SEALED | TYPE_ATTRIBUTE_PUBLIC);
 	class->parent = parent;
 	class->instance_size = mono_class_instance_size (class->parent);
 
