@@ -6593,8 +6593,6 @@ mono_bounded_array_class_get (MonoClass *eclass, guint32 rank, gboolean bounded)
 		class->inited = 1;
 	}
 
-	class->generic_container = eclass->generic_container;
-
 	if (rank == 1 && !bounded) {
 		MonoClass *prev_class;
 
