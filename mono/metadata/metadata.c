@@ -3024,7 +3024,7 @@ do_mono_metadata_parse_generic_class (MonoType *type, MonoImage *m, MonoGenericC
 		return FALSE;
 
 	gklass = mono_class_from_mono_type (gtype);
-	if (!mono_class_has_generic_container (gklass))
+	if (!mono_class_is_gtd (gklass))
 		return FALSE;
 
 	count = mono_metadata_decode_value (ptr, &ptr);
@@ -4715,9 +4715,9 @@ mono_metadata_class_equal (MonoClass *c1, MonoClass *c2, gboolean signature_only
 		return TRUE;
 	if (c1_gclass && c2_gclass)
 		return _mono_metadata_generic_class_equal (c1_gclass, c2_gclass, signature_only);
-	if (c1_gclass && mono_class_has_generic_container (c2))
+	if (c1_gclass && mono_class_is_gtd (c2))
 		return _mono_metadata_generic_class_container_equal (c1_gclass, c2, signature_only);
-	if (mono_class_has_generic_container (c1) && c2_gclass)
+	if (mono_class_is_gtd (c1) && c2_gclass)
 		return _mono_metadata_generic_class_container_equal (c2_gclass, c1, signature_only);
 	if ((c1->byval_arg.type == MONO_TYPE_VAR) && (c2->byval_arg.type == MONO_TYPE_VAR))
 		return mono_metadata_generic_param_equal (

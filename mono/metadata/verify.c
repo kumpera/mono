@@ -527,7 +527,7 @@ mono_type_is_valid_type_in_context_full (MonoType *type, MonoGenericContext *con
 		if (klass->byval_arg.type != type->type)
 			return mono_type_is_valid_type_in_context_full (&klass->byval_arg, context, check_gtd);
 
-		if (check_gtd && mono_class_has_generic_container (klass))
+		if (check_gtd && mono_class_is_gtd (klass))
 			return FALSE;
 		break;
 	}
@@ -593,7 +593,7 @@ is_valid_generic_instantiation (MonoGenericContainer *gc, MonoGenericContext *co
 		 * The type A <K> has a parent B<K>, that is inflated into the GTD B<>.
 		 * Since A<K> is open, thus not instantiatable, this is valid.
 		 */
-		if (mono_class_has_generic_container (paramClass) && param_type->type != MONO_TYPE_GENERICINST && !ginst->is_open)
+		if (mono_class_is_gtd (paramClass) && param_type->type != MONO_TYPE_GENERICINST && !ginst->is_open)
 			return FALSE;
 
 		/*it's not safe to call mono_class_init from here*/
@@ -1669,7 +1669,7 @@ get_boxable_mono_type (VerifyContext* ctx, int token, const char *opcode)
 	if (!(class = mono_class_from_mono_type (type)))
 		ADD_VERIFY_ERROR (ctx, g_strdup_printf ("Could not retrieve type token for %s at 0x%04x", opcode, ctx->ip_offset));
 
-	if (mono_class_has_generic_container (class) && type->type != MONO_TYPE_GENERICINST)
+	if (mono_class_is_gtd (class) && type->type != MONO_TYPE_GENERICINST)
 		CODE_NOT_VERIFIABLE (ctx, g_strdup_printf ("Cannot use the generic type definition in a boxable type position for %s at 0x%04x", opcode, ctx->ip_offset));	
 
 	check_unverifiable_type (ctx, type);
@@ -4872,7 +4872,7 @@ mono_method_verify (MonoMethod *method, int level)
 	if (ctx.signature->is_inflated)
 		ctx.generic_context = generic_context = mono_method_get_context (method);
 
-	if (!generic_context && (mono_class_has_generic_container (method->klass) || method->is_generic)) {
+	if (!generic_context && (mono_class_is_gtd (method->klass) || method->is_generic)) {
 		if (method->is_generic)
 			ctx.generic_context = generic_context = &(mono_method_get_generic_container (method)->context);
 		else
@@ -6127,7 +6127,7 @@ verify_class_fields (MonoClass *class)
 	MonoClassField *field;
 	MonoGenericContext *context = mono_class_get_context (class);
 	GHashTable *unique_fields = g_hash_table_new_full (&field_hash, &field_equals, NULL, NULL);
-	if (mono_class_has_generic_container (class))
+	if (mono_class_is_gtd (class))
 		context = &mono_class_get_generic_container (class)->context;
 
 	while ((field = mono_class_get_fields (class, &iter)) != NULL) {
@@ -6288,19 +6288,19 @@ mono_verifier_verify_class (MonoClass *class)
 	if (class->parent) {
 		if (MONO_CLASS_IS_INTERFACE (class->parent))
 			return FALSE;
-		if (!mono_class_is_ginst (class) && mono_class_has_generic_container (class->parent))
+		if (!mono_class_is_ginst (class) && mono_class_is_gtd (class->parent))
 			return FALSE;
 		if (mono_class_is_ginst (class->parent) && !mono_class_is_ginst (class)) {
 			MonoGenericContext *context = mono_class_get_context (class);
-			if (mono_class_has_generic_container (class))
+			if (mono_class_is_gtd (class))
 				context = &mono_class_get_generic_container (class)->context;
 			if (!mono_type_is_valid_type_in_context (&class->parent->byval_arg, context))
 				return FALSE;
 		}
 	}
-	if (mono_class_has_generic_container (class) && (mono_class_get_flags (class) & TYPE_ATTRIBUTE_LAYOUT_MASK) == TYPE_ATTRIBUTE_EXPLICIT_LAYOUT)
+	if (mono_class_is_gtd (class) && (mono_class_get_flags (class) & TYPE_ATTRIBUTE_LAYOUT_MASK) == TYPE_ATTRIBUTE_EXPLICIT_LAYOUT)
 		return FALSE;
-	if (mono_class_has_generic_container (class) && !verify_generic_parameters (class))
+	if (mono_class_is_gtd (class) && !verify_generic_parameters (class))
 		return FALSE;
 	if (!verify_class_for_overlapping_reference_fields (class))
 		return FALSE;

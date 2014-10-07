@@ -467,7 +467,7 @@ mono_type_get_name_recurse (MonoType *type, GString *str, gboolean is_recursed,
 				g_string_append_c (str, '>');
 			else
 				g_string_append_c (str, ']');
-		} else if (mono_class_has_generic_container (klass) &&
+		} else if (mono_class_is_gtd (klass) &&
 			   (format != MONO_TYPE_NAME_FORMAT_FULL_NAME) &&
 			   (format != MONO_TYPE_NAME_FORMAT_ASSEMBLY_QUALIFIED)) {
 			int i;
@@ -599,7 +599,7 @@ mono_class_is_open_constructed_type (MonoType *t)
 		return t->data.generic_class->context.class_inst->is_open;
 	case MONO_TYPE_CLASS:
 	case MONO_TYPE_VALUETYPE:
-		return mono_class_has_generic_container (t->data.klass);
+		return mono_class_is_gtd (t->data.klass);
 	default:
 		return FALSE;
 	}
@@ -1008,7 +1008,7 @@ mono_class_inflate_generic_method_full_checked (MonoMethod *method, MonoClass *k
 	 * 
 	 */
 	if (!((method->is_generic && context->method_inst) || 
-		(mono_class_has_generic_container (method->klass) && context->class_inst)))
+		(mono_class_is_gtd (method->klass) && context->class_inst)))
 		return method;
 
 	/*
@@ -1112,7 +1112,7 @@ mono_class_inflate_generic_method_full_checked (MonoMethod *method, MonoClass *k
 			klass_hint = NULL;
 	}
 
-	if (mono_class_has_generic_container (method->klass))
+	if (mono_class_is_gtd (method->klass))
 		result->klass = klass_hint;
 
 	if (!result->klass) {
@@ -1180,7 +1180,7 @@ mono_method_get_context_general (MonoMethod *method, gboolean uninflated)
 		return NULL;
 	if (method->is_generic)
 		return &(mono_method_get_generic_container (method)->context);
-	if (mono_class_has_generic_container (method->klass))
+	if (mono_class_is_gtd (method->klass))
 		return &mono_class_try_get_generic_container (method->klass)->context;
 	return NULL;
 }
@@ -1252,7 +1252,7 @@ mono_class_find_enum_basetype (MonoClass *class, MonoError *error)
 
 	mono_error_init (error);
 
-	if (mono_class_has_generic_container (class))
+	if (mono_class_is_gtd (class))
 		container = mono_class_get_generic_container (class);
 	else if (mono_class_is_ginst (class)) {
 		MonoClass *gklass = mono_class_get_generic_class (class)->container_class;
@@ -1576,7 +1576,7 @@ mono_class_setup_fields (MonoClass *class)
 	/* Prevent infinite loops if the class references itself */
 	class->setup_fields_called = 1;
 
-	if (mono_class_has_generic_container (class)) {
+	if (mono_class_is_gtd (class)) {
 		container = mono_class_get_generic_container (class);
 	} else if (gtd) {
 		container = mono_class_get_generic_container (gtd);
@@ -3687,7 +3687,7 @@ mono_class_setup_vtable_full (MonoClass *class, GList *in_setup)
 		context = mono_class_get_context (class);
 		type_token = mono_class_get_generic_class (class)->container_class->type_token;
 	} else {
-		if (mono_class_has_generic_container (class))
+		if (mono_class_is_gtd (class))
 			context = &mono_class_get_generic_container (class)->context;		
 		type_token = class->type_token;
 	}
@@ -9860,11 +9860,11 @@ can_access_member (MonoClass *access_klass, MonoClass *member_klass, MonoClass* 
 		return TRUE;
 
 	if (((mono_class_is_ginst (access_klass) && mono_class_get_generic_class (access_klass)->container_class) ||
-					mono_class_has_generic_container (access_klass)) && 
+					mono_class_is_gtd (access_klass)) && 
 			(member_generic_def = get_generic_definition_class (member_klass))) {
 		MonoClass *access_container;
 
-		if (mono_class_has_generic_container (access_klass))
+		if (mono_class_is_gtd (access_klass))
 			access_container = access_klass;
 		else
 			access_container = mono_class_get_generic_class (access_klass)->container_class;

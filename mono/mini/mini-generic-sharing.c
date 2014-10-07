@@ -61,7 +61,7 @@ type_check_context_used (MonoType *type, gboolean recursive)
 		if (recursive) {
 			MonoGenericClass *gclass = type->data.generic_class;
 
-			g_assert (mono_class_has_generic_container (gclass->container_class));
+			g_assert (mono_class_is_gtd (gclass->container_class));
 			return mono_generic_context_check_used (&gclass->context);
 		} else {
 			return 0;
@@ -124,7 +124,7 @@ mono_class_check_context_used (MonoClass *class)
 
 	if (mono_class_is_ginst (class))
 		context_used |= mono_generic_context_check_used (&mono_class_get_generic_class (class)->context);
-	else if (mono_class_has_generic_container (class))
+	else if (mono_class_is_gtd (class))
 		context_used |= mono_generic_context_check_used (&mono_class_get_generic_container (class)->context);
 
 	return context_used;
@@ -1996,7 +1996,7 @@ mono_method_lookup_rgctx (MonoVTable *class_vtable, MonoGenericInst *method_inst
 	MonoMethodRuntimeGenericContext *mrgctx;
 	MonoMethodRuntimeGenericContext key;
 
-	g_assert (!mono_class_has_generic_container (class_vtable->klass));
+	g_assert (!mono_class_is_gtd (class_vtable->klass));
 	g_assert (!method_inst->is_open);
 
 	mono_domain_lock (domain);
@@ -2080,7 +2080,7 @@ mono_method_is_generic_impl (MonoMethod *method)
 	   if not compiled with sharing. */
 	if (method->wrapper_type != MONO_WRAPPER_NONE)
 		return FALSE;
-	if (mono_class_has_generic_container (method->klass))
+	if (mono_class_is_gtd (method->klass))
 		return TRUE;
 	return FALSE;
 }
@@ -2223,13 +2223,13 @@ mono_method_is_generic_sharable_full (MonoMethod *method, gboolean allow_type_va
 			return FALSE;
 
 		g_assert (mono_class_get_generic_class (method->klass)->container_class &&
-				mono_class_has_generic_container (mono_class_get_generic_class (method->klass)->container_class));
+				mono_class_is_gtd (mono_class_get_generic_class (method->klass)->container_class));
 
 		if (has_constraints (mono_class_get_generic_container (mono_class_get_generic_class (method->klass)->container_class)))
 			return FALSE;
 	}
 
-	if (mono_class_has_generic_container (method->klass) && !allow_type_vars)
+	if (mono_class_is_gtd (method->klass) && !allow_type_vars)
 		return FALSE;
 
 	/* This does potentially expensive cattr checks, so do it at the end */
@@ -2263,7 +2263,7 @@ mono_method_needs_static_rgctx_invoke (MonoMethod *method, gboolean allow_type_v
 
 	return ((method->flags & METHOD_ATTRIBUTE_STATIC) ||
 			method->klass->valuetype) &&
-		(mono_class_is_ginst (method->klass) || mono_class_has_generic_container (method->klass));
+		(mono_class_is_ginst (method->klass) || mono_class_is_gtd (method->klass));
 }
 
 static MonoGenericInst*
@@ -2293,7 +2293,7 @@ mono_method_construct_object_context (MonoMethod *method)
 	MonoGenericContext object_context;
 
 	g_assert (!mono_class_is_ginst (method->klass));
-	if (mono_class_has_generic_container (method->klass)) {
+	if (mono_class_is_gtd (method->klass)) {
 		int type_argc = mono_class_get_generic_container (method->klass)->type_argc;
 
 		object_context.class_inst = get_object_generic_inst (type_argc);
@@ -2496,7 +2496,7 @@ mini_class_get_container_class (MonoClass *class)
 	if (mono_class_is_ginst (class))
 		return mono_class_get_generic_class (class)->container_class;
 
-	g_assert (mono_class_has_generic_container (class));
+	g_assert (mono_class_is_gtd (class));
 	return class;
 }
 
@@ -2512,7 +2512,7 @@ mini_class_get_context (MonoClass *class)
 	if (mono_class_is_ginst (class))
 		return &mono_class_get_generic_class (class)->context;
 
-	g_assert (mono_class_has_generic_container (class));
+	g_assert (mono_class_is_gtd (class));
 	return &mono_class_get_generic_container (class)->context;
 }
 

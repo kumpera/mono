@@ -718,7 +718,7 @@ encode_type (MonoDynamicImage *assembly, MonoType *type, SigBuffer *buf)
 	case MONO_TYPE_CLASS: {
 		MonoClass *k = mono_class_from_mono_type (type);
 
-		if (mono_class_has_generic_container (k)) {
+		if (mono_class_is_gtd (k)) {
 			MonoGenericClass *gclass = mono_metadata_lookup_generic_class (k, mono_class_get_generic_container (k)->context.class_inst, TRUE);
 			encode_generic_class (assembly, gclass, buf);
 		} else {
@@ -1676,7 +1676,7 @@ type_get_qualified_name (MonoType *type, MonoAssembly *ass) {
 		return mono_type_get_name_full (type, MONO_TYPE_NAME_FORMAT_REFLECTION);
 	ta = klass->image->assembly;
 	if (assembly_is_dynamic (ta) || (ta == ass)) {
-		if (mono_class_is_ginst (klass) || mono_class_has_generic_container (klass))
+		if (mono_class_is_ginst (klass) || mono_class_is_gtd (klass))
 			/* For generic type definitions, we want T, while REFLECTION returns T<K> */
 			return mono_type_get_name_full (type, MONO_TYPE_NAME_FORMAT_FULL_NAME);
 		else
@@ -1748,7 +1748,7 @@ field_encode_signature (MonoDynamicImage *assembly, MonoReflectionFieldBuilder *
 	encode_custom_modifiers (assembly, fb->modreq, fb->modopt, &buf);
 	/* encode custom attributes before the type */
 
-	if (mono_class_has_generic_container (class))
+	if (mono_class_is_gtd (class))
 		typespec = create_typespec (assembly, type);
 
 	if (typespec) {
@@ -2332,7 +2332,7 @@ create_typespec (MonoDynamicImage *assembly, MonoType *type)
 	case MONO_TYPE_CLASS:
 	case MONO_TYPE_VALUETYPE: {
 		MonoClass *k = mono_class_from_mono_type (type);
-		if (!k || !mono_class_has_generic_container (k)) {
+		if (!k || !mono_class_is_gtd (k)) {
 			sigbuffer_free (&buf);
 			return 0;
 		}
@@ -3104,7 +3104,7 @@ create_generic_typespec (MonoDynamicImage *assembly, MonoReflectionTypeBuilder *
 		mono_reflection_create_generic_class (tb);
 
 	sigbuffer_add_value (&buf, MONO_TYPE_GENERICINST);
-	g_assert (mono_class_has_generic_container (klass));
+	g_assert (mono_class_is_gtd (klass));
 	sigbuffer_add_value (&buf, klass->byval_arg.type);
 	sigbuffer_add_value (&buf, mono_image_typedef_or_ref_full (assembly, &klass->byval_arg, FALSE));
 
@@ -4273,7 +4273,7 @@ fixup_method (MonoReflectionILGen *ilgen, gpointer value, MonoDynamicImage *asse
 				   !strcmp (iltoken->member->vtable->klass->name, "MonoGenericMethod") ||
 				   !strcmp (iltoken->member->vtable->klass->name, "MonoGenericCMethod")) {
 				MonoMethod *m = ((MonoReflectionMethod*)iltoken->member)->method;
-				g_assert (mono_class_is_ginst (m->klass) || mono_class_has_generic_container (m->klass));
+				g_assert (mono_class_is_ginst (m->klass) || mono_class_is_gtd (m->klass));
 				continue;
 			} else if (!strcmp (iltoken->member->vtable->klass->name, "FieldBuilder")) {
 				continue;
@@ -4975,7 +4975,7 @@ mono_image_create_token (MonoDynamicImage *assembly, MonoObject *obj,
 		MonoType *type = mono_reflection_type_get_handle ((MonoReflectionType *)obj);
 		MonoClass *mc = mono_class_from_mono_type (type);
 		token = mono_metadata_token_from_dor (
-			mono_image_typedef_or_ref_full (assembly, type, !mono_class_has_generic_container (mc) || create_open_instance));
+			mono_image_typedef_or_ref_full (assembly, type, !mono_class_is_gtd (mc) || create_open_instance));
 	} else if (strcmp (klass->name, "GenericTypeParameterBuilder") == 0) {
 		MonoType *type = mono_reflection_type_get_handle ((MonoReflectionType *)obj);
 		token = mono_metadata_token_from_dor (
@@ -10075,7 +10075,7 @@ mono_reflection_create_generic_class (MonoReflectionTypeBuilder *tb)
 
 	count = tb->generic_params ? mono_array_length (tb->generic_params) : 0;
 
-	if (mono_class_has_generic_container (klass) || (count == 0))
+	if (mono_class_is_gtd (klass) || (count == 0))
 		return;
 
 	g_assert (tb->generic_container && (tb->generic_container->owner.klass == klass));
@@ -10414,7 +10414,7 @@ reflection_methodbuilder_to_mono_method (MonoClass *klass,
 			}
 		}
 
-		if (mono_class_has_generic_container (klass)) {
+		if (mono_class_is_gtd (klass)) {
 			container->parent = mono_class_get_generic_container (klass);
 			container->context.class_inst = mono_class_get_generic_container (klass)->context.class_inst;
 		}
@@ -10528,7 +10528,7 @@ ctorbuilder_to_mono_method (MonoClass *klass, MonoReflectionCtorBuilder* mb)
 	mono_save_custom_attrs (klass->image, mb->mhandle, mb->cattrs);
 
 	/* If we are in a generic class, we might be called multiple times from inflate_method */
-	if (!((MonoDynamicImage*)(MonoDynamicImage*)klass->image)->save && !mono_class_has_generic_container (klass)) {
+	if (!((MonoDynamicImage*)(MonoDynamicImage*)klass->image)->save && !mono_class_is_gtd (klass)) {
 		/* ilgen is no longer needed */
 		mb->ilgen = NULL;
 	}
@@ -10552,7 +10552,7 @@ methodbuilder_to_mono_method (MonoClass *klass, MonoReflectionMethodBuilder* mb)
 	mono_save_custom_attrs (klass->image, mb->mhandle, mb->cattrs);
 
 	/* If we are in a generic class, we might be called multiple times from inflate_method */
-	if (!((MonoDynamicImage*)(MonoDynamicImage*)klass->image)->save && !mono_class_has_generic_container (klass)) {
+	if (!((MonoDynamicImage*)(MonoDynamicImage*)klass->image)->save && !mono_class_is_gtd (klass)) {
 		/* ilgen is no longer needed */
 		mb->ilgen = NULL;
 	}
@@ -10625,7 +10625,7 @@ mono_reflection_bind_generic_parameters (MonoReflectionType *type, int type_argc
 		mono_reflection_create_generic_class (tb);
 
 	klass = mono_class_from_mono_type (mono_reflection_type_get_handle (type));
-	if (!mono_class_has_generic_container (klass)) {
+	if (!mono_class_is_gtd (klass)) {
 		mono_loader_unlock ();
 		return NULL;
 	}
@@ -10649,7 +10649,7 @@ mono_class_bind_generic_parameters (MonoClass *klass, int type_argc, MonoType **
 	MonoGenericClass *gclass;
 	MonoGenericInst *inst;
 
-	g_assert (mono_class_has_generic_container (klass));
+	g_assert (mono_class_is_gtd (klass));
 
 	inst = mono_metadata_get_generic_inst (type_argc, types);
 	gclass = mono_metadata_lookup_generic_class (klass, inst, is_dynamic);
@@ -11481,7 +11481,7 @@ mono_reflection_create_runtime_class (MonoReflectionTypeBuilder *tb)
 
 #if 0
 	if (!((MonoDynamicImage*)klass->image)->run) {
-		if (mono_class_has_generic_container (klass)) {
+		if (mono_class_is_gtd (klass)) {
 			/* FIXME: The code below can't handle generic classes */
 			klass->wastypebuilder = TRUE;
 			mono_loader_unlock ();
@@ -11544,7 +11544,7 @@ mono_reflection_create_runtime_class (MonoReflectionTypeBuilder *tb)
 	 *
 	 * Together with this we must ensure the contents of all instances to match the created type.
 	 */
-	if (domain->type_hash && mono_class_has_generic_container (klass))
+	if (domain->type_hash && mono_class_is_gtd (klass))
 		mono_g_hash_table_foreach_remove (domain->type_hash, remove_instantiations_of_and_ensure_contents, klass);
 
 	mono_domain_unlock (domain);
@@ -11992,7 +11992,7 @@ resolve_object (MonoImage *image, MonoObject *obj, MonoClass **handle_class, Mon
 			result = fb->handle;
 		}
 
-		if (fb->handle && mono_class_has_generic_container (fb->handle->parent)) {
+		if (fb->handle && mono_class_is_gtd (fb->handle->parent)) {
 			MonoClass *klass = fb->handle->parent;
 			MonoType *type = mono_class_inflate_generic_type (&klass->byval_arg, context);
 			MonoClass *inflated = mono_class_from_mono_type (type);

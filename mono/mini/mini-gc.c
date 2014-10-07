@@ -1561,7 +1561,7 @@ get_vtype_bitmap (MonoType *t, int *numbits)
 {
 	MonoClass *klass = mono_class_from_mono_type (t);
 
-	if (mono_class_has_generic_container (klass) || mono_class_is_open_constructed_type (t)) {
+	if (mono_class_is_gtd (klass) || mono_class_is_open_constructed_type (t)) {
 		/* FIXME: Generic sharing */
 		return NULL;
 	} else {

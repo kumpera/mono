@@ -570,7 +570,7 @@ mono_field_from_token (MonoImage *image, guint32 token, MonoClass **retklass,
 		field = mono_class_get_field (k, token);
 	}
 
-	if (field && field->parent && !mono_class_is_ginst (field->parent) && !mono_class_has_generic_container (field->parent))
+	if (field && field->parent && !mono_class_is_ginst (field->parent) && !mono_class_is_gtd (field->parent))
 		mono_conc_hashtable_insert (image->field_cache, GUINT_TO_POINTER (token), field);
 
 	return field;

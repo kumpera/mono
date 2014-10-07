@@ -47,7 +47,7 @@ ldvirtfn_internal (MonoObject *obj, MonoMethod *method, gboolean gshared)
 
 		if (mono_class_is_ginst (res->klass))
 			context.class_inst = mono_class_get_generic_class (res->klass)->context.class_inst;
-		else if (mono_class_has_generic_container (res->klass))
+		else if (mono_class_is_gtd (res->klass))
 			context.class_inst = mono_class_get_generic_container (res->klass)->context.class_inst;
 		context.method_inst = mono_method_get_context (method)->method_inst;
 
@@ -990,7 +990,7 @@ mono_helper_compile_generic_method (MonoObject *obj, MonoMethod *method, gpointe
 	if (obj == NULL)
 		mono_raise_exception (mono_get_exception_null_reference ());
 	vmethod = mono_object_get_virtual_method (obj, method);
-	g_assert (!mono_class_has_generic_container (vmethod->klass));
+	g_assert (!mono_class_is_gtd (vmethod->klass));
 	g_assert (!mono_class_is_ginst (vmethod->klass) || !mono_class_get_generic_class (vmethod->klass)->context.class_inst->is_open);
 	g_assert (!context->method_inst || !context->method_inst->is_open);
 

@@ -3101,7 +3101,7 @@ get_method_override (MonoImage *m, guint32 token, MonoGenericContainer *containe
 			MonoMethod *mh = NULL;
 			mh = mono_get_method_full (m, decl, NULL, (MonoGenericContext *) container);
 
-			if (mh && (mh->klass && (mono_class_is_ginst (mh->klass) || mono_class_has_generic_container (mh->klass)))) {
+			if (mh && (mh->klass && (mono_class_is_ginst (mh->klass) || mono_class_is_gtd (mh->klass)))) {
 				char *meth_str;
 				char *ret;
 				

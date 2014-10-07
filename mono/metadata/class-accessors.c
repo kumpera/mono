@@ -135,14 +135,8 @@ mono_class_try_get_generic_container (MonoClass *klass)
 	return klass->generic_container;
 }
 
-gboolean
-mono_class_has_generic_container (MonoClass *klass)
-{
-	return klass->__generic_container != NULL;
-}
-
 void
 mono_class_set_generic_container (MonoClass *klass, MonoGenericContainer *container)
 {
-	klass->__generic_container = container;
+	klass->generic_container = container;
 }

@@ -1458,9 +1458,6 @@ mono_class_try_get_generic_container (MonoClass *klass) MONO_INTERNAL;
 
 /* Those 3 functions have to be made public because of monodis. */
 
-MONO_API gboolean
-mono_class_has_generic_container (MonoClass *klass);
-
 MONO_API void
 mono_class_set_generic_container (MonoClass *klass, MonoGenericContainer *container);
 

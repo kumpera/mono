@@ -4214,7 +4214,7 @@ if (valgrind_register){
 		gboolean is_generic = FALSE;
 
 		if (cfg->method->is_inflated || mono_method_get_generic_container (cfg->method) ||
-				mono_class_has_generic_container (cfg->method->klass) || mono_class_is_ginst (cfg->method->klass)) {
+				mono_class_is_gtd (cfg->method->klass) || mono_class_is_ginst (cfg->method->klass)) {
 			is_generic = TRUE;
 		}
 
@@ -4804,7 +4804,7 @@ mini_get_shared_method_full (MonoMethod *method, gboolean all_vt, gboolean is_gs
 	gboolean gsharedvt = FALSE;
 	MonoGenericContainer *class_container, *method_container = NULL;
 
-	if (method->is_generic || (mono_class_has_generic_container (method->klass) && !method->is_inflated)) {
+	if (method->is_generic || (mono_class_is_gtd (method->klass) && !method->is_inflated)) {
 		declaring_method = method;
 	} else {
 		declaring_method = mono_method_get_declaring_generic_method (method);
@@ -4949,7 +4949,7 @@ mini_method_compile (MonoMethod *method, guint32 opts, MonoDomain *domain, JitFl
 		 * FIXME: Remove the method->klass->generic_class limitation.
 		 */
 		try_generic_shared = mono_class_generic_sharing_enabled (method->klass) &&
-			(opts & MONO_OPT_GSHARED) && ((method->is_generic || mono_class_has_generic_container (method->klass)) || (!mono_class_is_ginst (method->klass) && mono_method_is_generic_sharable_full (method, TRUE, FALSE, FALSE)));
+			(opts & MONO_OPT_GSHARED) && ((method->is_generic || mono_class_is_gtd (method->klass)) || (!mono_class_is_ginst (method->klass) && mono_method_is_generic_sharable_full (method, TRUE, FALSE, FALSE)));
 	else
 		try_generic_shared = mono_class_generic_sharing_enabled (method->klass) &&
 			(opts & MONO_OPT_GSHARED) && mono_method_is_generic_sharable (method, FALSE);
@@ -5016,7 +5016,7 @@ mini_method_compile (MonoMethod *method, guint32 opts, MonoDomain *domain, JitFl
 	if (cfg->gen_seq_points)
 		cfg->seq_points = g_ptr_array_new ();
 
-	if (cfg->compile_aot && !try_generic_shared && (method->is_generic || mono_class_has_generic_container (method->klass) || method_is_gshared)) {
+	if (cfg->compile_aot && !try_generic_shared && (method->is_generic || mono_class_is_gtd (method->klass) || method_is_gshared)) {
 		cfg->exception_type = MONO_EXCEPTION_GENERIC_SHARING_FAILED;
 		return cfg;
 	}

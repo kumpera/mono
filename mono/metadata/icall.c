@@ -1617,7 +1617,7 @@ ves_icall_System_Reflection_FieldInfo_get_marshal_info (MonoReflectionField *fie
 	MonoType *ftype;
 	int i;
 
-	if (mono_class_has_generic_container (klass) ||
+	if (mono_class_is_gtd (klass) ||
 	    (mono_class_is_ginst (klass) && mono_class_get_generic_class (klass)->context.class_inst->is_open))
 		return NULL;
 
@@ -2347,7 +2347,7 @@ ves_icall_MonoType_GetGenericArguments (MonoReflectionType *type)
 
 	klass = mono_class_from_mono_type (type->type);
 
-	if (mono_class_has_generic_container (klass)) {
+	if (mono_class_is_gtd (klass)) {
 		MonoGenericContainer *container = mono_class_get_generic_container (klass);
 		res = mono_array_new_specific (array_vtable, container->type_argc);
 		for (i = 0; i < container->type_argc; ++i) {
@@ -2378,7 +2378,7 @@ ves_icall_Type_get_IsGenericTypeDefinition (MonoReflectionType *type)
 		return FALSE;
 
 	klass = mono_class_from_mono_type (type->type);
-	return mono_class_has_generic_container (klass);
+	return mono_class_is_gtd (klass);
 }
 
 ICALL_EXPORT MonoReflectionType*
@@ -2392,7 +2392,7 @@ ves_icall_Type_GetGenericTypeDefinition_impl (MonoReflectionType *type)
 
 	klass = mono_class_from_mono_type (type->type);
 
-	if (mono_class_has_generic_container (klass)) {
+	if (mono_class_is_gtd (klass)) {
 		return type; /* check this one */
 	}
 	if (mono_class_is_ginst (klass)) {
@@ -2468,7 +2468,7 @@ ves_icall_Type_get_IsGenericType (MonoReflectionType *type)
 		return FALSE;
 
 	klass = mono_class_from_mono_type (type->type);
-	return mono_class_is_ginst (klass) || mono_class_has_generic_container (klass);
+	return mono_class_is_ginst (klass) || mono_class_is_gtd (klass);
 }
 
 ICALL_EXPORT gint32
@@ -4789,7 +4789,7 @@ mono_method_get_equivalent_method (MonoMethod *method, MonoClass *klass)
 		ctx.class_inst = inflated->context.class_inst;
 		if (mono_class_is_ginst (klass))
 			ctx.class_inst = mono_class_get_generic_class (klass)->context.class_inst;
-		else if (mono_class_has_generic_container (klass))
+		else if (mono_class_is_gtd (klass))
 			ctx.class_inst = mono_class_get_generic_container (klass)->context.class_inst;
 		return mono_class_inflate_generic_method_full (inflated->declaring, klass, &ctx);
 	}

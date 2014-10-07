@@ -915,7 +915,7 @@ compile_all_methods_thread_main_inner (CompileAllThreadArgs *args)
 		    (method->flags & METHOD_ATTRIBUTE_ABSTRACT))
 			continue;
 
-		if (mono_class_has_generic_container (method->klass))
+		if (mono_class_is_gtd (method->klass))
 			continue;
 		sig = mono_method_signature (method);
 		if (!sig) {
