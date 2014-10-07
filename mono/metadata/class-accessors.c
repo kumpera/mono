@@ -117,3 +117,32 @@ mono_class_set_flags (MonoClass *klass, guint32 flags)
 	g_assert (klass->class_kind == MONO_CLASS_BORING || klass->class_kind == MONO_CLASS_GTD);
 	((MonoClassBoring*)klass)->flags = flags;
 }
+
+/*
+ * mono_class_get_generic_container:
+ *
+ *   Return the generic container of KLASS which should be a generic type definition.
+ */
+MonoGenericContainer*
+mono_class_get_generic_container (MonoClass *klass)
+{
+	return klass->generic_container;
+}
+
+MonoGenericContainer*
+mono_class_try_get_generic_container (MonoClass *klass)
+{
+	return klass->generic_container;
+}
+
+gboolean
+mono_class_has_generic_container (MonoClass *klass)
+{
+	return klass->__generic_container != NULL;
+}
+
+void
+mono_class_set_generic_container (MonoClass *klass, MonoGenericContainer *container)
+{
+	klass->__generic_container = container;
+}

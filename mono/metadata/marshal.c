@@ -4305,7 +4305,7 @@ mono_marshal_get_delegate_invoke_internal (MonoMethod *method, gboolean callvirt
 
 		container = mono_method_get_generic_container (method);
 		if (!container)
-			container = method->klass->generic_container;
+			container = mono_class_get_generic_container (method->klass);
 		g_assert (container);
 
 		invoke_sig = sig = mono_signature_no_pinvoke (method);
@@ -10439,7 +10439,7 @@ mono_marshal_get_synchronized_inner_wrapper (MonoMethod *method)
 		method = ((MonoMethodInflated*)method)->declaring;
 		container = mono_method_get_generic_container (method);
 		if (!container)
-			container = method->klass->generic_container;
+			container = mono_class_get_generic_container (method->klass);
 		g_assert (container);
 	}
 
@@ -10489,7 +10489,7 @@ mono_marshal_get_synchronized_wrapper (MonoMethod *method)
 		method = ((MonoMethodInflated*)method)->declaring;
 		container = mono_method_get_generic_container (method);
 		if (!container)
-			container = method->klass->generic_container;
+			container = mono_class_get_generic_container (method->klass);
 		g_assert (container);
 	}
 

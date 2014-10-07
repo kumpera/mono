@@ -3270,8 +3270,8 @@ create_gsharedvt_inst (MonoAotCompile *acfg, MonoMethod *method, MonoGenericCont
 
 	memset (ctx, 0, sizeof (MonoGenericContext));
 
-	if (method->klass->generic_container) {
-		shared_context = method->klass->generic_container->context;
+	if (mono_class_has_generic_container (method->klass)) {
+		shared_context = mono_class_get_generic_container (method->klass)->context;
 		inst = shared_context.class_inst;
 
 		args = g_new0 (MonoType*, inst->type_argc);
@@ -3554,7 +3554,7 @@ add_wrappers (MonoAotCompile *acfg)
 		if (!klass->delegate || klass == mono_defaults.delegate_class || klass == mono_defaults.multicastdelegate_class)
 			continue;
 
-		if (!klass->generic_container) {
+		if (!mono_class_has_generic_container (klass)) {
 			method = mono_get_delegate_invoke (klass);
 
 			m = mono_marshal_get_delegate_invoke (method, NULL);
@@ -3580,7 +3580,7 @@ add_wrappers (MonoAotCompile *acfg)
 				if (j < cattr->num_attrs)
 					add_method (acfg, mono_marshal_get_native_func_wrapper_aot (klass));
 			}
-		} else if ((acfg->opts & MONO_OPT_GSHAREDVT) && klass->generic_container) {
+		} else if ((acfg->opts & MONO_OPT_GSHAREDVT) && mono_class_has_generic_container (klass)) {
 			MonoGenericContext ctx;
 			MonoMethod *inst, *gshared;
 
@@ -3666,7 +3666,7 @@ add_wrappers (MonoAotCompile *acfg)
 		if (method->iflags & METHOD_IMPL_ATTRIBUTE_SYNCHRONIZED) {
 			if (method->is_generic) {
 				// FIXME:
-			} else if (method->klass->generic_container) {
+			} else if (mono_class_has_generic_container (method->klass)) {
 				MonoGenericContext ctx;
 				MonoMethod *inst, *gshared, *m;
 
@@ -3823,7 +3823,7 @@ add_wrappers (MonoAotCompile *acfg)
 			continue;
 		}
 
-		if (klass->valuetype && !klass->generic_container && can_marshal_struct (klass) &&
+		if (klass->valuetype && !mono_class_has_generic_container (klass) && can_marshal_struct (klass) &&
 			!(klass->nested_in && strstr (klass->nested_in->name, "<PrivateImplementationDetails>") == klass->nested_in->name)) {
 			add_method (acfg, mono_marshal_get_struct_to_ptr (klass));
 			add_method (acfg, mono_marshal_get_ptr_to_struct (klass));
@@ -3848,7 +3848,7 @@ has_type_vars (MonoClass *klass)
 					return TRUE;
 		}
 	}
-	if (klass->generic_container)
+	if (mono_class_has_generic_container (klass))
 		return TRUE;
 	return FALSE;
 }
@@ -4255,7 +4255,7 @@ add_generic_instances (MonoAotCompile *acfg)
 				g_free (type_argv);
 			}
 
-			if (method->is_generic || method->klass->generic_container)
+			if (method->is_generic || mono_class_has_generic_container (method->klass))
 				declaring_method = method;
 			else
 				declaring_method = mono_method_get_declaring_generic_method (method);
@@ -5660,11 +5660,11 @@ emit_klass_info (MonoAotCompile *acfg, guint32 token)
 
 	mono_class_has_finalizer (klass);
 
-	if (klass->generic_container || cant_encode) {
+	if (mono_class_has_generic_container (klass) || cant_encode) {
 		encode_value (-1, p, &p);
 	} else {
 		encode_value (klass->vtable_size, p, &p);
-		encode_value ((klass->generic_container ? (1 << 8) : 0) | (no_special_static << 7) | (klass->has_static_refs << 6) | (klass->has_references << 5) | ((klass->blittable << 4) | ((mono_class_get_ext (klass) && mono_class_get_ext (klass)->nested_classes) ? 1 : 0) << 3) | (klass->has_cctor << 2) | (klass->has_finalize << 1) | klass->ghcimpl, p, &p);
+		encode_value ((mono_class_has_generic_container (klass) ? (1 << 8) : 0) | (no_special_static << 7) | (klass->has_static_refs << 6) | (klass->has_references << 5) | ((klass->blittable << 4) | ((mono_class_get_ext (klass) && mono_class_get_ext (klass)->nested_classes) ? 1 : 0) << 3) | (klass->has_cctor << 2) | (klass->has_finalize << 1) | klass->ghcimpl, p, &p);
 		if (klass->has_cctor)
 			encode_method_ref (acfg, mono_class_get_cctor (klass), p, &p);
 		if (klass->has_finalize)
@@ -6615,7 +6615,7 @@ compile_method (MonoAotCompile *acfg, MonoMethod *method)
 	InterlockedIncrement (&acfg->stats.mcount);
 
 #if 0
-	if (method->is_generic || method->klass->generic_container) {
+	if (method->is_generic || mono_class_has_generic_container (method->klass)) {
 		InterlockedIncrement (&acfg->stats.genericcount);
 		return;
 	}
@@ -8482,7 +8482,7 @@ collect_methods (MonoAotCompile *acfg)
 		if (!strstr (method->klass->image->name, "mini"))
 			continue;
 		*/
-		if (method->is_generic || method->klass->generic_container) {
+		if (method->is_generic || mono_class_has_generic_container (method->klass)) {
 			MonoMethod *gshared;
 
 			gshared = mini_get_shared_method_full (method, TRUE, TRUE);

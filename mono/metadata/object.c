@@ -6327,7 +6327,7 @@ mono_delegate_ctor (MonoObject *this, MonoObject *target, gpointer addr)
 		ji = mono_jit_info_table_find (mono_get_root_domain (), mono_get_addr_from_ftnptr (addr));
 	if (ji) {
 		method = mono_jit_info_get_method (ji);
-		g_assert (!method->klass->generic_container);
+		g_assert (!mono_class_has_generic_container (method->klass));
 	}
 
 	mono_delegate_ctor_with_method (this, target, addr, method);

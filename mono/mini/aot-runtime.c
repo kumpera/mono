@@ -451,7 +451,7 @@ decode_klass_ref (MonoAotModule *module, guint8 *buf, guint8 **endbuf)
 		gclass = decode_klass_ref (module, p, &p);
 		if (!gclass)
 			return NULL;
-		g_assert (gclass->generic_container);
+		g_assert (mono_class_has_generic_container (gclass));
 
 		memset (&ctx, 0, sizeof (ctx));
 		ctx.class_inst = decode_generic_inst (module, p, &p);
@@ -488,7 +488,7 @@ decode_klass_ref (MonoAotModule *module, guint8 *buf, guint8 **endbuf)
 				if (!class_def)
 					return NULL;
 
-				container = class_def->generic_container;
+				container = mono_class_try_get_generic_container (class_def);
 			}
 		} else {
 			serial = decode_value (p, &p);
@@ -635,7 +635,7 @@ decode_type (MonoAotModule *module, guint8 *buf, guint8 **endbuf)
 		gclass = decode_klass_ref (module, p, &p);
 		if (!gclass)
 			return NULL;
-		g_assert (gclass->generic_container);
+		g_assert (mono_class_has_generic_container (gclass));
 
 		memset (&ctx, 0, sizeof (ctx));
 		ctx.class_inst = decode_generic_inst (module, p, &p);
@@ -3639,7 +3639,7 @@ load_method (MonoDomain *domain, MonoAotModule *amodule, MonoImage *image, MonoM
 		mono_profiler_method_end_jit (method, jinfo, MONO_PROFILE_OK);
 	}
 
-	if (from_plt && klass && !klass->generic_container)
+	if (from_plt && klass && !mono_class_has_generic_container (klass))
 		mono_runtime_class_init (mono_class_vtable (domain, klass));
 
 	return code;

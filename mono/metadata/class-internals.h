@@ -1360,9 +1360,6 @@ mono_method_search_in_array_class (MonoClass *klass, const char *name, MonoMetho
 void
 mono_class_setup_interface_id (MonoClass *klass) MONO_INTERNAL;
 
-MonoGenericContainer*
-mono_class_get_generic_container (MonoClass *klass) MONO_INTERNAL;
-
 /* monodis needs this :( */
 MonoGenericClass*
 mono_class_get_generic_class (MonoClass *klass);
@@ -1455,6 +1452,21 @@ mono_class_alloc0 (MonoClass *class, int size) MONO_INTERNAL;
 
 void
 mono_class_set_flags (MonoClass *klass, uint32_t flags) MONO_INTERNAL;
+
+MonoGenericContainer*
+mono_class_try_get_generic_container (MonoClass *klass) MONO_INTERNAL;
+
+/* Those 3 functions have to be made public because of monodis. */
+
+MONO_API gboolean
+mono_class_has_generic_container (MonoClass *klass);
+
+MONO_API void
+mono_class_set_generic_container (MonoClass *klass, MonoGenericContainer *container);
+
+MONO_API MonoGenericContainer*
+mono_class_get_generic_container (MonoClass *klass);
+
 
 /*Now that everything has been defined, let's include the inline functions */
 #include <mono/metadata/class-inlines.h>

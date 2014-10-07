@@ -7897,9 +7897,9 @@ type_commands_internal (int command, MonoClass *klass, MonoDomain *domain, guint
 			b |= (1 << 3);
 		if (klass->enumtype)
 			b |= (1 << 4);
-		if (klass->generic_container)
+		if (mono_class_has_generic_container (klass))
 			b |= (1 << 5);
-		if (klass->generic_container || mono_class_is_ginst (klass))
+		if (mono_class_has_generic_container (klass) || mono_class_is_ginst (klass))
 			b |= (1 << 6);
 		buffer_add_byte (buf, b);
 		nnested = 0;
@@ -7911,7 +7911,7 @@ type_commands_internal (int command, MonoClass *klass, MonoDomain *domain, guint
 		while ((nested = mono_class_get_nested_types (klass, &iter)))
 			buffer_add_typeid (buf, domain, nested);
 		if (CHECK_PROTOCOL_VERSION (2, 12)) {
-			if (klass->generic_container)
+			if (mono_class_has_generic_container (klass))
 				buffer_add_typeid (buf, domain, klass);
 			else if (mono_class_is_ginst (klass))
 				buffer_add_typeid (buf, domain, mono_class_get_generic_class (klass)->container_class);
@@ -7928,8 +7928,8 @@ type_commands_internal (int command, MonoClass *klass, MonoDomain *domain, guint
 				buffer_add_int (buf, count);
 				for (i = 0; i < count; i++)
 					buffer_add_typeid (buf, domain, mono_class_from_mono_type (inst->type_argv [i]));
-			} else if (klass->generic_container) {
-				MonoGenericContainer *container = klass->generic_container;
+			} else if (mono_class_has_generic_container (klass)) {
+				MonoGenericContainer *container = mono_class_get_generic_container (klass);
 				MonoClass *pklass;
 
 				count = container->type_argc;

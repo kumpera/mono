@@ -570,7 +570,7 @@ mono_field_from_token (MonoImage *image, guint32 token, MonoClass **retklass,
 		field = mono_class_get_field (k, token);
 	}
 
-	if (field && field->parent && !mono_class_is_ginst (field->parent) && !field->parent->generic_container)
+	if (field && field->parent && !mono_class_is_ginst (field->parent) && !mono_class_has_generic_container (field->parent))
 		mono_conc_hashtable_insert (image->field_cache, GUINT_TO_POINTER (token), field);
 
 	return field;
@@ -1768,7 +1768,7 @@ mono_get_method_from_token (MonoImage *image, guint32 token, MonoClass *klass,
 		sig = mono_metadata_blob_heap (image, cols [4]);
 	size = mono_metadata_decode_blob_size (sig, &sig);
 
-	container = klass->generic_container;
+	container = mono_class_try_get_generic_container (klass);
 
 	/* 
 	 * load_generic_params does a binary search so only call it if the method 
@@ -2435,7 +2435,7 @@ mono_method_signature_checked (MonoMethod *m, MonoError *error)
 	g_assert (!mono_class_is_ginst (m->klass));
 	container = mono_method_get_generic_container (m);
 	if (!container)
-		container = m->klass->generic_container;
+		container = mono_class_try_get_generic_container (m->klass);
 
 	/* Generic signatures depend on the container so they cannot be cached */
 	/* icall/pinvoke signatures cannot be cached cause we modify them below */
@@ -2643,7 +2643,7 @@ mono_method_get_header (MonoMethod *method)
 	 */
 	container = mono_method_get_generic_container (method);
 	if (!container)
-		container = method->klass->generic_container;
+		container = mono_class_try_get_generic_container (method->klass);
 	header = mono_metadata_parse_mh_full (img, container, loc);
 
 	return header;
