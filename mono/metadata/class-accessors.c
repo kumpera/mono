@@ -126,17 +126,21 @@ mono_class_set_flags (MonoClass *klass, guint32 flags)
 MonoGenericContainer*
 mono_class_get_generic_container (MonoClass *klass)
 {
-	return klass->generic_container;
+	g_assert (mono_class_is_gtd (klass));
+	return ((MonoClassGtd*)klass)->generic_container;
 }
 
 MonoGenericContainer*
 mono_class_try_get_generic_container (MonoClass *klass)
 {
-	return klass->generic_container;
+	if (mono_class_is_gtd (klass))
+		return ((MonoClassGtd*)klass)->generic_container;
+	return NULL;
 }
 
 void
 mono_class_set_generic_container (MonoClass *klass, MonoGenericContainer *container)
 {
-	klass->generic_container = container;
+	g_assert (mono_class_is_gtd (klass));
+	((MonoClassGtd*)klass)->generic_container = container;
 }

@@ -5673,9 +5673,8 @@ mono_class_create_from_typedef (MonoImage *image, guint32 type_token, MonoError 
 	/*
 	 * Check whether we're a generic type definition.
 	 */
-	mono_class_set_generic_container (class, mono_metadata_load_generic_params (image, class->type_token, NULL));
-	
 	if (mono_class_is_gtd (class)) {
+		mono_class_set_generic_container (class, mono_metadata_load_generic_params (image, class->type_token, NULL));
 		mono_class_get_generic_container (class)->owner.klass = class;
 		context = &mono_class_get_generic_container (class)->context;
 		enable_gclass_recording ();

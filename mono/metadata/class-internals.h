@@ -396,7 +396,7 @@ struct _MonoClass {
 	MonoType byval_arg;
 
 	// MonoGenericClass *generic_class;
-	MonoGenericContainer *generic_container;
+	// MonoGenericContainer *generic_container;
 
 	void *gc_descr;
 
@@ -419,6 +419,7 @@ typedef struct {
 
 typedef struct {
 	MonoClassBoring class;
+	MonoGenericContainer *generic_container;
 } MonoClassGtd;
 
 typedef struct {
