@@ -665,7 +665,8 @@ class_next_value (gpointer value)
 {
 	MonoClass *class = value;
 
-	return (gpointer*)&class->next_class_cache;
+	g_assert (mono_class_is_boring (class) || mono_class_is_gtd (class));
+	return (gpointer*)&((MonoClassBoring*)class)->next_class_cache;
 }
 
 void

@@ -402,9 +402,6 @@ struct _MonoClass {
 
 	MonoClassRuntimeInfo *runtime_info;
 
-	/* next element in the class_cache hash list (in MonoImage) */
-	MonoClass *next_class_cache;
-
 	/* Generic vtable. Initialized by a call to mono_class_setup_vtable () */
 	MonoMethod **vtable;
 
@@ -415,6 +412,9 @@ struct _MonoClass {
 typedef struct {
 	MonoClass class;
 	guint32 flags; /* From the typedef table */
+
+	/* next element in the class_cache hash list (in MonoImage) */
+	MonoClass *next_class_cache;
 } MonoClassBoring;
 
 typedef struct {
