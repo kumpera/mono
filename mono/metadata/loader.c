@@ -530,10 +530,8 @@ mono_field_from_token (MonoImage *image, guint32 token, MonoClass **retklass, Mo
 	MonoError error;
 	MonoClassField *res = mono_field_from_token_checked (image, token, retklass, context, &error);
 	g_assert (!mono_loader_get_last_error ());
-	if (!mono_error_ok (&error)) {
-		mono_loader_set_error_from_mono_error (&error);
-		mono_error_cleanup (&error);
-	}
+	g_assert (mono_error_ok (&error)); /* This is for strict use by embedders */
+
 	return res;
 }
 
@@ -893,12 +891,7 @@ mono_method_get_signature_full (MonoMethod *method, MonoImage *image, guint32 to
 	MonoMethodSignature *res = mono_method_get_signature_checked (method, image, token, context, &error);
 
 	g_assert (!mono_loader_get_last_error ());
-
-	if (!res) {
-		g_assert (!mono_error_ok (&error));
-		mono_loader_set_error_from_mono_error (&error);
-		mono_error_cleanup (&error); /* FIXME Don't swallow the error */
-	}
+	g_assert (mono_error_ok (&error)); /* This is for strict use by embedders */
 	return res;
 }
 
@@ -1000,12 +993,8 @@ mono_method_get_signature (MonoMethod *method, MonoImage *image, guint32 token)
 	MonoMethodSignature *res = mono_method_get_signature_checked (method, image, token, NULL, &error);
 
 	g_assert (!mono_loader_get_last_error ());
+	g_assert (mono_error_ok (&error)); /* This is for strict use by embedders */
 
-	if (!res) {
-		g_assert (!mono_error_ok (&error));
-		mono_loader_set_error_from_mono_error (&error);
-		mono_error_cleanup (&error); /* FIXME Don't swallow the error */
-	}
 	return res;
 }
 
