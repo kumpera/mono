@@ -1171,9 +1171,11 @@ decode_method_ref_with_target (MonoAotModule *module, MethodRef *ref, MonoMethod
 		if (!image)
 			return FALSE;
 
-		ref->method = mono_get_method_full (image, ref->token, NULL, NULL);
-		if (!ref->method)
+		ref->method = mono_get_method_checked (image, ref->token, NULL, NULL, &error);
+		if (!ref->method) {
+			mono_error_cleanup (&error); /* FIXME don't swallow the error */
 			return FALSE;
+		}
 
 		memset (&ctx, 0, sizeof (ctx));
 

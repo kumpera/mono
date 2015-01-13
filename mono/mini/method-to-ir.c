@@ -6458,7 +6458,9 @@ mini_get_method_allow_open (MonoMethod *m, guint32 token, MonoClass *klass, Mono
 			g_assert (mono_error_ok (&error)); /* FIXME don't swallow the error */
 		}
 	} else {
-		method = mono_get_method_full (m->klass->image, token, klass, context);
+		MonoError error;
+		method = mono_get_method_checked (m->klass->image, token, klass, context, &error);
+		g_assert (mono_error_ok (&error)); /* FIXME don't swallow the error */
 	}
 
 	return method;
