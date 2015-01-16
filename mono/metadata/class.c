@@ -1304,14 +1304,10 @@ mono_class_find_enum_basetype (MonoClass *class, MonoError *error)
 			goto fail;
 		}
 
-		ftype = mono_metadata_parse_type_full (m, container, MONO_PARSE_FIELD, cols [MONO_FIELD_FLAGS], sig + 1, &sig);
-		if (!ftype) {
-			if (mono_loader_get_last_error ()) /*FIXME plug the above to not leak errors*/
-				mono_error_set_from_loader_error (error);
-			else
-				mono_error_set_bad_image (error, class->image, "Could not parse type for field signature %x", cols [MONO_FIELD_SIGNATURE]);
+		ftype = mono_metadata_parse_type_full (m, container, cols [MONO_FIELD_FLAGS], sig + 1, &sig, error);
+		if (!ftype)
 			goto fail;
-		}
+
 		if (class->generic_class) {
 			//FIXME do we leak here?
 			ftype = mono_class_inflate_generic_type_checked (ftype, mono_class_get_context (class), error);
@@ -10450,9 +10446,9 @@ mono_field_resolve_type (MonoClassField *field, MonoError *error)
 		mono_metadata_decode_value (sig, &sig);
 		/* FIELD signature == 0x06 */
 		g_assert (*sig == 0x06);
-		field->type = mono_metadata_parse_type_full (image, container, MONO_PARSE_FIELD, cols [MONO_FIELD_FLAGS], sig + 1, &sig);
+		field->type = mono_metadata_parse_type_full (image, container, cols [MONO_FIELD_FLAGS], sig + 1, &sig, error);
 		if (!field->type)
-			mono_class_set_failure_from_loader_error (class, error, g_strdup_printf ("Could not load field %s type", field->name));
+			mono_class_set_failure (class, MONO_EXCEPTION_TYPE_LOAD, g_strdup (mono_error_get_message (error)));
 	}
 }
 

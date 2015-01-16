@@ -1090,16 +1090,9 @@ method_from_memberref (MonoImage *image, guint32 idx, MonoGenericContext *typesp
 
 	sig = find_cached_memberref_sig (image, sig_idx);
 	if (!sig) {
-		sig = mono_metadata_parse_method_signature (image, 0, ptr, NULL);
-		if (sig == NULL) {
-			/* FIXME don't swallow parsing error */
-			if (mono_loader_get_last_error ()) /* FIXME mono_metadata_parse_method_signature leak a loader error */
-				mono_error_set_from_loader_error (error);
-			else
-				mono_error_set_method_load (error, klass, mname, "Could not parse method signature");
+		sig = mono_metadata_parse_method_signature_full (image, NULL, 0, ptr, NULL, error);
+		if (sig == NULL)
 			goto fail;
-		}
-
 		sig = cache_memberref_sig (image, sig_idx, sig);
 	}
 
@@ -1184,12 +1177,10 @@ method_from_methodspec (MonoImage *image, MonoGenericContext *context, guint32 i
 	ptr++;
 	param_count = mono_metadata_decode_value (ptr, &ptr);
 
-	inst = mono_metadata_parse_generic_inst (image, NULL, param_count, ptr, &ptr);
-	if (!inst) {
-		g_assert (!mono_loader_get_last_error ());
-		mono_error_set_bad_image (error, image, "Cannot parse generic instance for methodspec 0x%08x", idx);
+	inst = mono_metadata_parse_generic_inst (image, NULL, param_count, ptr, &ptr, error);
+	if (!inst)
 		return NULL;
-	}
+
 
 	if (context && inst->is_open) {
 		inst = mono_metadata_inflate_generic_inst (inst, context, error);
@@ -2588,11 +2579,10 @@ mono_method_signature_checked (MonoMethod *m, MonoError *error)
 
 		size = mono_metadata_decode_blob_size (sig, &sig_body);
 
-		signature = mono_metadata_parse_method_signature_full (img, container, idx, sig_body, NULL);
-		if (!signature) {
-			mono_error_set_from_loader_error (error);
+		signature = mono_metadata_parse_method_signature_full (img, container, idx, sig_body, NULL, error);
+		if (!signature)
 			return NULL;
-		}
+
 
 		if (can_cache_signature) {
 			mono_image_lock (img);

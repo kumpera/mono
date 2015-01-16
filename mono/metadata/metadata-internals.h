@@ -650,31 +650,27 @@ mono_metadata_interfaces_from_typedef_full  (MonoImage             *image,
 											 MonoGenericContext    *context,
 											 MonoError *error) MONO_INTERNAL;
 
-MonoArrayType *
-mono_metadata_parse_array_full              (MonoImage             *image,
-					     MonoGenericContainer  *container,
-					     const char            *ptr,
-					     const char           **rptr) MONO_INTERNAL;
-
 MONO_API MonoType *
 mono_metadata_parse_type_full               (MonoImage             *image,
 					     MonoGenericContainer  *container,
-					     MonoParseTypeMode      mode,
 					     short                  opt_attrs,
 					     const char            *ptr,
-					     const char           **rptr);
+					     const char           **rptr,
+						 MonoError *error);
 
 MonoMethodSignature *
 mono_metadata_parse_signature_full          (MonoImage             *image,
 					     MonoGenericContainer  *generic_container,
-					     guint32                token) MONO_INTERNAL;
+					     guint32                token,
+						 MonoError *error) MONO_INTERNAL;
 
 MONO_API MonoMethodSignature *
 mono_metadata_parse_method_signature_full   (MonoImage             *image,
 					     MonoGenericContainer  *generic_container,
 					     int                     def,
 					     const char             *ptr,
-					     const char            **rptr);
+					     const char            **rptr,
+						 MonoError *error);
 
 MONO_API MonoMethodHeader *
 mono_metadata_parse_mh_full                 (MonoImage             *image,
@@ -699,7 +695,8 @@ mono_metadata_parse_generic_inst            (MonoImage             *image,
 					     MonoGenericContainer  *container,
 					     int                    count,
 					     const char            *ptr,
-					     const char           **rptr) MONO_INTERNAL;
+					     const char           **rptr,
+						 MonoError *error) MONO_INTERNAL;
 
 MonoGenericInst *
 mono_metadata_get_generic_inst              (int 		    type_argc,

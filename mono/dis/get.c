@@ -185,6 +185,7 @@ get_array_shape (MonoImage *m, const char *ptr, char **result)
 char *
 get_typespec (MonoImage *m, guint32 idx, gboolean is_def, MonoGenericContainer *container)
 {
+	MonoError error;
 	guint32 cols [MONO_TYPESPEC_SIZE];
 	const char *ptr;
 	char *s, *result;
@@ -216,11 +217,17 @@ get_typespec (MonoImage *m, guint32 idx, gboolean is_def, MonoGenericContainer *
 		break;
 
 	case MONO_TYPE_FNPTR:
-		sig = mono_metadata_parse_method_signature_full (m, container, 0, ptr, &ptr);
-		s = dis_stringify_function_ptr (m, sig);
-		g_string_append (res, "method ");
-		g_string_append (res, s);
-		g_free (s);
+		sig = mono_metadata_parse_method_signature_full (m, container, 0, ptr, &ptr, &error);
+		if (!sig) {
+			g_string_append (res, "<broken fnptr");
+			g_warning ("Broken fnptr signature %s", mono_error_get_message (&error));
+			mono_error_cleanup (&error);
+		} else {
+			s = dis_stringify_function_ptr (m, sig);
+			g_string_append (res, "method ");
+			g_string_append (res, s);
+			g_free (s);
+		}
 		break;
 
 	case MONO_TYPE_ARRAY:
@@ -899,7 +906,8 @@ dis_stringify_method_signature_full (MonoImage *m, MonoMethodSignature *method, 
 			}
 
 			mono_metadata_decode_blob_size (sig, &sig);
-			method = mono_metadata_parse_method_signature_full (m, container, methoddef_row, sig, &sig);
+			method = mono_metadata_parse_method_signature_full (m, container, methoddef_row, sig, &sig, &error);
+			g_assert (mono_error_ok (&error)); /*FIXME don't swallow the error message*/
 			free_method = 1;
 		}
 
@@ -1266,6 +1274,7 @@ dis_stringify_type (MonoImage *m, MonoType *type, gboolean is_def)
 const char *
 get_type (MonoImage *m, const char *ptr, char **result, gboolean is_def, MonoGenericContainer *container)
 {
+	MonoError error;
 	const char *start = ptr;
 	guint32 type;
 	MonoType *t;
@@ -1320,22 +1329,25 @@ get_type (MonoImage *m, const char *ptr, char **result, gboolean is_def, MonoGen
 	}
 
 	default:
-		t = mono_metadata_parse_type_full (m, container, MONO_PARSE_TYPE, 0, start, &ptr);
+		t = mono_metadata_parse_type_full (m, container, 0, start, &ptr, &error);
 		if (t) {
 			*result = dis_stringify_type (m, t, is_def);
 		} else {
 			GString *err = g_string_new ("@!#$<InvalidType>$#!@");
-			if (container)
-				t = mono_metadata_parse_type_full (m, NULL, MONO_PARSE_TYPE, 0, start, &ptr);
+			if (container) {
+				mono_error_cleanup (&error);
+				t = mono_metadata_parse_type_full (m, NULL, 0, start, &ptr, &error);
+			}
 			if (t) {
 				char *name = dis_stringify_type (m, t, is_def);
-				g_warning ("Encountered a generic type inappropriate for its context");
+				g_warning ("Encountered a generic type inappropriate for its context, parser error is %s", mono_error_get_message (&error));
 				g_string_append (err, " // ");
 				g_string_append (err, name);
 				g_free (name);
 			} else {
-				g_warning ("Encountered an invalid type");
+				g_warning ("Encountered an invalid type due to %s", mono_error_get_message (&error));
 			}
+			mono_error_cleanup (&error);
 			*result = g_string_free (err, FALSE);
 		}
 

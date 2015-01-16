@@ -836,6 +836,7 @@ dis_method_list (const char *klass_name, MonoImage *m, guint32 start, guint32 en
 	}
 
 	for (i = start; i < end; i++){
+		MonoError error;
 		MonoMethodSignature *ms;
 		MonoGenericContainer *container;
 		char *flags, *impl_flags;
@@ -862,11 +863,12 @@ dis_method_list (const char *klass_name, MonoImage *m, guint32 start, guint32 en
 			container = type_container;
 		}
 
-		ms = mono_metadata_parse_method_signature_full (m, container, i + 1, sig, &sig);
+		ms = mono_metadata_parse_method_signature_full (m, container, i + 1, sig, &sig, &error);
 		if (ms != NULL){
 			sig_str = dis_stringify_method_signature (m, ms, i + 1, container, FALSE);
 			method_name = mono_metadata_string_heap (m, cols [MONO_METHOD_NAME]);
 		} else {
+			mono_error_cleanup (&error);
 			sig_str = NULL;
 			method_name = g_strdup ("<NULL METHOD SIGNATURE>");
 		}
@@ -958,6 +960,7 @@ dis_property_methods (MonoImage *m, guint32 prop, MonoGenericContainer *containe
 static char*
 dis_property_signature (MonoImage *m, guint32 prop_idx, MonoGenericContainer *container)
 {
+	MonoError error;
 	MonoTableInfo *propt = &m->tables [MONO_TABLE_PROPERTY];
 	const char *ptr;
 	guint32 pcount, i;
@@ -980,7 +983,8 @@ dis_property_signature (MonoImage *m, guint32 prop_idx, MonoGenericContainer *co
 		g_string_append (res, "instance ");
 	ptr++;
 	pcount = mono_metadata_decode_value (ptr, &ptr);
-	type = mono_metadata_parse_type_full (m, container, MONO_PARSE_TYPE, 0, ptr, &ptr);
+	type = mono_metadata_parse_type_full (m, container, 0, ptr, &ptr, &error);
+	g_assert (mono_error_ok (&error)); /*FIXME don't swallow the error message*/
 	blurb = dis_stringify_type (m, type, TRUE);
 	if (prop_flags & 0x0200)
 		g_string_append (res, "specialname ");
@@ -993,7 +997,8 @@ dis_property_signature (MonoImage *m, guint32 prop_idx, MonoGenericContainer *co
 	for (i = 0; i < pcount; i++) {
 		if (i)
 			g_string_append (res, ", ");
-		param = mono_metadata_parse_type_full (m, container, MONO_PARSE_PARAM, 0, ptr, &ptr);
+		param = mono_metadata_parse_type_full (m, container, 0, ptr, &ptr, &error);
+		g_assert (mono_error_ok (&error)); /*FIXME don't swallow the error message*/
 		blurb = dis_stringify_param (m, param);
 		g_string_append (res, blurb);
 		g_free (blurb);
