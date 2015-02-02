@@ -1,3 +1,4 @@
+#define __XAMARIN_ANDROID
 //
 // mkbundle: tool to create bundles.
 //
@@ -161,10 +162,10 @@ class MakeBundle {
 				break;
 			}
 			
-			if (static_link && style == "windows") {
-				Console.Error.WriteLine ("The option `{0}' is not supported on this platform.", args [i]);
-				return 1;
-			}
+			// if (static_link && style == "windows") {
+			// 	Console.Error.WriteLine ("The option `{0}' is not supported on this platform.", args [i]);
+			// 	return 1;
+			// }
 		}
 
 		Console.WriteLine ("Sources: {0} Auto-dependencies: {1}", sources.Count, autodeps);
@@ -265,7 +266,7 @@ class MakeBundle {
 			using (StreamWriter tc = new StreamWriter (File.Create (temp_c))) {
 			string prog = null;
 
-#if XAMARIN_ANDROID
+#if __XAMARIN_ANDROID
 			tc.WriteLine ("/* This source code was produced by mkbundle, do not edit */");
 			tc.WriteLine ("\n#ifndef NULL\n#define NULL (void *)0\n#endif");
 			tc.WriteLine (@"
@@ -476,6 +477,11 @@ void          mono_register_config_for_assembly (const char* assembly_name, cons
 
 			if (compile_only)
 				return;
+
+			if (style == "windows") {
+				Console.Error.WriteLine ("Windows and --static requires -c");
+				Environment.Exit (1);
+			}
 
 			string zlib = (compress ? "-lz" : "");
 			string debugging = "-g";
