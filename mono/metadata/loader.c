@@ -2446,6 +2446,7 @@ mono_method_get_last_managed (void)
 }
 
 static gboolean loader_lock_track_ownership = FALSE;
+pthread_t loader_lock_current_owner;
 
 /**
  * mono_loader_lock:
@@ -2455,7 +2456,11 @@ static gboolean loader_lock_track_ownership = FALSE;
 void
 mono_loader_lock (void)
 {
+	MONO_PREPARE_BLOCKING
 	mono_locks_acquire (&loader_mutex, LoaderLock);
+	MONO_FINISH_BLOCKING
+	loader_lock_current_owner = pthread_self ();
+		
 	if (G_UNLIKELY (loader_lock_track_ownership)) {
 		mono_native_tls_set_value (loader_lock_nest_id, GUINT_TO_POINTER (GPOINTER_TO_UINT (mono_native_tls_get_value (loader_lock_nest_id)) + 1));
 	}
@@ -2464,6 +2469,7 @@ mono_loader_lock (void)
 void
 mono_loader_unlock (void)
 {
+	loader_lock_current_owner = 0;
 	mono_locks_release (&loader_mutex, LoaderLock);
 	if (G_UNLIKELY (loader_lock_track_ownership)) {
 		mono_native_tls_set_value (loader_lock_nest_id, GUINT_TO_POINTER (GPOINTER_TO_UINT (mono_native_tls_get_value (loader_lock_nest_id)) - 1));

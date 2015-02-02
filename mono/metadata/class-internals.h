@@ -1183,10 +1183,10 @@ void
 mono_loader_cleanup        (void);
 
 void
-mono_loader_lock           (void) MONO_LLVM_INTERNAL;
+mono_loader_lock           (void);
 
 void
-mono_loader_unlock         (void) MONO_LLVM_INTERNAL;
+mono_loader_unlock         (void);
 
 void
 mono_loader_lock_track_ownership (gboolean track);

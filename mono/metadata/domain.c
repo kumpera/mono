@@ -1915,3 +1915,21 @@ mono_get_aot_cache_config (void)
 {
 	return &aot_cache_config;
 }
+
+pthread_t domain_lock_current_owner;
+
+void
+mono_domain_lock (MonoDomain *domain)
+{
+	MONO_PREPARE_BLOCKING
+	mono_locks_acquire (&(domain)->lock, DomainLock);
+	MONO_FINISH_BLOCKING
+	domain_lock_current_owner = pthread_self ();
+}
+
+void
+mono_domain_unlock (MonoDomain *domain)
+{
+	domain_lock_current_owner = 0;
+	mono_locks_release (&(domain)->lock, DomainLock);
+}
