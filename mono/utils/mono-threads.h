@@ -93,25 +93,25 @@ and reduce the number of casts drastically.
 } while (0)
 
 
-#if 1
+#if 0
 #define THREADS_DEBUG(...)
 #else
 #define THREADS_DEBUG MOSTLY_ASYNC_SAFE_PRINTF
 #endif
 
-#if 1
+#if 0
 #define THREADS_STW_DEBUG(...)
 #else
 #define THREADS_STW_DEBUG MOSTLY_ASYNC_SAFE_PRINTF
 #endif
 
-#if 1
+#if 0
 #define THREADS_SUSPEND_DEBUG(...)
 #else
 #define THREADS_SUSPEND_DEBUG MOSTLY_ASYNC_SAFE_PRINTF
 #endif
 
-#if 1
+#if 0
 #define THREADS_STATE_MACHINE_DEBUG(...)
 #else
 #define THREADS_STATE_MACHINE_DEBUG MOSTLY_ASYNC_SAFE_PRINTF

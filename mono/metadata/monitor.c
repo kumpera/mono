@@ -662,7 +662,9 @@ retry_contended:
 	 * We pass TRUE instead of allow_interruption since we have to check for the
 	 * StopRequested case below.
 	 */
+	MONO_PREPARE_BLOCKING
 	ret = WaitForSingleObjectEx (mon->entry_sem, waitms, TRUE);
+	MONO_FINISH_BLOCKING
 
 	mono_thread_clr_state (thread, ThreadState_WaitSleepJoin);
 	

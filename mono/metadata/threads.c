@@ -772,8 +772,12 @@ create_thread (MonoThread *thread, MonoInternalThread *internal, StartInfo *star
 	 * starts
 	 */
 	create_flags = CREATE_SUSPENDED;
+
+	MONO_PREPARE_BLOCKING
 	thread_handle = mono_threads_create_thread ((LPTHREAD_START_ROUTINE)start_wrapper, start_info,
 												stack_size, create_flags, &tid);
+	MONO_FINISH_BLOCKING
+
 	if (thread_handle == NULL) {
 		/* The thread couldn't be created, so throw an exception */
 		mono_threads_lock ();
@@ -804,7 +808,9 @@ create_thread (MonoThread *thread, MonoInternalThread *internal, StartInfo *star
 	if (!handle_store (thread, FALSE))
 		return FALSE;
 
+	MONO_PREPARE_BLOCKING
 	mono_thread_info_resume (tid);
+	MONO_FINISH_BLOCKING
 
 	if (internal->start_notify) {
 		/*
@@ -815,7 +821,10 @@ create_thread (MonoThread *thread, MonoInternalThread *internal, StartInfo *star
 		 */
 		THREAD_DEBUG (g_message ("%s: (%"G_GSIZE_FORMAT") waiting for thread %p (%"G_GSIZE_FORMAT") to start", __func__, GetCurrentThreadId (), internal, (gsize)internal->tid));
 
+		MONO_PREPARE_BLOCKING
 		WaitForSingleObjectEx (internal->start_notify, INFINITE, FALSE);
+		MONO_FINISH_BLOCKING
+
 		CloseHandle (internal->start_notify);
 		internal->start_notify = NULL;
 	}
@@ -1129,7 +1138,9 @@ ves_icall_System_Threading_Thread_Sleep_internal(gint32 ms)
 	while (TRUE) {
 		mono_thread_set_state (thread, ThreadState_WaitSleepJoin);
 	
+		MONO_PREPARE_BLOCKING
 		res = SleepEx(ms,TRUE);
+		MONO_FINISH_BLOCKING
 	
 		mono_thread_clr_state (thread, ThreadState_WaitSleepJoin);
 

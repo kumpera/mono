@@ -669,6 +669,7 @@ mono_thread_info_end_self_suspend (void)
 		mono_thread_info_wait_for_resume (info);
 		break;
 	case SelfSuspendNotifyAndWait:
+		THREADS_SUSPEND_DEBUG ("SELF suspend done, notifying of suspend");
 		mono_threads_notify_initiator_of_suspend (info);
 		mono_thread_info_wait_for_resume (info);
 		mono_threads_notify_initiator_of_resume (info);

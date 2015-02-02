@@ -56,5 +56,4 @@ void mono_threads_reset_blocking_end (void* cookie);
 
 #endif /* USE_COOP_GC */
 
-
 #endif
