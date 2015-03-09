@@ -24,6 +24,12 @@ sgen_libs = \
 	$(monodir)/mono/utils/libmonoutils.la \
 	$(GLIB_LIBS) $(LIBICONV)
 
+corgc_libs = \
+	$(monodir)/mono/metadata/libmonoruntimecorgc.la	\
+	$(monodir)/mono/io-layer/libwapi.la	\
+	$(monodir)/mono/utils/libmonoutils.la \
+	$(GLIB_LIBS) $(LIBICONV)
+
 static_libs=	\
 	$(monodir)/mono/metadata/libmonoruntime-static.la	\
 	$(monodir)/mono/io-layer/libwapi.la	\
@@ -36,6 +42,13 @@ sgenstatic_libs = \
 	$(monodir)/mono/io-layer/libwapi.la	\
 	$(monodir)/mono/utils/libmonoutils.la \
 	$(GLIB_LIBS) $(LIBICONV)
+
+corgcstatic_libs = \
+	$(monodir)/mono/metadata/libmonoruntimecorgc-static.la	\
+	$(monodir)/mono/io-layer/libwapi.la	\
+	$(monodir)/mono/utils/libmonoutils.la \
+	$(GLIB_LIBS) $(LIBICONV)
+
 
 CLASS=$(mcs_topdir)/class/lib/net_4_5
 
@@ -89,6 +102,12 @@ sgen_libraries = libmonosgen-2.0.la
 sgen_static_libraries = libmini-static.la $(sgenstatic_libs)
 endif
 
+if SUPPORT_CORGC
+corgc_binaries = mono-corgc
+corgc_libraries = libmonocorgc-2.0.la
+corgc_static_libraries = libmini-static.la $(corgcstatic_libs)
+endif
+
 if SUPPORT_BOEHM
 boehm_libraries = libmonoboehm-2.0.la
 boehm_static_libraries = libmini-static.la $(static_libs)
@@ -119,9 +138,9 @@ endif
 if DISABLE_EXECUTABLES
 else
 if HOST_WIN32
-bin_PROGRAMS = $(boehm_binaries) $(sgen_binaries) monow
+bin_PROGRAMS = $(boehm_binaries) $(sgen_binaries) $(corgc_binaries) monow
 else
-bin_PROGRAMS = $(boehm_binaries) $(sgen_binaries)
+bin_PROGRAMS = $(boehm_binaries) $(sgen_binaries) $(corgc_binaries)
 endif
 endif
 
@@ -132,10 +151,10 @@ noinst_PROGRAMS = genmdesc mono
 endif
 
 if DISABLE_EXECUTABLES
-shared_libraries = $(boehm_libraries) $(sgen_libraries)
+shared_libraries = $(boehm_libraries) $(sgen_libraries) $(corgc_libraries)
 else
 if SHARED_MONO
-shared_libraries = $(boehm_libraries) $(sgen_libraries)
+shared_libraries = $(boehm_libraries) $(sgen_libraries) $(corgc_libraries)
 endif
 endif
 
@@ -181,6 +200,11 @@ mono_SOURCES = \
 
 mono_sgen_CFLAGS = $(AM_CFLAGS)
 
+mono_corgc_SOURCES = \
+	main-corgc.c
+
+mono_corgc_CFLAGS = $(AM_CFLAGS)
+
 # We build this after libmono was built so it contains the date when the final
 # link was done
 if SUPPORT_BOEHM
@@ -202,6 +226,17 @@ endif
 mono_sgen-main-sgen.$(OBJEXT): buildver-sgen.h
 main-sgen.$(OBJEXT): buildver-sgen.h
 
+
+if DISABLE_EXECUTABLES
+buildver-corgc.h: libmini-static.la $(monodir)/mono/metadata/libmonoruntimecorgc.la
+else
+buildver-corgc.h: libmini-static.la $(monodir)/mono/metadata/libmonoruntimecorgc-static.la
+endif
+	@echo "const char *build_date = \"`date`\";" > buildver-corgc.h
+mono_corgc-main-corgc.$(OBJEXT): buildver-corgc.h
+main-corgc.$(OBJEXT): buildver-corgc.h
+
+
 if DTRACE_G_REQUIRED
 LIBMONO_DTRACE_OBJECT = .libs/mono-dtrace.$(OBJEXT)
 if STATIC_MONO
@@ -219,9 +254,11 @@ if STATIC_MONO
 # This leads to higher performance, especially with TLS
 MONO_LIB=$(boehm_static_libraries)
 MONO_SGEN_LIB=$(sgen_static_libraries)
+MONO_CORGC_LIB=$(corgc_static_libraries)
 else 
 MONO_LIB=libmonoboehm-2.0.la
 MONO_SGEN_LIB=libmonosgen-2.0.la
+MONO_CORGC_LIB=libmonocorgc-2.0.la
 endif
 
 if LOADED_LLVM
@@ -250,6 +287,16 @@ mono_sgen_LDADD = \
 	$(MONO_DTRACE_OBJECT)
 
 mono_sgen_LDFLAGS = $(static_flags) -export-dynamic $(monobinldflags) $(monobin_platform_ldflags)
+
+mono_corgc_LDADD = \
+	$(MONO_CORGC_LIB)	\
+	$(GLIB_LIBS)		\
+	$(LLVMMONOF)		\
+	$(LIBICONV)		\
+	-lm			\
+	$(MONO_DTRACE_OBJECT)
+
+mono_corgc_LDFLAGS = $(static_flags) -export-dynamic $(monobinldflags) $(monobin_platform_ldflags)
 
 # if SUPPORT_SGEN
 # 
@@ -562,6 +609,11 @@ libmonosgen_2_0_la_CFLAGS = $(mono_sgen_CFLAGS)
 libmonosgen_2_0_la_LIBADD = libmini.la $(sgen_libs) $(LIBMONO_DTRACE_OBJECT) $(LLVMMONOF)
 libmonosgen_2_0_la_LDFLAGS = $(libmonoldflags)
 
+libmonocorgc_2_0_la_SOURCES =
+libmonocorgc_2_0_la_CFLAGS = $(mono_corgc_CFLAGS)
+libmonocorgc_2_0_la_LIBADD = libmini.la $(corgc_libs) $(LIBMONO_DTRACE_OBJECT) $(LLVMMONOF)
+libmonocorgc_2_0_la_LDFLAGS = $(libmonoldflags)
+
 #
 # This library is shared between mono and mono-sgen, since the code in mini/ doesn't contain
 # compile time dependencies on boehm/sgen.
@@ -736,7 +788,7 @@ docu: mini.sgm
 check-local: rcheck check-seq-points
 
 clean-local:
-	rm -f mono a.out gmon.out *.o buildver-boehm.h buildver-sgen.h test.exe regressionexitcode.out TestResults_op_il_seq_point.xml*
+	rm -f mono a.out gmon.out *.o buildver-boehm.h buildver-sgen.h buildver-corgc.h test.exe regressionexitcode.out TestResults_op_il_seq_point.xml*
 
 pkgconfigdir = $(libdir)/pkgconfig
 

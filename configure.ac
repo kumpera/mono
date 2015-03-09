@@ -2757,6 +2757,7 @@ sizeof_register="SIZEOF_VOID_P"
 
 jit_wanted=true
 sgen_supported=false
+corgc_supported=false
 boehm_supported=true
 case "$host" in
 	mips*)
@@ -2837,6 +2838,7 @@ case "$host" in
 			;;
 		  darwin*)
 			sgen_supported=true
+			corgc_supported=true
 			AOT_SUPPORTED="yes"
 			;;
 		  openbsd*|freebsd*|kfreebsd-gnu*)
@@ -3232,6 +3234,28 @@ if test x$buildsgen = xyes; then
 fi
 AC_SUBST(SGEN_DEFINES)
 AM_CONDITIONAL(SUPPORT_SGEN, test x$buildsgen = xyes)
+
+dnl 
+dnl CoreClr GC checks (corgc)
+dnl
+if $corgc_supported; then
+   build_corgc_default=yes
+else
+   build_corgc_default=no
+fi
+CORGC_DEFINES=
+AC_ARG_WITH(corgc, [  --with-corgc=yes,no             CoreCLR GC, default=yes],[buildcorgc=$with_corgc],[buildcorgc=$build_corgc_default])
+if test x$buildcorgc = xyes; then
+   if $corgc_supported; then
+       CORGC_DEFINES="-DHAVE_COR_GC -DHAVE_MOVING_COLLECTOR"
+       gc_msg="CoreClr GC and $gc_msg"
+   else
+       buildcorgc=no
+       AC_MSG_WARN("CoreClr GC is not supported on this platform")
+   fi
+fi
+AC_SUBST(CORGC_DEFINES)
+AM_CONDITIONAL(SUPPORT_CORGC, test x$buildcorgc = xyes)
 
 jit_status="Building and using the JIT"
 

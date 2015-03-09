@@ -49,6 +49,17 @@ endif
 sgen_libraries = $(shared_sgen_libraries) libmonoruntimesgen-static.la 
 endif
 
+if SUPPORT_CORGC
+if DISABLE_EXECUTABLES
+shared_corgc_libraries = libmonoruntimecorgc.la 
+else
+if SHARED_MONO
+shared_corgc_libraries = libmonoruntimecorgc.la 
+endif
+endif
+corgc_libraries = $(shared_corgc_libraries) libmonoruntimecorgc-static.la 
+endif
+
 if SUPPORT_BOEHM
 if DISABLE_EXECUTABLES
 shared_boehm_libraries = libmonoruntime.la
@@ -61,12 +72,12 @@ boehm_libraries = $(shared_boehm_libraries) libmonoruntime-static.la
 endif
 
 if DISABLE_EXECUTABLES
-noinst_LTLIBRARIES = $(shared_sgen_libraries) $(shared_boehm_libraries)
+noinst_LTLIBRARIES = $(shared_sgen_libraries) $(shared_corgc_libraries) $(shared_boehm_libraries)
 else
-noinst_LTLIBRARIES = $(boehm_libraries) $(sgen_libraries)
+noinst_LTLIBRARIES =  $(sgen_libraries) $(corgc_libraries) $(boehm_libraries)
 endif
 
-AM_CPPFLAGS = -I$(top_srcdir) -I$(top_srcdir)/mono $(LIBGC_CPPFLAGS) $(GLIB_CFLAGS) -DMONO_BINDIR=\"$(bindir)/\" -DMONO_ASSEMBLIES=\"$(assembliesdir)\" -DMONO_CFG_DIR=\"$(confdir)\" $(SHARED_CFLAGS)
+AM_CPPFLAGS = -I$(top_srcdir) -I$(top_srcdir)/mono  -I$(top_srcdir)/mono/metadata/corgc/mono $(LIBGC_CPPFLAGS) $(GLIB_CFLAGS) -DMONO_BINDIR=\"$(bindir)/\" -DMONO_ASSEMBLIES=\"$(assembliesdir)\" -DMONO_CFG_DIR=\"$(confdir)\" $(SHARED_CFLAGS)
 
 #
 # Make sure any prefix changes are updated in the binaries too.
@@ -220,6 +231,18 @@ gc_dependent_sources = \
 boehm_sources = \
 	boehm-gc.c
 
+corgc_sources = \
+	corgc/gccommon.cpp	\
+	corgc/gceewks.cpp	\
+	corgc/gcscan.cpp	\
+	corgc/gcwks.cpp	\
+	corgc/handletable.cpp	\
+	corgc/handletablecache.cpp	\
+	corgc/handletablecore.cpp	\
+	corgc/handletablescan.cpp	\
+	corgc/objecthandle.cpp	\
+	corgc/glue.c
+
 sgen_sources = \
 	sgen-os-posix.c		\
 	sgen-os-mach.c		\
@@ -284,6 +307,10 @@ libmonoruntime_la_CFLAGS = $(BOEHM_DEFINES)
 libmonoruntimesgen_la_SOURCES = $(common_sources) $(gc_dependent_sources) $(sgen_sources)
 libmonoruntimesgen_la_CFLAGS = $(SGEN_DEFINES)
 
+libmonoruntimecorgc_la_SOURCES = $(common_sources) $(gc_dependent_sources) $(corgc_sources)
+libmonoruntimecorgc_la_CFLAGS = $(CORGC_DEFINES)
+
+
 libmonoruntime_static_la_SOURCES = $(libmonoruntime_la_SOURCES)
 libmonoruntime_static_la_LDFLAGS = -static
 libmonoruntime_static_la_CFLAGS = $(BOEHM_DEFINES)
@@ -291,6 +318,10 @@ libmonoruntime_static_la_CFLAGS = $(BOEHM_DEFINES)
 libmonoruntimesgen_static_la_SOURCES = $(libmonoruntimesgen_la_SOURCES)
 libmonoruntimesgen_static_la_LDFLAGS = -static
 libmonoruntimesgen_static_la_CFLAGS = $(SGEN_DEFINES)
+
+libmonoruntimecorgc_static_la_SOURCES = $(libmonoruntimecorgc_la_SOURCES)
+libmonoruntimecorgc_static_la_LDFLAGS = -static
+libmonoruntimecorgc_static_la_CFLAGS = $(CORGC_DEFINES)
 
 libmonoruntimeincludedir = $(includedir)/mono-$(API_VER)/mono/metadata
 
