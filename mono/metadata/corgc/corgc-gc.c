@@ -15,13 +15,25 @@
 
 #ifdef HAVE_COR_GC
 
+//glue.cpp code
+extern void corgc_init (void);
+extern void corgc_attach (void);
+
+	
 static gboolean gc_initialized = FALSE;
 static MonoMethod *write_barrier_method;
+static MonoVTable *array_fill_vtable;
 
+
+#define ALLOC_ALIGN 8
+#define CAN_ALIGN_UP(s)		((s) <= SIZE_MAX - (ALLOC_ALIGN - 1))
+#define ALIGN_UP(s)		(((s)+(ALLOC_ALIGN-1)) & ~(ALLOC_ALIGN-1))
+#define ALIGN_TO(val,align) ((((guint64)val) + ((align) - 1)) & ~((align) - 1))
 
 static void*
 corgc_thread_register (MonoThreadInfo* info, void *baseptr)
 {
+	corgc_attach ();
 	return info;
 }
 
@@ -52,6 +64,8 @@ mono_gc_base_init (void)
 		return;
 
 	mono_counters_init ();
+
+	corgc_init ();
 
 	memset (&cb, 0, sizeof (cb));
 	cb.thread_register = corgc_thread_register;
@@ -616,6 +630,35 @@ void*
 mono_gc_alloc_mature (MonoVTable *vtable)
 {
 	return mono_gc_alloc_obj (vtable, vtable->klass->instance_size);
+}
+
+//Functions needed by the CoreCLR GC
+void*
+corgc_get_array_fill_vtable (void)
+{
+	if (!array_fill_vtable) {
+		static MonoClass klass;
+		static char _vtable[sizeof(MonoVTable)+8];
+		MonoVTable* vtable = (MonoVTable*) ALIGN_TO(_vtable, 8);
+		gsize bmap;
+
+		MonoDomain *domain = mono_get_root_domain ();
+		g_assert (domain);
+
+		klass.element_class = mono_defaults.byte_class;
+		klass.rank = 1;
+		klass.instance_size = sizeof (MonoArray);
+		klass.sizes.element_size = 1;
+		klass.name = "array_filler_type";
+
+		vtable->klass = &klass;
+		bmap = 0;
+		vtable->gc_descr = mono_gc_make_descr_for_array (TRUE, &bmap, 0, 1);
+		vtable->rank = 1;
+
+		array_fill_vtable = vtable;
+	}
+	return array_fill_vtable;
 }
 
 
