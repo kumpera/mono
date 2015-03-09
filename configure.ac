@@ -3248,6 +3248,7 @@ AC_ARG_WITH(corgc, [  --with-corgc=yes,no             CoreCLR GC, default=yes],[
 if test x$buildcorgc = xyes; then
    if $corgc_supported; then
        CORGC_DEFINES="-DHAVE_COR_GC -DHAVE_MOVING_COLLECTOR"
+	   CXXFLAGS="$CXXFLAGS -lstdc++"
        gc_msg="CoreClr GC and $gc_msg"
    else
        buildcorgc=no
