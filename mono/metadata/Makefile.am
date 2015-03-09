@@ -241,7 +241,7 @@ corgc_sources = \
 	corgc/handletablecore.cpp	\
 	corgc/handletablescan.cpp	\
 	corgc/objecthandle.cpp	\
-	corgc/glue.c
+	corgc/glue.cpp
 
 sgen_sources = \
 	sgen-os-posix.c		\
