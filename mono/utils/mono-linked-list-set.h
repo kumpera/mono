@@ -81,7 +81,7 @@ Requires the world to be stoped
 static inline MonoLinkedListSetNode*
 mono_lls_info_step (MonoLinkedListSetNode *val, MonoThreadHazardPointers *hp)
 {
-	val = mono_lls_pointer_unmask (val);
+	val = (MonoLinkedListSetNode *)mono_lls_pointer_unmask (val);
 	mono_hazard_pointer_set (hp, 1, val);
 	return val;
 }
