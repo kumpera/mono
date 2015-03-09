@@ -57,12 +57,7 @@
 #define ALLOC_TYPED(dest,size,type) do { (dest) = GC_MALLOC ((size)); *(gpointer*)dest = (type);} while (0)
 #endif
 #else
-#ifdef HAVE_SGEN_GC
-#define GC_NO_DESCRIPTOR (NULL)
-#define ALLOC_PTRFREE(obj,vt,size) do { (obj) = mono_gc_alloc_obj (vt, size);} while (0)
-#define ALLOC_OBJECT(obj,vt,size) do { (obj) = mono_gc_alloc_obj (vt, size);} while (0)
-#define ALLOC_TYPED(dest,size,type) do { (dest) = mono_gc_alloc_obj (type, size);} while (0)
-#elif HAVE_COR_GC
+#ifdef HAVE_MOVING_COLLECTOR
 #define GC_NO_DESCRIPTOR (NULL)
 #define ALLOC_PTRFREE(obj,vt,size) do { (obj) = mono_gc_alloc_obj (vt, size);} while (0)
 #define ALLOC_OBJECT(obj,vt,size) do { (obj) = mono_gc_alloc_obj (vt, size);} while (0)
@@ -679,7 +674,7 @@ compute_class_bitmap (MonoClass *class, gsize *bitmap, int size, int offset, int
 		size = max_size;
 	}
 
-#ifdef HAVE_SGEN_GC
+#ifdef HAVE_MOVING_COLLECTOR
 	/*An Ephemeron cannot be marked by sgen*/
 	if (!static_fields && class->image == mono_defaults.corlib && !strcmp ("Ephemeron", class->name)) {
 		*max_set = 0;
@@ -721,7 +716,7 @@ compute_class_bitmap (MonoClass *class, gsize *bitmap, int size, int offset, int
 				break;
 			/* only UIntPtr is allowed to be GC-tracked and only in mscorlib */
 			case MONO_TYPE_U:
-#ifdef HAVE_SGEN_GC
+#ifdef HAVE_MOVING_COLLECTOR
 				break;
 #else
 				if (class->image != mono_defaults.corlib)
@@ -4459,7 +4454,7 @@ mono_object_new_pinned (MonoDomain *domain, MonoClass *klass)
 	if (!vtable)
 		return NULL;
 
-#ifdef HAVE_SGEN_GC
+#ifdef HAVE_MOVING_COLLECTOR
 	return mono_gc_alloc_pinned_obj (vtable, mono_class_instance_size (klass));
 #else
 	return mono_object_new_specific (vtable);
@@ -4685,7 +4680,7 @@ mono_array_full_copy (MonoArray *src, MonoArray *dest)
 	size = mono_array_length (src);
 	g_assert (size == mono_array_length (dest));
 	size *= mono_array_element_size (klass);
-#ifdef HAVE_SGEN_GC
+#ifdef HAVE_MOVING_COLLECTOR
 	if (klass->element_class->valuetype) {
 		if (klass->element_class->has_references)
 			mono_value_copy_array (dest, 0, mono_array_addr_with_size_fast (src, 0, 0), mono_array_length (src));
@@ -4720,7 +4715,7 @@ mono_array_clone_in_domain (MonoDomain *domain, MonoArray *array)
 		o = mono_array_new_full (domain, klass, &size, NULL);
 
 		size *= mono_array_element_size (klass);
-#ifdef HAVE_SGEN_GC
+#ifdef HAVE_MOVING_COLLECTOR
 		if (klass->element_class->valuetype) {
 			if (klass->element_class->has_references)
 				mono_value_copy_array (o, 0, mono_array_addr_with_size_fast (array, 0, 0), mono_array_length (array));
@@ -4743,7 +4738,7 @@ mono_array_clone_in_domain (MonoDomain *domain, MonoArray *array)
 		sizes [i + klass->rank] = array->bounds [i].lower_bound;
 	}
 	o = mono_array_new_full (domain, klass, sizes, (intptr_t*)sizes + klass->rank);
-#ifdef HAVE_SGEN_GC
+#ifdef HAVE_MOVING_COLLECTOR
 	if (klass->element_class->valuetype) {
 		if (klass->element_class->has_references)
 			mono_value_copy_array (o, 0, mono_array_addr_with_size_fast (array, 0, 0), mono_array_length (array));
@@ -4868,7 +4863,7 @@ mono_array_new_full (MonoDomain *domain, MonoClass *array_class, uintptr_t *leng
 	 * they need to be kept in sync.
 	 */
 	vtable = mono_class_vtable_full (domain, array_class, TRUE);
-#ifndef HAVE_SGEN_GC
+#ifndef HAVE_MOVING_COLLECTOR
 	if (!array_class->has_references) {
 		o = mono_object_allocate_ptrfree (byte_len, vtable);
 #if NEED_TO_ZERO_PTRFREE
@@ -4954,7 +4949,7 @@ mono_array_new_specific (MonoVTable *vtable, uintptr_t n)
 		mono_gc_out_of_memory (MONO_ARRAY_MAX_SIZE);
 		return NULL;
 	}
-#ifndef HAVE_SGEN_GC
+#ifndef HAVE_MOVING_COLLECTOR
 	if (!vtable->klass->has_references) {
 		o = mono_object_allocate_ptrfree (byte_len, vtable);
 #if NEED_TO_ZERO_PTRFREE
@@ -4992,7 +4987,7 @@ MonoString *
 mono_string_new_utf16 (MonoDomain *domain, const guint16 *text, gint32 len)
 {
 	MonoString *s;
-	
+
 	s = mono_string_new_size (domain, len);
 	g_assert (s != NULL);
 
@@ -5058,7 +5053,7 @@ mono_string_new_size (MonoDomain *domain, gint32 len)
 	vtable = mono_class_vtable (domain, mono_defaults.string_class);
 	g_assert (vtable);
 
-#ifndef HAVE_SGEN_GC
+#ifndef HAVE_MOVING_COLLECTOR
 	s = mono_object_allocate_ptrfree (size, vtable);
 
 	s->length = len;
@@ -5193,7 +5188,7 @@ mono_value_box (MonoDomain *domain, MonoClass *class, gpointer value)
 
 	size = size - sizeof (MonoObject);
 
-#ifdef HAVE_SGEN_GC
+#ifdef HAVE_MOVING_COLLECTOR
 	g_assert (size == mono_class_value_size (class, NULL));
 	mono_gc_wbarrier_value_copy ((char *)res + sizeof (MonoObject), value, 1, class);
 #else
@@ -5436,7 +5431,7 @@ str_lookup (MonoDomain *domain, gpointer user_data)
 	info->res = mono_g_hash_table_lookup (domain->ldstr_table, info->ins);
 }
 
-#ifdef HAVE_SGEN_GC
+#ifdef HAVE_MOVING_COLLECTOR
 
 static MonoString*
 mono_string_get_pinned (MonoString *str)

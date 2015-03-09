@@ -65,7 +65,7 @@ struct _MonoGHashTable {
 	MonoGHashGCType gc_type;
 };
 
-#ifdef HAVE_SGEN_GC
+#ifdef HAVE_MOVING_COLLECTOR
 static void *table_hash_descr = NULL;
 
 static void mono_g_hash_mark (void *addr, MonoGCMarkFunc mark_func, void *gc_data);
@@ -128,7 +128,7 @@ mono_g_hash_table_new_type (GHashFunc hash_func, GEqualFunc key_equal_func, Mono
 
 	hash->gc_type = type;
 
-#ifdef HAVE_SGEN_GC
+#ifdef HAVE_MOVING_COLLECTOR
 	if (type > MONO_HASH_KEY_VALUE_GC)
 		g_error ("wrong type for gc hashtable");
 	/*
@@ -392,7 +392,7 @@ mono_g_hash_table_destroy (MonoGHashTable *hash)
 	
 	g_return_if_fail (hash != NULL);
 
-#ifdef HAVE_SGEN_GC
+#ifdef HAVE_MOVING_COLLECTOR
 	mono_gc_deregister_root ((char*)hash);
 #endif
 
@@ -477,7 +477,7 @@ mono_g_hash_table_print_stats (MonoGHashTable *table)
 	printf ("Size: %d Table Size: %d Max Chain Length: %d\n", table->in_use, table->table_size, max_chain_size);
 }
 
-#ifdef HAVE_SGEN_GC
+#ifdef HAVE_MOVING_COLLECTOR
 
 /* GC marker function */
 static void

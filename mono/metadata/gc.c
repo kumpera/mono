@@ -103,7 +103,7 @@ mono_gc_run_finalize (void *obj, void *data)
 {
 	MonoObject *exc = NULL;
 	MonoObject *o;
-#ifndef HAVE_SGEN_GC
+#ifndef HAVE_MOVING_COLLECTOR
 	MonoObject *o2;
 #endif
 	MonoMethod* finalizer = NULL;
@@ -118,7 +118,7 @@ mono_gc_run_finalize (void *obj, void *data)
 
 	domain = o->vtable->domain;
 
-#ifndef HAVE_SGEN_GC
+#ifndef HAVE_MOVING_COLLECTOR
 	mono_domain_finalizers_lock (domain);
 
 	o2 = g_hash_table_lookup (domain->finalizable_objects_hash, o);
@@ -289,7 +289,7 @@ object_register_finalizer (MonoObject *obj, void (*callback)(void *, void*))
 	mono_domain_finalizers_unlock (domain);
 
 	mono_gc_register_for_finalization (obj, callback);
-#elif defined(HAVE_SGEN_GC)
+#elif defined(HAVE_MOVING_COLLECTOR)
 	/*
 	 * If we register finalizers for domains that are unloading we might
 	 * end up running them while or after the domain is being cleared, so
@@ -484,7 +484,7 @@ ves_icall_System_GC_WaitForPendingFinalizers (void)
 void
 ves_icall_System_GC_register_ephemeron_array (MonoObject *array)
 {
-#ifdef HAVE_SGEN_GC
+#ifdef HAVE_MOVING_COLLECTOR
 	if (!mono_gc_ephemeron_array_add (array)) {
 		mono_set_pending_exception (mono_object_domain (array)->out_of_memory_ex);
 		return;
@@ -618,7 +618,7 @@ find_first_unset (guint32 bitmap)
 static void*
 make_root_descr_all_refs (int numbits, gboolean pinned)
 {
-#ifdef HAVE_SGEN_GC
+#ifdef HAVE_MOVING_COLLECTOR
 	if (pinned)
 		return NULL;
 #endif
@@ -1006,7 +1006,7 @@ finalize_domain_objects (DomainFinalizationReq *req)
 {
 	MonoDomain *domain = req->domain;
 
-#if HAVE_SGEN_GC
+#if HAVE_MOVING_COLLECTOR
 #define NUM_FOBJECTS 64
 	MonoObject *to_finalize [NUM_FOBJECTS];
 	int count;
@@ -1036,7 +1036,7 @@ finalize_domain_objects (DomainFinalizationReq *req)
 
 		g_ptr_array_free (objs, TRUE);
 	}
-#elif defined(HAVE_SGEN_GC)
+#elif defined(HAVE_MOVING_COLLECTOR)
 	while ((count = mono_gc_finalizers_for_domain (domain, to_finalize, NUM_FOBJECTS))) {
 		int i;
 		for (i = 0; i < count; ++i) {
@@ -1365,7 +1365,7 @@ mono_gc_parse_environment_string_extract_number (const char *str, size_t *out)
 	return TRUE;
 }
 
-#ifndef HAVE_SGEN_GC
+#ifndef HAVE_MOVING_COLLECTOR
 void*
 mono_gc_alloc_mature (MonoVTable *vtable)
 {
@@ -1403,7 +1403,7 @@ reference_queue_proccess (MonoReferenceQueue *queue)
 	RefQueueEntry **iter = &queue->queue;
 	RefQueueEntry *entry;
 	while ((entry = *iter)) {
-#ifdef HAVE_SGEN_GC
+#ifdef HAVE_MOVING_COLLECTOR
 		if (queue->should_be_deleted || !mono_gc_weak_link_get (&entry->dis_link)) {
 			mono_gc_weak_link_remove (&entry->dis_link, TRUE);
 #else
@@ -1464,7 +1464,7 @@ reference_queue_clear_for_domain (MonoDomain *domain)
 		RefQueueEntry *entry;
 		while ((entry = *iter)) {
 			if (entry->domain == domain) {
-#ifdef HAVE_SGEN_GC
+#ifdef HAVE_MOVING_COLLECTOR
 				mono_gc_weak_link_remove (&entry->dis_link, TRUE);
 #else
 				mono_gchandle_free ((guint32)entry->gchandle);
@@ -1532,7 +1532,7 @@ mono_gc_reference_queue_add (MonoReferenceQueue *queue, MonoObject *obj, void *u
 	entry->user_data = user_data;
 	entry->domain = mono_object_domain (obj);
 
-#ifdef HAVE_SGEN_GC
+#ifdef HAVE_MOVING_COLLECTOR
 	mono_gc_weak_link_add (&entry->dis_link, obj, TRUE);
 #else
 	entry->gchandle = mono_gchandle_new_weakref (obj, TRUE);
