@@ -5,13 +5,18 @@
 #include <mono/metadata/mono-gc.h>
 #include <mono/metadata/gc-internal.h>
 #include <mono/metadata/runtime.h>
+#include <mono/metadata/method-builder.h>
+#include <mono/metadata/object-internals.h>
+
 #include <mono/utils/atomic.h>
 #include <mono/utils/mono-threads.h>
 #include <mono/utils/mono-counters.h>
 
+
 #ifdef HAVE_COR_GC
 
 static gboolean gc_initialized = FALSE;
+static MonoMethod *write_barrier_method;
 
 
 static void*
@@ -31,11 +36,16 @@ corgc_thread_unregister (MonoThreadInfo *p)
 		mono_threads_add_joinable_thread ((gpointer)tid);
 }
 
+static gboolean
+mono_gc_is_critical_method (MonoMethod *method)
+{
+	return method == write_barrier_method;
+}
+
 void
 mono_gc_base_init (void)
 {
 	MonoThreadInfoCallbacks cb;
-	const char *env;
 	int dummy;
 
 	if (gc_initialized)
@@ -251,12 +261,6 @@ mono_gc_wbarrier_object_copy (MonoObject* obj, MonoObject *src)
 			mono_object_class (obj)->instance_size - sizeof (MonoObject));
 }
 
-gboolean
-mono_gc_is_critical_method (MonoMethod *method)
-{
-	return FALSE;
-}
-
 int
 mono_gc_get_aligned_size_for_allocator (int size)
 {
@@ -294,27 +298,6 @@ mono_gc_get_gc_name (void)
 }
 
 void
-mono_gc_add_weak_track_handle (MonoObject *obj, guint32 gchandle)
-{
-}
-
-void
-mono_gc_change_weak_track_handle (MonoObject *old_obj, MonoObject *obj, guint32 gchandle)
-{
-}
-
-void
-mono_gc_remove_weak_track_handle (guint32 gchandle)
-{
-}
-
-GSList*
-mono_gc_remove_weak_track_object (MonoDomain *domain, MonoObject *obj)
-{
-	return NULL;
-}
-
-void
 mono_gc_clear_domain (MonoDomain *domain)
 {
 }
@@ -331,11 +314,43 @@ mono_gc_get_restart_signal (void)
 	return -1;
 }
 
+
+#define OPDEF(a,b,c,d,e,f,g,h,i,j) \
+	a = i,
+
+enum {
+#include "mono/cil/opcode.def"
+	CEE_LAST
+};
+
 MonoMethod*
 mono_gc_get_write_barrier (void)
 {
-	g_assert_not_reached ();
-	return NULL;
+	MonoMethod *res;
+	MonoMethodBuilder *mb;
+	MonoMethodSignature *sig;
+
+	if (write_barrier_method)
+		return write_barrier_method;
+
+	/* Create the IL version of mono_gc_barrier_generic_store () */
+	sig = mono_metadata_signature_alloc (mono_defaults.corlib, 1);
+	sig->ret = &mono_defaults.void_class->byval_arg;
+	sig->params [0] = &mono_defaults.int_class->byval_arg;
+
+	mb = mono_mb_new (mono_defaults.object_class, "wbarrier", MONO_WRAPPER_WRITE_BARRIER);
+
+	mono_mb_emit_ldarg (mb, 0);
+	mono_mb_emit_icall (mb, mono_gc_wbarrier_generic_nostore);
+	mono_mb_emit_byte (mb, CEE_RET);
+
+	res = mono_mb_create_method (mb, sig, 16);
+	mono_mb_free (mb);
+
+	//FIXME locking
+	write_barrier_method = res;
+
+	return write_barrier_method;
 }
 
 void*
@@ -376,7 +391,6 @@ mono_gc_wbarrier_value_copy_bitmap (gpointer _dest, gpointer _src, int size, uns
 guint8*
 mono_gc_get_card_table (int *shift_bits, gpointer *card_mask)
 {
-	g_assert_not_reached ();
 	return NULL;
 }
 
@@ -455,7 +469,6 @@ mono_gc_user_markers_supported (void)
 void *
 mono_gc_make_root_descr_user (MonoGCRootMarkFunc marker)
 {
-	g_assert_not_reached ();
 	return NULL;
 }
 
@@ -528,6 +541,82 @@ mono_gc_pending_finalizers (void)
 void
 mono_gc_set_string_length (MonoString *str, gint32 new_length)
 {
+	str->length = new_length;
 }
+
+//moving collector extra callbacks
+gboolean
+mono_gc_ephemeron_array_add (MonoObject *obj)
+{
+	return FALSE;
+}
+
+int
+mono_gc_finalizers_for_domain (MonoDomain *domain, MonoObject **out_array, int out_size)
+{
+	return 0;
+}
+
+void
+mono_gc_register_for_finalization (MonoObject *obj, void *user_data)
+{
+	
+}
+
+int
+mono_gc_register_root_wbarrier (char *start, size_t size, void *descr)
+{
+	return TRUE;
+}
+
+void*
+mono_gc_alloc_obj (MonoVTable *vtable, size_t size)
+{
+	void **res = g_malloc0 (size);
+	*res = vtable;
+	return res;
+}
+
+void*
+mono_gc_alloc_vector (MonoVTable *vtable, size_t size, uintptr_t max_length)
+{
+	MonoArray *arr = (MonoArray *)mono_gc_alloc_obj (vtable, size);;
+	arr->max_length = (mono_array_size_t)max_length;
+	return arr;
+}
+
+
+void*
+mono_gc_alloc_array (MonoVTable *vtable, size_t size, uintptr_t max_length, uintptr_t bounds_size)
+{
+	MonoArray *arr = (MonoArray *)mono_gc_alloc_obj (vtable, size);;
+	MonoArrayBounds *bounds = (MonoArrayBounds*)((char*)arr + size - bounds_size);
+
+	arr->max_length = (mono_array_size_t)max_length;
+	arr->bounds = bounds;
+	return arr;
+}
+
+void*
+mono_gc_alloc_string (MonoVTable *vtable, size_t size, gint32 len)
+{
+	MonoString *str = (MonoString *)mono_gc_alloc_obj (vtable, size);
+
+	str->length = len;
+	return str;
+}
+
+void*
+mono_gc_alloc_pinned_obj (MonoVTable *vtable, size_t size)
+{
+	return mono_gc_alloc_obj (vtable, size);
+}
+
+void*
+mono_gc_alloc_mature (MonoVTable *vtable)
+{
+	return mono_gc_alloc_obj (vtable, vtable->klass->instance_size);
+}
+
 
 #endif
