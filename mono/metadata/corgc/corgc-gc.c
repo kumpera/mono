@@ -17,12 +17,16 @@
 
 //glue.cpp code
 extern void corgc_init (void);
-extern void corgc_attach (void);
 
 	
 static gboolean gc_initialized = FALSE;
 static MonoMethod *write_barrier_method;
 static MonoVTable *array_fill_vtable;
+
+typedef struct {
+	MonoThreadInfo info;
+	size_t alloc_context [16];
+} CorGCThreadInfo;
 
 
 #define ALLOC_ALIGN 8
@@ -33,7 +37,7 @@ static MonoVTable *array_fill_vtable;
 static void*
 corgc_thread_register (MonoThreadInfo* info, void *baseptr)
 {
-	corgc_attach ();
+	// corgc_attach ();
 	return info;
 }
 
@@ -76,7 +80,7 @@ mono_gc_base_init (void)
 	cb.mono_gc_pthread_create = (gpointer)mono_gc_pthread_create;
 #endif
 	
-	mono_threads_init (&cb, sizeof (MonoThreadInfo));
+	mono_threads_init (&cb, sizeof (CorGCThreadInfo));
 	// mono_mutex_init (&mono_gc_lock);
 
 	mono_thread_info_attach (&dummy);
@@ -661,5 +665,59 @@ corgc_get_array_fill_vtable (void)
 	return array_fill_vtable;
 }
 
+/*
+It's not clean on how to ask the GC to work in preemptive mode only.
+*/
+
+void
+cor_destroy_thread (void *t)
+{
+	g_assert (t == mono_thread_info_current ());
+	mono_thread_info_detach ();
+}
+
+void*
+cor_thread_current (void)
+{
+	return mono_thread_info_current ();
+}
+
+int
+cor_preempt_gc_get (void)
+{
+	return 1; //we're always in preemptive mode
+	// MonoThreadInfo *info = mono_thread_info_current ();
+	// return info->inside_critical_region == 0;
+}
+
+void
+cor_preempt_gc_set(int val)
+{
+	// MonoThreadInfo *info = mono_thread_info_current ();
+	// info->inside_critical_region = val == 0;
+}
+
+void *
+cor_thread_next(void *t)
+{
+	MonoThreadInfo *info = t;
+	if (!info)
+		return mono_thread_info_list_head ();
+	return info->node.next;
+}
+
+void *
+cor_get_thread_alloc_ctx (void *t)
+{
+	CorGCThreadInfo *info = t;
+	return &info->alloc_context;
+}
+
+void
+cor_set_cur_thread_as_special ()
+{
+	MonoThreadInfo *info = mono_thread_info_current ();
+	info->tools_thread = TRUE;
+}
 
 #endif

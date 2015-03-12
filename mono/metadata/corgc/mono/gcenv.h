@@ -9,9 +9,12 @@
 
 #define FEATURE_REDHAWK 1
 #define FEATURE_CONSERVATIVE_GC 1
+#define FEATURE_PAL 1
 // #define _DEBUG
 
 #ifndef _INC_WINDOWS
+
+#include <pthread.h>
 
 // -----------------------------------------------------------------------------------------------------------
 //
@@ -131,18 +134,7 @@ inline HRESULT HRESULT_FROM_WIN32(unsigned long x)
 #pragma pack(push, 8)
 
 typedef struct _RTL_CRITICAL_SECTION {
-    PVOID DebugInfo;
-
-    //
-    //  The following three fields control entering and exiting the critical
-    //  section for the resource
-    //
-
-    LONG LockCount;
-    LONG RecursionCount;
-    HANDLE OwningThread;        // from the thread's ClientId->UniqueThread
-    HANDLE LockSemaphore;
-    ULONG_PTR SpinCount;        // force size on 64-bit systems when packed
+    pthread_mutex_t mutex;
 } CRITICAL_SECTION, RTL_CRITICAL_SECTION, *PRTL_CRITICAL_SECTION;
 
 #pragma pack(pop)
@@ -269,12 +261,10 @@ WINAPI
 FlushFileBuffers(
          HANDLE hFile);
 
-extern "C" VOID
-_mm_pause ();
-
-#pragma intrinsic(_mm_pause)
-
-#define YieldProcessor _mm_pause
+WINBASEAPI
+VOID
+WINAPI
+YieldProcessor ();
 
 #endif // _INC_WINDOWS
 
@@ -717,40 +707,25 @@ struct alloc_context;
 
 class Thread
 {
-    uint32_t m_fPreemptiveGCDisabled;
-    uintptr_t m_alloc_context[16]; // Reserve enough space to fix allocation context
-
-    friend class ThreadStore;
-    Thread * m_pNext;
-
+//     uint32_t m_fPreemptiveGCDisabled;
+//     uintptr_t m_alloc_context[16]; // Reserve enough space to fix allocation context
+//
+//     friend class ThreadStore;
+//     Thread * m_pNext;
+//
+// public:
+//     Thread()
+//     {
+//     }
+//
 public:
-    Thread()
-    {
-    }
+    bool PreemptiveGCDisabled();
+    void EnablePreemptiveGC();
+	void DisablePreemptiveGC();
 
-    bool PreemptiveGCDisabled()
-    {
-        return !!m_fPreemptiveGCDisabled;
-    }
+    alloc_context* GetAllocContext();
 
-    void EnablePreemptiveGC()
-    {
-        m_fPreemptiveGCDisabled = false;
-    }
-
-    void DisablePreemptiveGC()
-    {
-        m_fPreemptiveGCDisabled = true;
-    }
-
-    alloc_context* GetAllocContext()
-    {
-        return (alloc_context *)&m_alloc_context;
-    }
-
-    void SetGCSpecial(bool fGCSpecial)
-    {
-    }
+	void SetGCSpecial(bool fGCSpecial);
 
     bool CatchAtSafePoint()
     {
