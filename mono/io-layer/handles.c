@@ -1554,6 +1554,34 @@ int _wapi_handle_wait_signal_handle (gpointer handle, gboolean alertable)
 	return _wapi_handle_timedwait_signal_handle (handle, NULL, alertable, FALSE);
 }
 
+
+void
+signal_handle_and_unref (void *wait_handle)
+{
+	pthread_cond_t *cond;
+	mono_mutex_t *mutex;
+	guint32 idx;
+
+	g_assert (wait_handle);
+	/* If we reach here, then wait_handle is set to the flag value, 
+	 * which means that the target thread is either
+	 * - before the first CAS in timedwait, which means it won't enter the
+	 * wait.
+	 * - it is after the first CAS, so it is already waiting, or it will 
+	 * enter the wait, and it will be interrupted by the broadcast.
+	 */
+	idx = GPOINTER_TO_UINT(wait_handle);
+	cond = &_WAPI_PRIVATE_HANDLES(idx).signal_cond;
+	mutex = &_WAPI_PRIVATE_HANDLES(idx).signal_mutex;
+
+	mono_mutex_lock (mutex);
+	mono_cond_broadcast (cond);
+	mono_mutex_unlock (mutex);
+
+	/* ref added by set_wait_handle */
+	_wapi_handle_unref (wait_handle);
+}
+
 int _wapi_handle_timedwait_signal_handle (gpointer handle,
 										  struct timespec *timeout, gboolean alertable, gboolean poll)
 {
@@ -1592,9 +1620,14 @@ int _wapi_handle_timedwait_signal_handle (gpointer handle,
 		int res;
 		pthread_cond_t *cond;
 		mono_mutex_t *mutex;
+		MonoInterruptionToken token = { .data = handle, .callback = signal_handle_and_unref };
 
-		if (alertable && !wapi_thread_set_wait_handle (handle))
-			return 0;
+		if (alertable) {
+			if (mono_interruption_token_install (&token))
+				_wapi_handle_ref (handle);
+			else
+				return 0;
+		}
 
 		cond = &_WAPI_PRIVATE_HANDLES (idx).signal_cond;
 		mutex = &_WAPI_PRIVATE_HANDLES (idx).signal_mutex;
@@ -1610,7 +1643,7 @@ int _wapi_handle_timedwait_signal_handle (gpointer handle,
 		}
 
 		if (alertable)
-			wapi_thread_clear_wait_handle (handle);
+			mono_interruption_token_uninstall ();
 
 		return res;
 	}
