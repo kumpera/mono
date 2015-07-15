@@ -112,6 +112,7 @@ monoutils_sources = \
 	mono-threads-coop.h	\
 	mono-tls.h	\
 	mono-tls.c	\
+	mono-fast-tls-none.c	\
 	linux_magic.h	\
 	mono-memory-model.h	\
 	atomic.h	\
