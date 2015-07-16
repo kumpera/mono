@@ -740,109 +740,104 @@ mono_arch_create_monitor_enter_trampoline (MonoTrampInfo **info, gboolean is_v4,
 	code = buf = mono_global_codeman_reserve (tramp_size);
 
 	x86_push_reg (code, X86_EAX);
-	if (mono_thread_get_tls_offset () != -1) {
-		if (is_v4) {
-			x86_test_membase_imm (code, X86_EDX, 0, 1);
-			/* if *lock_taken is 1, jump to actual trampoline */
-			jump_lock_taken_true = code;
-			x86_branch8 (code, X86_CC_NZ, -1, 1);
-			x86_push_reg (code, X86_EDX);
-		}
-		/* MonoObject* obj is in EAX */
-		/* is obj null? */
-		x86_test_reg_reg (code, X86_EAX, X86_EAX);
-		/* if yes, jump to actual trampoline */
-		jump_obj_null = code;
-		x86_branch8 (code, X86_CC_Z, -1, 1);
-
-		/* load obj->synchronization to ECX */
-		x86_mov_reg_membase (code, X86_ECX, X86_EAX, MONO_STRUCT_OFFSET (MonoObject, synchronisation), 4);
-
-		if (mono_gc_is_moving ()) {
-			/*if bit zero is set it's a thin hash*/
-			/*FIXME use testb encoding*/
-			x86_test_reg_imm (code, X86_ECX, 0x01);
-			jump_sync_thin_hash = code;
-			x86_branch8 (code, X86_CC_NE, -1, 1);
-
-			/*clear bits used by the gc*/
-			x86_alu_reg_imm (code, X86_AND, X86_ECX, ~0x3);
-		}
-
-		/* is synchronization null? */
-		x86_test_reg_reg (code, X86_ECX, X86_ECX);
-
-		/* if yes, jump to actual trampoline */
-		jump_sync_null = code;
-		x86_branch8 (code, X86_CC_Z, -1, 1);
-
-		/* load MonoInternalThread* into EDX */
-		if (aot) {
-			/* load_aotconst () puts the result into EAX */
-			x86_mov_reg_reg (code, X86_EDX, X86_EAX, sizeof (mgreg_t));
-			code = mono_arch_emit_load_aotconst (buf, code, &ji, MONO_PATCH_INFO_TLS_OFFSET, GINT_TO_POINTER (TLS_KEY_THREAD));
-			code = mono_x86_emit_tls_get_reg (code, X86_EAX, X86_EAX);
-			x86_xchg_reg_reg (code, X86_EAX, X86_EDX, sizeof (mgreg_t));
-		} else {
-			code = mono_x86_emit_tls_get (code, X86_EDX, mono_thread_get_tls_offset ());
-		}
-		/* load TID into EDX */
-		x86_mov_reg_membase (code, X86_EDX, X86_EDX, MONO_STRUCT_OFFSET (MonoInternalThread, small_id), 4);
-
-		/* is synchronization->owner free */
-		x86_mov_reg_membase (code, X86_EAX, X86_ECX, status_offset, 4);
-		x86_test_reg_imm (code, X86_EAX, OWNER_MASK);
-		/* if not, jump to next case */
-		jump_tid = code;
+	if (is_v4) {
+		x86_test_membase_imm (code, X86_EDX, 0, 1);
+		/* if *lock_taken is 1, jump to actual trampoline */
+		jump_lock_taken_true = code;
 		x86_branch8 (code, X86_CC_NZ, -1, 1);
+		x86_push_reg (code, X86_EDX);
+	}
+	/* MonoObject* obj is in EAX */
+	/* is obj null? */
+	x86_test_reg_reg (code, X86_EAX, X86_EAX);
+	/* if yes, jump to actual trampoline */
+	jump_obj_null = code;
+	x86_branch8 (code, X86_CC_Z, -1, 1);
 
-		/* if yes, try a compare-exchange with the TID */
-		/* Form new status */
-		x86_alu_reg_reg (code, X86_OR, X86_EDX, X86_EAX);
-		/* compare and exchange */
-		x86_prefix (code, X86_LOCK_PREFIX);
-		x86_cmpxchg_membase_reg (code, X86_ECX, status_offset, X86_EDX);
-		/* if not successful, jump to actual trampoline */
-		jump_cmpxchg_failed = code;
-		x86_branch8 (code, X86_CC_NZ, -1, 1);
-		/* if successful, pop and return */
-		if (is_v4) {
-			x86_pop_reg (code, X86_EDX);
-			x86_mov_membase_imm (code, X86_EDX, 0, 1, 1);
-		}
-		x86_pop_reg (code, X86_EAX);
-		x86_ret (code);
+	/* load obj->synchronization to ECX */
+	x86_mov_reg_membase (code, X86_ECX, X86_EAX, MONO_STRUCT_OFFSET (MonoObject, synchronisation), 4);
 
-		/* next case: synchronization->owner is not null */
-		x86_patch (jump_tid, code);
-		/* is synchronization->owner == TID? */
-		x86_alu_reg_imm (code, X86_AND, X86_EAX, OWNER_MASK);
-		x86_alu_reg_reg (code, X86_CMP, X86_EAX, X86_EDX);
-		/* if not, jump to actual trampoline */
-		jump_other_owner = code;
-		x86_branch8 (code, X86_CC_NZ, -1, 1);
-		/* if yes, increment nest */
-		x86_inc_membase (code, X86_ECX, nest_offset);
-		if (is_v4) {
-			x86_pop_reg (code, X86_EDX);
-			x86_mov_membase_imm (code, X86_EDX, 0, 1, 1);
-		}
-		x86_pop_reg (code, X86_EAX);
-		/* return */
-		x86_ret (code);
+	if (mono_gc_is_moving ()) {
+		/*if bit zero is set it's a thin hash*/
+		/*FIXME use testb encoding*/
+		x86_test_reg_imm (code, X86_ECX, 0x01);
+		jump_sync_thin_hash = code;
+		x86_branch8 (code, X86_CC_NE, -1, 1);
 
-		/* obj is pushed, jump to the actual trampoline */
-		x86_patch (jump_obj_null, code);
-		if (jump_sync_thin_hash)
-			x86_patch (jump_sync_thin_hash, code);
-		x86_patch (jump_sync_null, code);
-		x86_patch (jump_other_owner, code);
-		x86_patch (jump_cmpxchg_failed, code);
+		/*clear bits used by the gc*/
+		x86_alu_reg_imm (code, X86_AND, X86_ECX, ~0x3);
+	}
 
-		if (is_v4) {
-			x86_pop_reg (code, X86_EDX);
-			x86_patch (jump_lock_taken_true, code);
-		}
+	/* is synchronization null? */
+	x86_test_reg_reg (code, X86_ECX, X86_ECX);
+
+	/* if yes, jump to actual trampoline */
+	jump_sync_null = code;
+	x86_branch8 (code, X86_CC_Z, -1, 1);
+
+	/* load MonoInternalThread* into EDX */
+	x86_push_reg (code, X86_ECX);
+	code = mono_arch_emit_tls_get (buf, code, aot, &ji, TLS_KEY_THREAD); /* TLS var will be on EAX */
+	x86_mov_reg_reg (code, X86_EDX, X86_EAX, sizeof (mgreg_t));
+	x86_pop_reg (code, X86_ECX); //Restore ECX
+	x86_mov_reg_membase (code, X86_EAX, X86_ESP, is_v4 ? 4 : 0, 4); //Restore EAX
+
+	/* load TID into EDX */
+	x86_mov_reg_membase (code, X86_EDX, X86_EDX, MONO_STRUCT_OFFSET (MonoInternalThread, small_id), 4);
+
+	/* is synchronization->owner free */
+	x86_mov_reg_membase (code, X86_EAX, X86_ECX, status_offset, 4);
+	x86_test_reg_imm (code, X86_EAX, OWNER_MASK);
+	/* if not, jump to next case */
+	jump_tid = code;
+	x86_branch8 (code, X86_CC_NZ, -1, 1);
+
+	/* if yes, try a compare-exchange with the TID */
+	/* Form new status */
+	x86_alu_reg_reg (code, X86_OR, X86_EDX, X86_EAX);
+	/* compare and exchange */
+	x86_prefix (code, X86_LOCK_PREFIX);
+	x86_cmpxchg_membase_reg (code, X86_ECX, status_offset, X86_EDX);
+	/* if not successful, jump to actual trampoline */
+	jump_cmpxchg_failed = code;
+	x86_branch8 (code, X86_CC_NZ, -1, 1);
+	/* if successful, pop and return */
+	if (is_v4) {
+		x86_pop_reg (code, X86_EDX);
+		x86_mov_membase_imm (code, X86_EDX, 0, 1, 1);
+	}
+	x86_pop_reg (code, X86_EAX);
+	x86_ret (code);
+
+	/* next case: synchronization->owner is not null */
+	x86_patch (jump_tid, code);
+	/* is synchronization->owner == TID? */
+	x86_alu_reg_imm (code, X86_AND, X86_EAX, OWNER_MASK);
+	x86_alu_reg_reg (code, X86_CMP, X86_EAX, X86_EDX);
+	/* if not, jump to actual trampoline */
+	jump_other_owner = code;
+	x86_branch8 (code, X86_CC_NZ, -1, 1);
+	/* if yes, increment nest */
+	x86_inc_membase (code, X86_ECX, nest_offset);
+	if (is_v4) {
+		x86_pop_reg (code, X86_EDX);
+		x86_mov_membase_imm (code, X86_EDX, 0, 1, 1);
+	}
+	x86_pop_reg (code, X86_EAX);
+	/* return */
+	x86_ret (code);
+
+	/* obj is pushed, jump to the actual trampoline */
+	x86_patch (jump_obj_null, code);
+	if (jump_sync_thin_hash)
+		x86_patch (jump_sync_thin_hash, code);
+	x86_patch (jump_sync_null, code);
+	x86_patch (jump_other_owner, code);
+	x86_patch (jump_cmpxchg_failed, code);
+
+	if (is_v4) {
+		x86_pop_reg (code, X86_EDX);
+		x86_patch (jump_lock_taken_true, code);
 	}
 
 	if (aot) {
@@ -900,96 +895,93 @@ mono_arch_create_monitor_exit_trampoline (MonoTrampInfo **info, gboolean aot)
 	code = buf = mono_global_codeman_reserve (tramp_size);
 
 	x86_push_reg (code, X86_EAX);
-	if (mono_thread_get_tls_offset () != -1) {
-		/* MonoObject* obj is in EAX */
-		/* is obj null? */
-		x86_test_reg_reg (code, X86_EAX, X86_EAX);
-		/* if yes, jump to actual trampoline */
-		jump_obj_null = code;
-		x86_branch8 (code, X86_CC_Z, -1, 1);
+	/* MonoObject* obj is in EAX */
+	/* is obj null? */
+	x86_test_reg_reg (code, X86_EAX, X86_EAX);
+	/* if yes, jump to actual trampoline */
+	jump_obj_null = code;
+	x86_branch8 (code, X86_CC_Z, -1, 1);
 
-		/* load obj->synchronization to ECX */
-		x86_mov_reg_membase (code, X86_ECX, X86_EAX, MONO_STRUCT_OFFSET (MonoObject, synchronisation), 4);
+	/* load obj->synchronization to ECX */
+	x86_mov_reg_membase (code, X86_ECX, X86_EAX, MONO_STRUCT_OFFSET (MonoObject, synchronisation), 4);
 
-		if (mono_gc_is_moving ()) {
-			/*if bit zero is set it's a thin hash*/
-			/*FIXME use testb encoding*/
-			x86_test_reg_imm (code, X86_ECX, 0x01);
-			jump_sync_thin_hash = code;
-			x86_branch8 (code, X86_CC_NE, -1, 1);
+	if (mono_gc_is_moving ()) {
+		/*if bit zero is set it's a thin hash*/
+		/*FIXME use testb encoding*/
+		x86_test_reg_imm (code, X86_ECX, 0x01);
+		jump_sync_thin_hash = code;
+		x86_branch8 (code, X86_CC_NE, -1, 1);
 
-			/*clear bits used by the gc*/
-			x86_alu_reg_imm (code, X86_AND, X86_ECX, ~0x3);
-		}
-
-		/* is synchronization null? */
-		x86_test_reg_reg (code, X86_ECX, X86_ECX);
-		/* if yes, jump to actual trampoline */
-		jump_sync_null = code;
-		x86_branch8 (code, X86_CC_Z, -1, 1);
-
-		/* next case: synchronization is not null */
-		/* load MonoInternalThread* into EDX */
-		if (aot) {
-			/* load_aotconst () puts the result into EAX */
-			x86_mov_reg_reg (code, X86_EDX, X86_EAX, sizeof (mgreg_t));
-			code = mono_arch_emit_load_aotconst (buf, code, &ji, MONO_PATCH_INFO_TLS_OFFSET, GINT_TO_POINTER (TLS_KEY_THREAD));
-			code = mono_x86_emit_tls_get_reg (code, X86_EAX, X86_EAX);
-			x86_xchg_reg_reg (code, X86_EAX, X86_EDX, sizeof (mgreg_t));
-		} else {
-			code = mono_x86_emit_tls_get (code, X86_EDX, mono_thread_get_tls_offset ());
-		}
-		/* load TID into EDX */
-		x86_mov_reg_membase (code, X86_EDX, X86_EDX, MONO_STRUCT_OFFSET (MonoInternalThread, small_id), 4);
-		/* is synchronization->owner == TID */
-		x86_mov_reg_membase (code, X86_EAX, X86_ECX, status_offset, 4);
-		x86_alu_reg_reg (code, X86_XOR, X86_EDX, X86_EAX);
-		x86_test_reg_imm (code, X86_EDX, OWNER_MASK);
-		/* if no, jump to actual trampoline */
-		jump_not_owned = code;
-		x86_branch8 (code, X86_CC_NZ, -1, 1);
-
-		/* next case: synchronization->owner == TID */
-		/* is synchronization->nest == 1 */
-		x86_alu_membase_imm (code, X86_CMP, X86_ECX, nest_offset, 1);
-		/* if not, jump to next case */
-		jump_next = code;
-		x86_branch8 (code, X86_CC_NZ, -1, 1);
-		/* if yes, is synchronization->entry_count greater than zero? */
-		x86_test_reg_imm (code, X86_EAX, ENTRY_COUNT_WAITERS);
-		/* if yes, jump to actual trampoline */
-		jump_have_waiters = code;
-		x86_branch8 (code, X86_CC_NZ, -1 , 1);
-		/* if not, try to set synchronization->owner to null and return */
-		x86_mov_reg_reg (code, X86_EDX, X86_EAX, 4);
-		x86_alu_reg_imm (code, X86_AND, X86_EDX, ENTRY_COUNT_MASK); 
-		/* compare and exchange */
-		x86_prefix (code, X86_LOCK_PREFIX);
-		/* EAX contains the previous status */
-		x86_cmpxchg_membase_reg (code, X86_ECX, status_offset, X86_EDX);
-		/* if not successful, jump to actual trampoline */
-		jump_cmpxchg_failed = code;
-		x86_branch8 (code, X86_CC_NZ, -1, 1);
-
-		x86_pop_reg (code, X86_EAX);
-		x86_ret (code);
-
-		/* next case: synchronization->nest is not 1 */
-		x86_patch (jump_next, code);
-		/* decrease synchronization->nest and return */
-		x86_dec_membase (code, X86_ECX, nest_offset);
-		x86_pop_reg (code, X86_EAX);
-		x86_ret (code);
-
-		/* push obj and jump to the actual trampoline */
-		x86_patch (jump_obj_null, code);
-		if (jump_sync_thin_hash)
-			x86_patch (jump_sync_thin_hash, code);
-		x86_patch (jump_have_waiters, code);
-		x86_patch (jump_cmpxchg_failed, code);
-		x86_patch (jump_not_owned, code);
-		x86_patch (jump_sync_null, code);
+		/*clear bits used by the gc*/
+		x86_alu_reg_imm (code, X86_AND, X86_ECX, ~0x3);
 	}
+
+	/* is synchronization null? */
+	x86_test_reg_reg (code, X86_ECX, X86_ECX);
+	/* if yes, jump to actual trampoline */
+	jump_sync_null = code;
+	x86_branch8 (code, X86_CC_Z, -1, 1);
+
+	/* next case: synchronization is not null */
+	/* load MonoInternalThread* into EDX */
+	x86_push_reg (code, X86_ECX);
+	code = mono_arch_emit_tls_get (buf, code, aot, &ji, TLS_KEY_THREAD); /* TLS var will be on EAX */
+	x86_mov_reg_reg (code, X86_EDX, X86_EAX, sizeof (mgreg_t));
+	x86_pop_reg (code, X86_ECX); //Restore ECX
+	x86_mov_reg_membase (code, X86_EAX, X86_ESP, 0, 4); //Restore EAX
+
+
+
+	/* load TID into EDX */
+	x86_mov_reg_membase (code, X86_EDX, X86_EDX, MONO_STRUCT_OFFSET (MonoInternalThread, small_id), 4);
+	/* is synchronization->owner == TID */
+	x86_mov_reg_membase (code, X86_EAX, X86_ECX, status_offset, 4);
+	x86_alu_reg_reg (code, X86_XOR, X86_EDX, X86_EAX);
+	x86_test_reg_imm (code, X86_EDX, OWNER_MASK);
+	/* if no, jump to actual trampoline */
+	jump_not_owned = code;
+	x86_branch8 (code, X86_CC_NZ, -1, 1);
+
+	/* next case: synchronization->owner == TID */
+	/* is synchronization->nest == 1 */
+	x86_alu_membase_imm (code, X86_CMP, X86_ECX, nest_offset, 1);
+	/* if not, jump to next case */
+	jump_next = code;
+	x86_branch8 (code, X86_CC_NZ, -1, 1);
+	/* if yes, is synchronization->entry_count greater than zero? */
+	x86_test_reg_imm (code, X86_EAX, ENTRY_COUNT_WAITERS);
+	/* if yes, jump to actual trampoline */
+	jump_have_waiters = code;
+	x86_branch8 (code, X86_CC_NZ, -1 , 1);
+	/* if not, try to set synchronization->owner to null and return */
+	x86_mov_reg_reg (code, X86_EDX, X86_EAX, 4);
+	x86_alu_reg_imm (code, X86_AND, X86_EDX, ENTRY_COUNT_MASK); 
+	/* compare and exchange */
+	x86_prefix (code, X86_LOCK_PREFIX);
+	/* EAX contains the previous status */
+	x86_cmpxchg_membase_reg (code, X86_ECX, status_offset, X86_EDX);
+	/* if not successful, jump to actual trampoline */
+	jump_cmpxchg_failed = code;
+	x86_branch8 (code, X86_CC_NZ, -1, 1);
+
+	x86_pop_reg (code, X86_EAX);
+	x86_ret (code);
+
+	/* next case: synchronization->nest is not 1 */
+	x86_patch (jump_next, code);
+	/* decrease synchronization->nest and return */
+	x86_dec_membase (code, X86_ECX, nest_offset);
+	x86_pop_reg (code, X86_EAX);
+	x86_ret (code);
+
+	/* push obj and jump to the actual trampoline */
+	x86_patch (jump_obj_null, code);
+	if (jump_sync_thin_hash)
+		x86_patch (jump_sync_thin_hash, code);
+	x86_patch (jump_have_waiters, code);
+	x86_patch (jump_cmpxchg_failed, code);
+	x86_patch (jump_not_owned, code);
+	x86_patch (jump_sync_null, code);
 
 	/* obj is pushed, jump to the actual trampoline */
 	if (aot) {

@@ -6593,6 +6593,22 @@ mono_arch_emit_load_aotconst (guint8 *start, guint8 *code, MonoJumpInfo **ji, in
 	return code;
 }
 
+
+guint8*
+mono_arch_emit_tls_get (guint8 *start, guint8 *code, gboolean aot, MonoJumpInfo **ji, MonoTlsKey key)
+{
+	x86_push_imm (code, key);
+	/* FIXME should we about alignment? */
+	if (aot) {
+		code = mono_arch_emit_load_aotconst (start, code, ji, MONO_PATCH_INFO_INTERNAL_METHOD, "mono_tls_get");
+		x86_call_reg (code, X86_EAX);
+	} else {
+		x86_call_code (code, mono_find_jit_icall_by_name ("mono_tls_get")->func);
+	}
+	x86_alu_reg_imm (code, X86_ADD, X86_ESP, 4);
+	return code;
+}
+
 /* Can't put this into mini-x86.h */
 gpointer
 mono_x86_get_signal_exception_trampoline (MonoTrampInfo **info, gboolean aot);

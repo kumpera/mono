@@ -1034,7 +1034,7 @@ mini_get_tls_offset (MonoTlsKey key)
 
 	switch (key) {
 	case TLS_KEY_THREAD:
-		offset = mono_thread_get_tls_offset ();
+		offset = mono_tls_get_offset (TLS_KEY_THREAD); /* New style */
 		break;
 	case TLS_KEY_JIT_TLS:
 		offset = mono_get_jit_tls_offset ();

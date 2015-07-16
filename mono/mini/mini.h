@@ -2626,6 +2626,8 @@ GSList *mono_arch_get_trampolines               (gboolean aot);
 MonoInst* mono_arch_get_tls_get_intrinsic       (MonoCompile* cfg, gint32 tls_var);
 MonoInst* mono_arch_get_tls_set_intrinsic       (MonoCompile* cfg, gint32 tls_var, MonoInst *value);
 
+guint8*   mono_arch_emit_tls_get                (guint8 *start, guint8 *code, gboolean aot, MonoJumpInfo **ji, MonoTlsKey key);
+
 /* Handle block guard */
 gpointer mono_arch_install_handler_block_guard (MonoJitInfo *ji, MonoJitExceptionInfo *clause, MonoContext *ctx, gpointer new_value);
 gpointer mono_arch_create_handler_block_trampoline (MonoTrampInfo **info, gboolean aot);
