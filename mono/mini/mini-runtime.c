@@ -1040,7 +1040,7 @@ mini_get_tls_offset (MonoTlsKey key)
 		offset = mono_get_jit_tls_offset ();
 		break;
 	case TLS_KEY_DOMAIN:
-		offset = mono_domain_get_tls_offset ();
+		offset = mono_tls_get_offset (TLS_KEY_DOMAIN); /* New style */		
 		break;
 	case TLS_KEY_LMF:
 		offset = mono_get_lmf_tls_offset ();

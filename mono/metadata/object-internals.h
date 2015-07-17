@@ -705,12 +705,6 @@ mono_type_initialization_cleanup (void);
 int
 mono_thread_kill           (MonoInternalThread *thread, int signal);
 
-MonoNativeTlsKey
-mono_domain_get_tls_key    (void);
-
-gint32
-mono_domain_get_tls_offset (void);
-
 /* Reflection and Reflection.Emit support */
 
 /*

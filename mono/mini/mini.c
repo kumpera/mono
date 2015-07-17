@@ -2125,7 +2125,6 @@ mono_get_lmf_addr_intrinsic (MonoCompile* cfg)
 	return mono_create_tls_get (cfg, TLS_KEY_LMF_ADDR);
 }
 
-#if !defined (MONO_ARCH_HAVE_TLS_OPS)
 MonoInst*
 mono_arch_get_tls_get_intrinsic (MonoCompile* cfg, gint32 tls_var)
 {
@@ -2144,7 +2143,7 @@ mono_arch_get_tls_set_intrinsic (MonoCompile* cfg, gint32 tls_var, MonoInst *val
 	iargs [1] = value;
 	return mono_emit_jit_icall (cfg, mono_tls_set, iargs);
 }
-#endif
+
 
 #endif /* !DISABLE_JIT */
 
