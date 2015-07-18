@@ -77,12 +77,6 @@
 static guint32 default_opt = 0;
 static gboolean default_opt_set = FALSE;
 
-MonoNativeTlsKey mono_jit_tls_id;
-
-#ifdef MONO_HAVE_FAST_TLS
-MONO_FAST_TLS_DECLARE(mono_jit_tls);
-#endif
-
 gboolean mono_compile_aot = FALSE;
 /* If this is set, no code is generated dynamically, everything is taken from AOT files */
 gboolean mono_aot_only = FALSE;
@@ -700,23 +694,6 @@ MONO_FAST_TLS_DECLARE(mono_lmf);
 #endif
 
 gint32
-mono_get_jit_tls_offset (void)
-{
-	int offset;
-
-#ifdef HOST_WIN32
-	if (mono_jit_tls_id)
-		offset = mono_jit_tls_id;
-	else
-		/* FIXME: Happens during startup */
-		offset = -1;
-#else
-	MONO_THREAD_VAR_OFFSET (mono_jit_tls, offset);
-#endif
-	return offset;
-}
-
-gint32
 mono_get_lmf_tls_offset (void)
 {
 #if defined(MONO_ARCH_ENABLE_MONO_LMF_VAR)
@@ -744,7 +721,7 @@ mono_get_lmf (void)
 #else
 	MonoJitTlsData *jit_tls;
 
-	if ((jit_tls = mono_native_tls_get_value (mono_jit_tls_id)))
+	if ((jit_tls = mono_tls_get (TLS_KEY_JIT_TLS)))
 		return jit_tls->lmf;
 	/*
 	 * We do not assert here because this function can be called from
@@ -763,7 +740,7 @@ mono_get_lmf_addr (void)
 #else
 	MonoJitTlsData *jit_tls;
 
-	jit_tls = mono_native_tls_get_value (mono_jit_tls_id);
+	jit_tls = mono_tls_get (TLS_KEY_JIT_TLS);
 	if (G_LIKELY (jit_tls))
 		return &jit_tls->lmf;
 
@@ -777,7 +754,7 @@ mono_get_lmf_addr (void)
 
 	mono_jit_thread_attach (NULL);
 
-	if ((jit_tls = mono_native_tls_get_value (mono_jit_tls_id)))
+	if ((jit_tls = mono_tls_get (TLS_KEY_JIT_TLS)))
 		return &jit_tls->lmf;
 
 	g_assert_not_reached ();
@@ -798,7 +775,7 @@ mono_set_lmf (MonoLMF *lmf)
 MonoJitTlsData*
 mono_get_jit_tls (void)
 {
-	return mono_native_tls_get_value (mono_jit_tls_id);
+	return mono_tls_get (TLS_KEY_JIT_TLS);
 }
 
 static void
@@ -806,11 +783,7 @@ mono_set_jit_tls (MonoJitTlsData *jit_tls)
 {
 	MonoThreadInfo *info;
 
-	mono_native_tls_set_value (mono_jit_tls_id, jit_tls);
-
-#ifdef MONO_HAVE_FAST_TLS
-	MONO_FAST_TLS_SET (mono_jit_tls, jit_tls);
-#endif
+	mono_tls_set (TLS_KEY_JIT_TLS, jit_tls);
 
 	/* Save it into MonoThreadInfo so it can be accessed by mono_thread_state_init_from_handle () */
 	info = mono_thread_info_current ();
@@ -858,7 +831,7 @@ mono_jit_thread_attach (MonoDomain *domain)
 		mono_thread_set_state (mono_thread_internal_current (), ThreadState_Background);
 	}
 #else
-	if (!mono_native_tls_get_value (mono_jit_tls_id)) {
+	if (!mono_tls_get (TLS_KEY_JIT_TLS)) {
 		mono_thread_attach (domain);
 		mono_thread_set_state (mono_thread_internal_current (), ThreadState_Background);
 	}
@@ -887,7 +860,7 @@ mono_jit_set_domain (MonoDomain *domain)
 static void
 mono_thread_abort (MonoObject *obj)
 {
-	/* MonoJitTlsData *jit_tls = mono_native_tls_get_value (mono_jit_tls_id); */
+	/* MonoJitTlsData *jit_tls = mono_tls_get (TLS_KEY_JIT_TLS); */
 
 	/* handle_remove should be eventually called for this thread, too
 	g_free (jit_tls);*/
@@ -906,7 +879,7 @@ setup_jit_tls_data (gpointer stack_start, gpointer abort_func)
 	MonoJitTlsData *jit_tls;
 	MonoLMF *lmf;
 
-	jit_tls = mono_native_tls_get_value (mono_jit_tls_id);
+	jit_tls = mono_tls_get (TLS_KEY_JIT_TLS);
 	if (jit_tls)
 		return jit_tls;
 
@@ -1639,10 +1612,6 @@ mono_resolve_patch_target (MonoMethod *method, MonoDomain *domain, guint8 *code,
 	}
 	case MONO_PATCH_INFO_CASTCLASS_CACHE: {
 		target = mono_domain_alloc0 (domain, sizeof (gpointer));
-		break;
-	}
-	case MONO_PATCH_INFO_JIT_TLS_ID: {
-		target = (gpointer) (size_t) mono_jit_tls_id;
 		break;
 	}
 	case MONO_PATCH_INFO_TLS_OFFSET: {
@@ -2387,7 +2356,7 @@ MONO_SIG_HANDLER_FUNC (, mono_sigill_signal_handler)
 MONO_SIG_HANDLER_FUNC (, mono_sigsegv_signal_handler)
 {
 	MonoJitInfo *ji;
-	MonoJitTlsData *jit_tls = mono_native_tls_get_value (mono_jit_tls_id);
+	MonoJitTlsData *jit_tls = mono_tls_get (TLS_KEY_JIT_TLS);
 	gpointer fault_addr = NULL;
 #ifdef HAVE_SIG_INFO
 	MONO_SIG_HANDLER_INFO_TYPE *info = MONO_SIG_HANDLER_GET_INFO ();
@@ -3016,8 +2985,6 @@ mini_init (const char *filename, const char *runtime_version)
 
 	mono_trampolines_init ();
 
-	mono_native_tls_alloc (&mono_jit_tls_id, NULL);
-
 	if (default_opt & MONO_OPT_AOT)
 		mono_aot_init ();
 
@@ -3451,7 +3418,7 @@ mini_cleanup (MonoDomain *domain)
 	mono_runtime_cleanup (domain);
 #endif
 
-	free_jit_tls_data (mono_native_tls_get_value (mono_jit_tls_id));
+	free_jit_tls_data (mono_tls_get (TLS_KEY_JIT_TLS));
 
 	mono_icall_cleanup ();
 
@@ -3492,8 +3459,6 @@ mini_cleanup (MonoDomain *domain)
 
 	if (mono_inject_async_exc_method)
 		mono_method_desc_free (mono_inject_async_exc_method);
-
-	mono_native_tls_free (mono_jit_tls_id);
 
 	mono_mutex_destroy (&jit_mutex);
 
