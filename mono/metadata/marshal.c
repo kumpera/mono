@@ -3976,10 +3976,17 @@ mono_marshal_get_runtime_invoke (MonoMethod *method, gboolean virtual)
 			mono_marshal_lock ();
 			res = g_hash_table_lookup (cache, callsig);
 			if (!res) {
+				GHashTable *direct_cache;
 				res = newm;
 				g_hash_table_insert (cache, callsig, res);
 				/* Can't insert it into wrapper_hash since the key is a signature */
-				g_hash_table_insert (method->klass->image->runtime_invoke_direct_cache, method, res);
+
+				if (method->is_inflated)
+					direct_cache = ((MonoMethodInflated*)method)->owner->runtime_invoke_direct_cache;
+				else
+					direct_cache = method->klass->image->runtime_invoke_direct_cache;
+
+				g_hash_table_insert (direct_cache, method, res);
 			} else {
 				mono_free_method (newm);
 			}
@@ -11372,10 +11379,10 @@ mono_marshal_free_inflated_wrappers (MonoMethod *method)
         /*
          * indexed by MonoMethod pointers
          */
-       if (method->klass->image->runtime_invoke_direct_cache)
+       if (imethod->owner->managed_wrapper_cache)
+               g_hash_table_remove (imethod->owner->managed_wrapper_cache, method);
+       if (imethod->owner->runtime_invoke_direct_cache)
                g_hash_table_remove (method->klass->image->runtime_invoke_direct_cache, method);
-       if (method->klass->image->managed_wrapper_cache)
-               g_hash_table_remove (method->klass->image->managed_wrapper_cache, method);
        if (imethod->owner->native_wrapper_cache)
                g_hash_table_remove (imethod->owner->native_wrapper_cache, method);
        if (imethod->owner->native_wrapper_cache)

@@ -263,12 +263,12 @@ mono_marshal_remoting_find_in_cache (MonoMethod *method, int wrapper_type)
 {
 	MonoMethod *res = NULL;
 	MonoRemotingMethods *wrps;
-	MonoMethodInflated *imethod;
 
 	mono_marshal_lock_internal ();
-	if (method->is_inflated && (imethod = (MonoMethodInflated *)method, imethod->owner->remoting_invoke_cache))
+	if (method->is_inflated && ((MonoMethodInflated *)method)->owner->remoting_invoke_cache) {
+		MonoMethodInflated *imethod = (MonoMethodInflated *)method;
 		wrps = g_hash_table_lookup (imethod->owner->remoting_invoke_cache, method);
-	else if (method->klass->image->remoting_invoke_cache)
+	} else if (method->klass->image->remoting_invoke_cache)
 		wrps = g_hash_table_lookup (method->klass->image->remoting_invoke_cache, method);
 	else
 		wrps = NULL;
