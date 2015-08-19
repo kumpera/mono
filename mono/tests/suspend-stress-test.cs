@@ -11,9 +11,18 @@ class Driver {
 
 	static object very_contended_object = new object ();
 
-	static void MonitorEnterInALoop ()
+	static bool Ok (ref int loops) {
+		if (loops == -1)
+			return !stop_please;
+		if (loops == 0)
+			return false;
+		loops--;
+		return true;
+
+	}
+	static void MonitorEnterInALoop (int loops)
 	{
-		while (!stop_please) {
+		while (Ok (ref loops)) {
 			if (Monitor.TryEnter (very_contended_object, 100)) {
 				Thread.Sleep (30);
 				Monitor.Exit (very_contended_object);
@@ -21,23 +30,23 @@ class Driver {
 		}
 	}
 
-	static void AllocObjectInALoop () {
-		while (!stop_please) {
+	static void AllocObjectInALoop (int loops) {
+		while (Ok (ref loops)) {
 			var a = new object ();
 			var b = new byte [100];
 		}
 	}
 
-	static void AllocDomainInALoop () {
+	static void AllocDomainInALoop (int loops) {
 		int count = 0;
-		while (!stop_please) {
+		while (Ok (ref loops)) {
 			var a = AppDomain.CreateDomain ("test_domain_" + ++count);
 			AppDomain.Unload (a);
 		}
 	}
 
-	static void FileIO () {
-		while (!stop_please) {
+	static void FileIO (int loops) {
+		while (Ok (ref loops)) {
 			var dir = Path.GetTempFileName () + "_" + Thread.CurrentThread.ManagedThreadId;
 			Directory.CreateDirectory (dir);
 			Directory.Delete (dir);
@@ -45,27 +54,102 @@ class Driver {
 		}
 		
 	}
-	static ThreadStart[] available_tests = new [] {
-		new ThreadStart (MonitorEnterInALoop),
-		new ThreadStart (AllocObjectInALoop),
-		new ThreadStart (AllocDomainInALoop),
-		new ThreadStart (FileIO),
+	static Tuple<Action<int>,string>[] available_tests = new [] {
+		Tuple.Create (new Action<int> (MonitorEnterInALoop), "monitor"),
+		Tuple.Create (new Action<int> (AllocObjectInALoop), "alloc"),
+		Tuple.Create (new Action<int> (AllocDomainInALoop), "appdomain"),
+		Tuple.Create (new Action<int> (FileIO), "file-io")
 	};
+
+	static void GcPump (int timeInMillis)
+	{
+		var sw = Stopwatch.StartNew ();
+		do {
+			GC.Collect ();
+			Thread.Sleep (1);
+		} while (sw.ElapsedMilliseconds < timeInMillis);
+		stop_please = true;
+	}
+
+	const int minTpSteps = 1;
+	const int maxTpSteps = 30;
+
+	static void QueueStuffUsingTpl (int threadCount) {
+		int pendingJobs = 0;
+		int maxPending = threadCount * 2;
+		int generatorIdx = 0;
+		Random rand = new Random (0);
+
+		while (!stop_please) {
+			while (pendingJobs < maxPending) {
+				var task = available_tests [generatorIdx++ % available_tests.Length].Item1;
+				int steps = rand.Next(minTpSteps, maxTpSteps);
+				ThreadPool.QueueUserWorkItem (_ => {
+					task (steps);
+					Interlocked.Decrement (ref pendingJobs);
+				});
+				Interlocked.Increment (ref pendingJobs);
+			}
+			Thread.Sleep (1);
+		}
+		while (pendingJobs > 0)
+			Thread.Sleep (1);
+	}
+
+	static void DynamicLoadGenerator (int threadCount, int timeInMillis) {
+		var t = new Thread (() => QueueStuffUsingTpl (threadCount));
+		t.Start ();
+
+		GcPump (timeInMillis);
+
+		t.Join ();
+	}
+
+	static void StaticLoadGenerator (int threadCount, int testIndex, int timeInMillis) {
+		List<Thread> threads = new List<Thread> ();
+
+		for (int i = 0; i < threadCount; ++i) {
+			var dele = (testIndex >= 0 ? available_tests [testIndex] : available_tests [i % available_tests.Length]).Item1;
+			var t = new Thread (() => dele (-1));
+			t.Start ();
+			threads.Add (t);
+		}
+
+		GcPump (timeInMillis);
+
+		foreach (var t in threads)
+			t.Join ();
+	}
+	
+	static int ParseTestName (string name) {
+		for (int i = 0; i < available_tests.Length; ++i) {
+			if (available_tests[i].Item2 == name)
+				return i;
+		}
+		Console.WriteLine ("Invalid test name {0}", name);
+		Environment.Exit (2);
+		return -1;
+	}
 
 	static int Main (string[] args) {
 		int threadCount = Environment.ProcessorCount - 1;
 		int timeInMillis = TEST_DURATION;
 		int testIndex = -1;
+		bool tpLoadGenerator = false;
+		string testName = "static";
+		
 
 		for (int j = 0; j < args.Length;) {
 			if ((args [j] == "--duration") || (args [j] == "-d")) {
 				timeInMillis = Int32.Parse (args [j + 1]);
 				j += 2;
 			} else if ((args [j] == "--test") || (args [j] == "-t")) {
-				if (args [j + 1] == "mix")
+				if (args [j + 1] == "static")
 					testIndex = -1;
+				else if (args [j + 1] == "tp")
+					tpLoadGenerator = true;
 				else
-					testIndex = Int32.Parse (args [j + 1]);
+					testIndex = ParseTestName (testName = args [j + 1]);
 				j += 2;
 			} else 	if ((args [j] == "--thread-count") || (args [j] == "-tc")) {
 				threadCount = Int32.Parse (args [j + 1]);
@@ -76,26 +160,14 @@ class Driver {
 			}
         }
 
-		Console.WriteLine ("thread count {0} duration {1} test {2}", threadCount, timeInMillis, testIndex);
-
-		List<Thread> threads = new List<Thread> ();
-
-		for (int i = 0; i < threadCount; ++i) {
-			var t = new Thread (testIndex >= 0 ? available_tests [testIndex] : available_tests [i % available_tests.Length]);
-			t.Start ();
-			threads.Add (t);
+		if (tpLoadGenerator) {
+			Console.WriteLine ("tp window {0} duration {1}", threadCount, timeInMillis);
+			DynamicLoadGenerator (threadCount, timeInMillis);
+		} else {
+			Console.WriteLine ("thread count {0} duration {1} test {2}", threadCount, timeInMillis, testName);
+			StaticLoadGenerator (threadCount, testIndex, timeInMillis);
 		}
 
-		var sw = Stopwatch.StartNew ();
-		do {
-			GC.Collect ();
-			Thread.Sleep (1);
-		} while (sw.ElapsedMilliseconds < timeInMillis);
-
-		stop_please = true;
-
-		foreach (var t in threads)
-			t.Join ();
 		return 0;
 	}
 }
