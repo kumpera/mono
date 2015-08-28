@@ -1563,6 +1563,7 @@ typedef struct {
 	guint            gshared : 1;
 	guint            gsharedvt : 1;
 	guint            r4fp : 1;
+	guint            check_stack_alignment_after_calls : 1;
 	int              r4_stack_type;
 	gpointer         debug_info;
 	guint32          lmf_offset;
@@ -1942,6 +1943,10 @@ typedef struct {
 	 * Check for pinvoke calling convention mismatches.
 	 */
 	gboolean check_pinvoke_callconv;
+
+
+	/* Check for stack alignment on platforms that need it */
+	gboolean check_stack_alignment;
 } MonoDebugOptions;
 
 enum {

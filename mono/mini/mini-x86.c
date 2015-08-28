@@ -1879,6 +1879,12 @@ if (ins->inst_true_bb->native_offset) { \
 	x86_fnstsw (code); \
 } while (0); 
 
+static G_GNUC_UNUSED void
+stack_unaligned (MonoMethod *m, gpointer caller)
+{
+	printf ("%s\n", mono_method_full_name (m, TRUE));
+	g_assert_not_reached ();
+}
 
 static guint8*
 emit_call (MonoCompile *cfg, guint8 *code, guint32 patch_type, gconstpointer data)
@@ -1906,6 +1912,26 @@ emit_call (MonoCompile *cfg, guint8 *code, guint32 patch_type, gconstpointer dat
 
 	mono_add_patch_info (cfg, code - cfg->native_code, patch_type, data);
 	x86_call_code (code, 0);
+
+	if (cfg->check_stack_alignment_after_calls) {
+		guint8 *br [16];
+
+		/* Check that the stack is aligned on osx */
+		//SP must be == 0 on the method body
+
+		x86_push_reg (code, X86_EAX); // SP = SP - 4  (0 -4 % 16 == 0xc)
+		x86_mov_reg_reg (code, X86_EAX, X86_ESP, sizeof (mgreg_t));
+		x86_alu_reg_imm (code, X86_AND, X86_EAX, 15);
+		x86_alu_reg_imm (code, X86_CMP, X86_EAX, 0xc); //regular value is 0x
+		br [0] = code;
+		x86_branch_disp (code, X86_CC_Z, 0, FALSE);
+		x86_push_membase (code, X86_ESP, 0);
+		x86_push_imm (code, cfg->method);
+		x86_mov_reg_imm (code, X86_EAX, stack_unaligned);
+		x86_call_reg (code, X86_EAX);
+		x86_patch (br [0], code);
+		x86_pop_reg (code, X86_EAX);
+	}
 
 	return code;
 }
@@ -2570,6 +2596,9 @@ mono_arch_output_basic_block (MonoCompile *cfg, MonoBasicBlock *bb)
 		offset = code - cfg->native_code;
 
 		max_len = ((guint8 *)ins_get_spec (ins->opcode))[MONO_INST_LEN];
+
+		if (cfg->check_stack_alignment_after_calls)
+			max_len += 36; /* fuck it */
 
 #define EXTRA_CODE_SPACE (NACL_SIZE (16, 16 + kNaClAlignment))
 
@@ -5189,13 +5218,6 @@ mono_arch_patch_code_new (MonoCompile *cfg, MonoDomain *domain, guint8 *code, Mo
 	}
 }
 
-static G_GNUC_UNUSED void
-stack_unaligned (MonoMethod *m, gpointer caller)
-{
-	printf ("%s\n", mono_method_full_name (m, TRUE));
-	g_assert_not_reached ();
-}
-
 guint8 *
 mono_arch_emit_prolog (MonoCompile *cfg)
 {
@@ -5232,23 +5254,22 @@ mono_arch_emit_prolog (MonoCompile *cfg)
   	g_assert(alignment_check == 0);
 #endif
 
-#if 0
+	if (mini_get_debug_options ()->check_stack_alignment)
 	{
 		guint8 *br [16];
 
-	/* Check that the stack is aligned on osx */
-	x86_mov_reg_reg (code, X86_EAX, X86_ESP, sizeof (mgreg_t));
-	x86_alu_reg_imm (code, X86_AND, X86_EAX, 15);
-	x86_alu_reg_imm (code, X86_CMP, X86_EAX, 0xc);
-	br [0] = code;
-	x86_branch_disp (code, X86_CC_Z, 0, FALSE);
-	x86_push_membase (code, X86_ESP, 0);
-	x86_push_imm (code, cfg->method);
-	x86_mov_reg_imm (code, X86_EAX, stack_unaligned);
-	x86_call_reg (code, X86_EAX);
-	x86_patch (br [0], code);
+		/* Check that the stack is aligned on osx */
+		x86_mov_reg_reg (code, X86_EAX, X86_ESP, sizeof (mgreg_t));
+		x86_alu_reg_imm (code, X86_AND, X86_EAX, 15);
+		x86_alu_reg_imm (code, X86_CMP, X86_EAX, 0xc);
+		br [0] = code;
+		x86_branch_disp (code, X86_CC_Z, 0, FALSE);
+		x86_push_membase (code, X86_ESP, 0);
+		x86_push_imm (code, cfg->method);
+		x86_mov_reg_imm (code, X86_EAX, stack_unaligned);
+		x86_call_reg (code, X86_EAX);
+		x86_patch (br [0], code);
 	}
-#endif
 
 	/* Offset between RSP and the CFA */
 	cfa_offset = 0;
@@ -5390,6 +5411,9 @@ mono_arch_emit_prolog (MonoCompile *cfg)
 			MONO_BB_FOR_EACH_INS (bb, ins) {
 				if (ins->opcode == OP_LABEL)
 					ins->inst_c1 = max_offset;
+
+				if (cfg->check_stack_alignment_after_calls && MONO_IS_CALL (ins))
+					max_offset += 36;
 #ifdef __native_client_codegen__
 				switch (ins->opcode)
 				{
