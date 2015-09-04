@@ -235,11 +235,16 @@ struct _MonoJitInfo {
 
 #define MONO_SIZEOF_JIT_INFO (offsetof (struct _MonoJitInfo, clauses))
 
+typedef struct {
+	gpointer *static_data;
+	uint32_t gc_handle;
+} ContextStaticData;
+
 struct _MonoAppContext {
 	MonoObject obj;
 	gint32 domain_id;
 	gint32 context_id;
-	gpointer *static_data;
+	ContextStaticData *data;
 };
 
 /* Lock-free allocator */

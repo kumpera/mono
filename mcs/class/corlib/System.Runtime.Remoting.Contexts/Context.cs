@@ -54,7 +54,7 @@ namespace System.Runtime.Remoting.Contexts {
 		#region Sync with domain-internals.h
 		int domain_id;
 		int context_id;
-		UIntPtr static_data; /* GC-tracked */
+		UIntPtr data;
 		#endregion
 #pragma warning restore 169, 414
 

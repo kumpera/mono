@@ -149,6 +149,9 @@ static MonoGHashTable *threads=NULL;
  */
 static GHashTable *contexts = NULL;
 
+/* Cleanup queue for contexts. */
+static MonoReferenceQueue *context_queue;
+
 /*
  * Threads which are starting up and they are not in the 'threads' hash yet.
  * When handle_store is called for a thread, it will be removed from this hash table.
@@ -533,7 +536,7 @@ get_context_static_data (MonoAppContext *ctx, guint32 offset)
 	int idx = ACCESS_SPECIAL_STATIC_OFFSET (offset, index);
 	int off = ACCESS_SPECIAL_STATIC_OFFSET (offset, offset);
 
-	return ((char *) ctx->static_data [idx]) + off;
+	return ((char *) ctx->data->static_data [idx]) + off;
 }
 
 static MonoThread**
@@ -2552,6 +2555,33 @@ ves_icall_System_Threading_Volatile_Write_T (void *ptr, MonoObject *value)
 	mono_gc_wbarrier_generic_store_atomic (ptr, value);
 }
 
+static void
+free_context (void *user_data)
+{
+	ContextStaticData *data = user_data;
+
+	/*
+	 * FIXME: This GC handle hack is here to work around what is presumably a
+	 * bug in the GC. What happens is that, even after this callback has been
+	 * invoked, the GC handle for the relevant context object is somehow still
+	 * valid. So free_context_static_data_helper () sees a valid context object
+	 * and goes right ahead and tries to null out slots in the static data.
+	 * However, by this point, the static data has already been freed (in this
+	 * function) so it crashes when it tries to access it. So to work around
+	 * this bug, we fetch the context object from the handle here, and if it's
+	 * valid (i.e. the bug has manifested) we null out the data field so the
+	 * rest of the code knows that the static data has been freed.
+	 */
+
+	MonoAppContext *ctx = (MonoAppContext *) mono_gchandle_get_target (data->gc_handle);
+
+	if (ctx)
+		ctx->data = NULL;
+
+	mono_free_static_data (data->static_data);
+	g_free (data);
+}
+
 void
 ves_icall_System_Runtime_Remoting_Contexts_Context_RegisterContext (MonoAppContext *ctx)
 {
@@ -2562,9 +2592,20 @@ ves_icall_System_Runtime_Remoting_Contexts_Context_RegisterContext (MonoAppConte
 	if (!contexts)
 		contexts = g_hash_table_new (NULL, NULL);
 
-	context_adjust_static_data (ctx);
+	if (!context_queue)
+		context_queue = mono_gc_reference_queue_new (free_context);
+
 	gpointer gch = GUINT_TO_POINTER (mono_gchandle_new_weakref (&ctx->obj, FALSE));
 	g_hash_table_insert (contexts, gch, gch);
+
+	ContextStaticData *data = g_new (ContextStaticData, 1);
+	data->static_data = NULL;
+	data->gc_handle = GPOINTER_TO_UINT (gch);
+
+	ctx->data = data;
+	context_adjust_static_data (ctx);
+
+	mono_gc_reference_queue_add (context_queue, &ctx->obj, data);
 
 	mono_threads_unlock ();
 
@@ -2574,14 +2615,6 @@ ves_icall_System_Runtime_Remoting_Contexts_Context_RegisterContext (MonoAppConte
 void
 ves_icall_System_Runtime_Remoting_Contexts_Context_ReleaseContext (MonoAppContext *ctx)
 {
-	/*
-	 * NOTE: Since finalizers are unreliable for the purposes of ensuring
-	 * cleanup in exceptional circumstances, we don't actually do any
-	 * cleanup work here. We instead do this when we iterate the `contexts`
-	 * hash table. The only purpose of this finalizer, at the moment, is to
-	 * notify the profiler.
-	 */
-
 	//g_print ("Releasing context %d in domain %d\n", ctx->context_id, ctx->domain_id);
 
 	mono_profiler_context_unloaded (ctx);
@@ -3715,7 +3748,7 @@ context_adjust_static_data (MonoAppContext *ctx)
 {
 	if (context_static_info.offset || context_static_info.idx > 0) {
 		guint32 offset = MAKE_SPECIAL_STATIC_OFFSET (context_static_info.idx, context_static_info.offset, 0);
-		mono_alloc_static_data (&ctx->static_data, offset, FALSE);
+		mono_alloc_static_data (&ctx->data->static_data, offset, FALSE);
 	}
 }
 
@@ -3746,7 +3779,7 @@ alloc_context_static_data_helper (gpointer key, gpointer value, gpointer user)
 	}
 
 	guint32 offset = GPOINTER_TO_UINT (user);
-	mono_alloc_static_data (&ctx->static_data, offset, FALSE);
+	mono_alloc_static_data (&ctx->data->static_data, offset, FALSE);
 
 	return FALSE; // Don't remove it
 }
@@ -3910,10 +3943,10 @@ free_context_static_data_helper (gpointer key, gpointer value, gpointer user)
 	int off = ACCESS_SPECIAL_STATIC_OFFSET (data->offset, offset);
 	char *ptr;
 
-	if (!ctx->static_data || !ctx->static_data [idx])
+	if (!ctx->data || !ctx->data->static_data || !ctx->data->static_data [idx])
 		return FALSE; // Don't remove this key/value pair
 
-	ptr = ((char*) ctx->static_data [idx]) + off;
+	ptr = ((char*) ctx->data->static_data [idx]) + off;
 	mono_gc_bzero_atomic (ptr, data->size);
 
 	return FALSE; // Don't remove this key/value pair
