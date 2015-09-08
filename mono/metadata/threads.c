@@ -2573,10 +2573,10 @@ free_context (void *user_data)
 	 * rest of the code knows that the static data has been freed.
 	 */
 
-	MonoAppContext *ctx = (MonoAppContext *) mono_gchandle_get_target (data->gc_handle);
-
-	if (ctx)
-		ctx->data = NULL;
+//	MonoAppContext *ctx = (MonoAppContext *) mono_gchandle_get_target (data->gc_handle);
+//
+//	if (ctx)
+//		ctx->data = NULL;
 
 	mono_free_static_data (data->static_data);
 	g_free (data);
@@ -3943,7 +3943,7 @@ free_context_static_data_helper (gpointer key, gpointer value, gpointer user)
 	int off = ACCESS_SPECIAL_STATIC_OFFSET (data->offset, offset);
 	char *ptr;
 
-	if (!ctx->data || !ctx->data->static_data || !ctx->data->static_data [idx])
+	if (/*!ctx->data ||*/ !ctx->data->static_data || !ctx->data->static_data [idx])
 		return FALSE; // Don't remove this key/value pair
 
 	ptr = ((char*) ctx->data->static_data [idx]) + off;
