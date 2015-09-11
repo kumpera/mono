@@ -2325,6 +2325,9 @@ unload_thread_main (void *arg)
 	/* remove from the handle table the items related to this domain */
 	mono_gchandle_free_domain (domain);
 
+	/* Finish the refqueue from this domain */
+	mono_reference_queue_clear_for_domain (domain);
+
 	mono_domain_free (domain, FALSE);
 
 	mono_gc_collect (mono_gc_max_generation ());

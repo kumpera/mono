@@ -71,10 +71,10 @@ static MonoInternalThread *gc_thread;
 static void object_register_finalizer (MonoObject *obj, void (*callback)(void *, void*));
 
 static void mono_gchandle_set_target (guint32 gchandle, MonoObject *obj);
+static void mono_gchandle_cleanup (void);
 
 static void reference_queue_proccess_all (void);
 static void mono_reference_queue_cleanup (void);
-static void reference_queue_clear_for_domain (MonoDomain *domain);
 static HANDLE pending_done_event;
 
 static guint32
@@ -988,6 +988,30 @@ mono_gchandle_free_domain (MonoDomain *domain)
 
 }
 
+static void
+mono_gchandle_cleanup (void)
+{
+	guint type;
+	for (type = 0; type < 3; ++type) {
+		guint slot;
+		HandleData *handles = &gc_handles [type];
+		lock_handles (handles);
+		for (slot = 0; slot < handles->size; ++slot) {
+			if (!(handles->bitmap [slot / 32] & (1 << (slot % 32))))
+				continue;
+			handles->bitmap [slot / 32] &= ~(1 << (slot % 32));
+			if (type <= HANDLE_WEAK_TRACK) {
+				if (handles->entries [slot])
+					mono_gc_weak_link_remove (&handles->entries [slot], handles->type == HANDLE_WEAK_TRACK);
+			} else {
+				handles->entries [slot] = NULL;
+			}
+		}
+		unlock_handles (handles);
+	}
+
+}
+
 MonoBoolean
 mono_gc_GCHandle_CheckCurrentDomain (guint32 gchandle)
 {
@@ -1076,9 +1100,6 @@ finalize_domain_objects (DomainFinalizationReq *req)
 		}
 	}
 #endif
-
-	/* cleanup the reference queue */
-	reference_queue_clear_for_domain (domain);
 	
 	/* printf ("DONE.\n"); */
 	SetEvent (req->done_event);
@@ -1283,6 +1304,7 @@ mono_gc_cleanup (void)
 		mono_gc_base_cleanup ();
 	}
 
+	mono_gchandle_cleanup ();
 	mono_reference_queue_cleanup ();
 
 	mono_mutex_destroy (&allocator_section);
@@ -1429,8 +1451,8 @@ mono_reference_queue_cleanup (void)
 	reference_queue_proccess_all ();
 }
 
-static void
-reference_queue_clear_for_domain (MonoDomain *domain)
+void
+mono_reference_queue_clear_for_domain (MonoDomain *domain)
 {
 	MonoReferenceQueue *queue = ref_queues;
 	for (; queue; queue = queue->next) {

@@ -348,6 +348,8 @@ struct _MonoReferenceQueue {
 	gboolean should_be_deleted;
 };
 
+void mono_reference_queue_clear_for_domain (MonoDomain *domain);
+
 enum {
 	MONO_GC_FINALIZER_EXTENSION_VERSION = 1,
 };
