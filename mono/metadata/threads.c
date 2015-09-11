@@ -2573,8 +2573,9 @@ free_context (void *user_data)
 	 * rest of the code knows that the static data has been freed.
 	 */
 
-//	MonoAppContext *ctx = (MonoAppContext *) mono_gchandle_get_target (data->gc_handle);
-//
+	MonoAppContext *ctx = (MonoAppContext *) mono_gchandle_get_target (data->gc_handle);
+	if (ctx)
+		g_error ("GC HANDLE %d should be dead", data->gc_handle);
 //	if (ctx)
 //		ctx->data = NULL;
 
