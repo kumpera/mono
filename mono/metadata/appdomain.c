@@ -2260,6 +2260,79 @@ deregister_reflection_info_roots (MonoDomain *domain)
 	mono_domain_assemblies_unlock (domain);
 }
 
+/*
+AppDomain unloading sequence:
+
+1) Thread request unload
+	AppDomain Unload hooks are called, they can throw exceptions and abort the unload.
+
+2) Unload request succeeded.
+	Domain now in the MONO_APPDOMAIN_UNLOADING state.
+	Fork a thread and begin graceful shutdown of the domain.
+
+3) Stop accepting new stuff done against the domain.
+	On this stage, we gracefully start refusing new things to happen on this domain.
+	System.Environment::HasShutdownStarted returns ture
+	System.AppDomain::IsFinalizingForUnload () returns true
+	Threadpool stops accepting new jobs.
+	Threadpool lazily stops scheduling new jobs. (The lazy part is about not hurting live performance)
+	Object finalizers cannot be registered.
+	FIXME what about new GC handles and reference queues?
+	FIXME what about new threads?
+
+4) Abort all threads with code in the appdomain
+	This doesn't mean just running, but if there are any frames in the stack that belong to the target domain.
+	FIXME this is supposed to have take a timeout, we simply pass -1
+
+5) Drain the threadpool
+	This ensure no cpu and IO jobs are left.
+	FIXME this is supposed to have take a timeout, we simply pass -1
+
+6) Run all pending object finalizers
+	Due to (3) no further finalizers for this domain will pop up.
+	FIXME this is supposed to have take a timeout, we simply pass -1
+	LAMESPEC This currently clears the ref queue (which is the wrong place)
+
+7) Flush remsets
+	Zero managed static fields and do a minor GC.
+	This was to flush store buffers.
+	FIXME this can go away, or be turned into an explicit step.
+
+8) Cleanup vtables and deregister gc roots
+	Clear the vtable caches in MonoClass
+	Free managed static fields
+	deregister GC roots for SRE classes.
+
+9) Free assembly binding info (mono_assembly_cleanup_domain_bindings)
+	XXXX This doesn't touch managed memory, it should go together with the native cleanup part
+
+10) Clean cross-domain references
+	We have a VERY limited set of cross-domain references that are allowed. All should be cleared here.
+	Clear cached cultures (mono_threads_clear_cached_culture)
+
+11) Mark the domain as unloaded
+	Domain now in the MONO_APPDOMAIN_UNLOADED state.
+	At this point managed code can no longer witness this domain.
+
+12) Perform native visible cleanup
+	Zero GC handles (boehm only)
+	FIXME this should include flushing the ref queue
+
+13) Cleanup remaning managed references in the domain 
+	hash tables
+	gc handles
+	gc roots
+	etc
+
+14) Perform GC cleanup (mono_gc_clear_domain)
+	This frees all objects that belong to the domain
+
+15) Free the native structures
+	g_free
+	g_*_free and whatnots
+
+This is complex and not well structured. Here's my take on a cleaned up sequence:
+*/
 static guint32 WINAPI
 unload_thread_main (void *arg)
 {
