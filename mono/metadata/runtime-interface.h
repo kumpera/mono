@@ -58,8 +58,9 @@ NOTES:
 
 
 /*
+Tunnables for local handles
 
-FIXME
+TODO:
 	Move this to a tunables file so it's not lost here
 */
 #define MIN_LOCAL_HANDLES_FRAME_SIZE 8
@@ -85,8 +86,8 @@ TODO:
 #define LOCAL_HANDLE_POP_FRAME()	\
 	mono_local_handles_frame_pop (&__frame);
 
-void* mono_thread_info_push_stack_mark (void*, void*);
-void mono_thread_info_pop_stack_mark (void*, void*);
+void* mono_thread_info_push_stack_mark (MonoThreadInfo *, void *);
+void mono_thread_info_pop_stack_mark (MonoThreadInfo *, void *);
 
 typedef struct {
 	void *base;
@@ -96,9 +97,37 @@ typedef struct {
 void mono_local_handles_frame_alloc (MonoLocalHandlesFrame *, int);
 void mono_local_handles_frame_pop (MonoLocalHandlesFrame *);
 
-typedef void * MonoLocalHandle;
+/*
+Local handle creation and manipulation code.
+
+Handles are meant to be opaque and never directly accessed by user code.
+
+This is to encourage never exposing managed pointers on the stack for
+more than temporary expersions.
+
+Handles require a frame to be available so you must always use it in
+conjuction with the frame macros from above.
+
+TODO:
+	Add checked build asserts
+
+NOTES:
+
+*/
+typedef struct {
+	void *__CANT_TOUCH_THIS__;
+} MonoLocalHandle;
 
 #define LOCAL_HANDLE_NEW(MP) (mono_local_handles_alloc_handle(&__frame, (MP)))
+
+#define HANDLE_GET(LH) ((LH).__CANT_TOUCH_THIS__)
+#define HANDLE_SET_MP(TYPE, LH, FIELD, VALUE) do { \
+	MONO_OBJECT_SETREF (((TYPE*)HANDLE_GET((LH))), FIELD, (VALUE));	\
+} while (0)
+
+#define HANDLE_SET_VAL(TYPE, LH, FIELD, VALUE) do { \
+	((TYPE*)HANDLE_GET((LH)))->FIELD = (VALUE);	\
+} while (0)
 
 MonoLocalHandle mono_local_handles_alloc_handle (MonoLocalHandlesFrame *, void*);
 

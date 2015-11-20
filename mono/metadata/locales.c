@@ -295,20 +295,20 @@ construct_culture (MonoCultureInfo *this_obj, const CultureInfoEntry *ci)
 }
 
 static MonoBoolean
-construct_region (MonoRegionInfo *this_obj, const RegionInfoEntry *ri)
+construct_region (MonoLocalHandle this_obj, const RegionInfoEntry *ri)
 {
 	MonoDomain *domain = mono_domain_get ();
 
-	this_obj->geo_id = ri->geo_id;
-	MONO_OBJECT_SETREF (this_obj, iso2name, mono_string_new (domain, idx2string (ri->iso2name)));
-	MONO_OBJECT_SETREF (this_obj, iso3name, mono_string_new (domain, idx2string (ri->iso3name)));
-	MONO_OBJECT_SETREF (this_obj, win3name, mono_string_new (domain, idx2string (ri->win3name)));
-	MONO_OBJECT_SETREF (this_obj, english_name, mono_string_new (domain, idx2string (ri->english_name)));
-	MONO_OBJECT_SETREF (this_obj, native_name, mono_string_new (domain, idx2string (ri->native_name)));
-	MONO_OBJECT_SETREF (this_obj, currency_symbol, mono_string_new (domain, idx2string (ri->currency_symbol)));
-	MONO_OBJECT_SETREF (this_obj, iso_currency_symbol, mono_string_new (domain, idx2string (ri->iso_currency_symbol)));
-	MONO_OBJECT_SETREF (this_obj, currency_english_name, mono_string_new (domain, idx2string (ri->currency_english_name)));
-	MONO_OBJECT_SETREF (this_obj, currency_native_name, mono_string_new (domain, idx2string (ri->currency_native_name)));
+	HANDLE_SET_VAL (MonoRegionInfo, this_obj, geo_id, ri->geo_id);
+	HANDLE_SET_MP (MonoRegionInfo, this_obj, iso2name, mono_string_new (domain, idx2string (ri->iso2name)));
+	HANDLE_SET_MP (MonoRegionInfo, this_obj, iso3name, mono_string_new (domain, idx2string (ri->iso3name)));
+	HANDLE_SET_MP (MonoRegionInfo, this_obj, win3name, mono_string_new (domain, idx2string (ri->win3name)));
+	HANDLE_SET_MP (MonoRegionInfo, this_obj, english_name, mono_string_new (domain, idx2string (ri->english_name)));
+	HANDLE_SET_MP (MonoRegionInfo, this_obj, native_name, mono_string_new (domain, idx2string (ri->native_name)));
+	HANDLE_SET_MP (MonoRegionInfo, this_obj, currency_symbol, mono_string_new (domain, idx2string (ri->currency_symbol)));
+	HANDLE_SET_MP (MonoRegionInfo, this_obj, iso_currency_symbol, mono_string_new (domain, idx2string (ri->iso_currency_symbol)));
+	HANDLE_SET_MP (MonoRegionInfo, this_obj, currency_english_name, mono_string_new (domain, idx2string (ri->currency_english_name)));
+	HANDLE_SET_MP (MonoRegionInfo, this_obj, currency_native_name, mono_string_new (domain, idx2string (ri->currency_native_name)));
 	
 	return TRUE;
 }
@@ -561,24 +561,29 @@ done:
 }
 
 MonoBoolean
-ves_icall_System_Globalization_RegionInfo_construct_internal_region_from_name (MonoRegionInfo *this_obj,
-		MonoString *name)
+ves_icall_System_Globalization_RegionInfo_construct_internal_region_from_name (MonoRegionInfo *this_obj_raw,
+		MonoString *name_raw)
 {
+ 	ICALL_ENTRY();
+	LOCAL_HANDLE_PUSH_FRAME ();
+	MonoLocalHandle this_obj = LOCAL_HANDLE_NEW (this_obj_raw);
+	MonoLocalHandle name = LOCAL_HANDLE_NEW (name_raw);
+
+	gboolean res = FALSE;
 	const RegionInfoNameEntry *ne;
 	char *n;
 	
-	n = mono_string_to_utf8 (name);
+	n = mono_string_to_utf8 (HANDLE_GET (name)); //BAD
 	ne = mono_binary_search (n, region_name_entries, NUM_REGION_ENTRIES,
 		sizeof (RegionInfoNameEntry), region_name_locator);
 
-	if (ne == NULL) {
-		/*g_print ("ne (%s) is null\n", n);*/
-		g_free (n);
-		return FALSE;
-	}
 	g_free (n);
+	if (ne != NULL)
+		res = construct_region (this_obj, &region_entries [ne->region_entry_index]);
 
-	return construct_region (this_obj, &region_entries [ne->region_entry_index]);
+	LOCAL_HANDLE_POP_FRAME ();
+	ICALL_EXIT ();
+	return res;
 }
 
 MonoArray*
