@@ -24,6 +24,7 @@
 #include <mono/metadata/locales.h>
 #include <mono/metadata/culture-info.h>
 #include <mono/metadata/culture-info-tables.h>
+#include <mono/metadata/runtime-interface.h>
 #include <mono/utils/bsearch.h>
 
 #ifndef DISABLE_NORMALIZATION
@@ -537,16 +538,26 @@ ves_icall_System_Globalization_CultureInfo_construct_internal_locale_from_specif
 }
 */
 MonoBoolean
-ves_icall_System_Globalization_RegionInfo_construct_internal_region_from_lcid (MonoRegionInfo *this_obj,
+ves_icall_System_Globalization_RegionInfo_construct_internal_region_from_lcid (MonoRegionInfo *this_obj_raw,
 		gint lcid)
 {
+ 	ICALL_ENTRY();
+	LOCAL_HANDLE_PUSH_FRAME ();
+	MonoLocalHandle this_obj = LOCAL_HANDLE_NEW (this_obj_raw);
+
+	gboolean res = FALSE;
 	const RegionInfoEntry *ri;
 	
 	ri = region_info_entry_from_lcid (lcid);
 	if(ri == NULL)
-		return FALSE;
+		goto done;
 
-	return construct_region (this_obj, ri);
+	res = construct_region (this_obj, ri);
+
+done:
+	LOCAL_HANDLE_POP_FRAME ();
+	ICALL_EXIT ();
+	return res;
 }
 
 MonoBoolean
