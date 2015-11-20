@@ -4926,6 +4926,15 @@ mono_array_new (MonoDomain *domain, MonoClass *eclass, uintptr_t n)
 	return mono_array_new_specific (mono_class_vtable_full (domain, ac, TRUE), n);
 }
 
+MonoLocalHandle
+mono_array_new_handle (MonoDomain *domain, MonoClass *eclass, uintptr_t n)
+{
+	//this is the sort of function that actually doesn't need one, but this is an example
+	LOCAL_HANDLE_PUSH_FRAME ();
+	MonoLocalHandle arr = LOCAL_HANDLE_NEW (mono_array_new (domain, eclass, n));
+
+	return LOCAL_HANDLE_POP_FRAME_RET (arr);
+}
 /**
  * mono_array_new_specific:
  * @vtable: a vtable in the appropriate domain for an initialized class

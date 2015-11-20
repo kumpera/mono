@@ -66,6 +66,18 @@ TODO:
 #define MIN_LOCAL_HANDLES_FRAME_SIZE 8
 
 /*
+local handle structs
+*/
+typedef struct {
+	void *base;
+	int index, size;
+} MonoLocalHandlesFrame;
+
+typedef struct {
+	void *__CANT_TOUCH_THIS__;
+} MonoLocalHandle;
+
+/*
 Local handles frame setup teardown.
 
 Those should be used in two circustances:
@@ -86,17 +98,14 @@ TODO:
 #define LOCAL_HANDLE_POP_FRAME()	\
 	mono_local_handles_frame_pop (&__frame);
 
+#define LOCAL_HANDLE_POP_FRAME_RET(LH) (mono_local_handles_frame_pop_ret (&__frame, LH));
+
 void* mono_thread_info_push_stack_mark (MonoThreadInfo *, void *);
 void mono_thread_info_pop_stack_mark (MonoThreadInfo *, void *);
 
-typedef struct {
-	void *base;
-	int index, size;
-} MonoLocalHandlesFrame;
-
 void mono_local_handles_frame_alloc (MonoLocalHandlesFrame *, int);
 void mono_local_handles_frame_pop (MonoLocalHandlesFrame *);
-
+MonoLocalHandle mono_local_handles_frame_pop_ret (MonoLocalHandlesFrame *, MonoLocalHandle);
 /*
 Local handle creation and manipulation code.
 
@@ -114,9 +123,6 @@ TODO:
 NOTES:
 
 */
-typedef struct {
-	void *__CANT_TOUCH_THIS__;
-} MonoLocalHandle;
 
 #define LOCAL_HANDLE_NEW(MP) (mono_local_handles_alloc_handle(&__frame, (MP)))
 
@@ -124,10 +130,17 @@ typedef struct {
 #define HANDLE_SET_MP(TYPE, LH, FIELD, VALUE) do { \
 	MONO_OBJECT_SETREF (((TYPE*)HANDLE_GET((LH))), FIELD, (VALUE));	\
 } while (0)
+#define HANDLE_SET_LH(TYPE, LH, FIELD, VALUE) do { \
+	MONO_OBJECT_SETREF (((TYPE*)HANDLE_GET((LH))), FIELD, HANDLE_GET(VALUE));	\
+} while (0)
 
 #define HANDLE_SET_VAL(TYPE, LH, FIELD, VALUE) do { \
 	((TYPE*)HANDLE_GET((LH)))->FIELD = (VALUE);	\
 } while (0)
+
+//STR helpers
+#define STR_HANDLE_GET(LH) ((MonoString*)(LH).__CANT_TOUCH_THIS__)
+
 
 MonoLocalHandle mono_local_handles_alloc_handle (MonoLocalHandlesFrame *, void*);
 

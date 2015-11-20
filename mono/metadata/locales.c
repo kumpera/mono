@@ -649,20 +649,27 @@ int ves_icall_System_Globalization_CompareInfo_internal_compare (MonoCompareInfo
 					 options));
 }
 
-void ves_icall_System_Globalization_CompareInfo_assign_sortkey (MonoCompareInfo *this_obj, MonoSortKey *key, MonoString *source, gint32 options)
+void ves_icall_System_Globalization_CompareInfo_assign_sortkey (MonoCompareInfo *this_obj_raw, MonoSortKey *key_raw, MonoString *source_raw, gint32 options)
 {
-	MonoArray *arr;
+	ICALL_ENTRY();
+	LOCAL_HANDLE_PUSH_FRAME ();
+	MonoLocalHandle key = LOCAL_HANDLE_NEW (key_raw);
+	MonoLocalHandle source = LOCAL_HANDLE_NEW (source_raw);
+
+	MonoLocalHandle arr;
 	gint32 keylen, i;
 
-	keylen=mono_string_length (source);
+	keylen = mono_string_length (STR_HANDLE_GET (source));
 	
-	arr=mono_array_new (mono_domain_get (), mono_get_byte_class (),
-			    keylen);
-	for(i=0; i<keylen; i++) {
-		mono_array_set (arr, guint8, i, mono_string_chars (source)[i]);
+	arr = mono_array_new_handle (mono_domain_get (), mono_get_byte_class (), keylen);
+	for(i = 0; i< keylen; i++) {
+		mono_array_set (HANDLE_GET (arr), guint8, i, mono_string_chars (STR_HANDLE_GET (source))[i]);
 	}
 	
-	MONO_OBJECT_SETREF (key, key, arr);
+	HANDLE_SET_LH (MonoSortKey, key, key, arr);
+
+	LOCAL_HANDLE_POP_FRAME ();
+	ICALL_EXIT ();
 }
 
 int ves_icall_System_Globalization_CompareInfo_internal_index (MonoCompareInfo *this_obj, MonoString *source, gint32 sindex, gint32 count, MonoString *value, gint32 options, MonoBoolean first)
