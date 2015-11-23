@@ -8,6 +8,54 @@
 /*
 The follow macros help with functions that either are called by managed code or
 make calls to non-runtime functions.
+
+Skeleton for an icall that returns no value:
+
+void
+do_something (MonoObject *this_raw, int flags)
+{
+	//Order matters
+	//XXX it would be nice to colapse those two calls
+	ICALL_ENTRY ();
+	LOCAL_HANDLE_PUSH_FRAME ();
+
+	//The convetion is that HANDLE_DCL wraps a variable with equal name with a _raw suffix. 
+	HANDLE_DCL (this_obj);
+
+	...
+	//All icalls MUST have a single exit
+	//XXX colapse those two calls into a single one
+	//XXX force all epilogues to have a done label if we can avoid the warning
+done:
+	LOCAL_HANDLE_POP_FRAME ();
+	ICALL_EXIT ();
+}
+
+Skeleton for an icall that returns a reference value
+
+MonoObject*
+do_something (void)
+{
+	ICALL_ENTRY ();
+	LOCAL_HANDLE_PUSH_FRAME ();
+	MonoLocalHandle ret;
+
+	ret = mono_array_new_handle (...);
+
+	//XXX this is pretty ugly, it would be nice to wrap this into something nicer
+done:
+	MonoObject *ret_raw = LOCAL_HANDLE_POP_FRAME_RET_MP ();
+	ICALL_EXIT ();
+	return ret_raw;
+}
+
+
+TODO
+
+- Skeleton for non-icall functions
+- Guidelines on how to handle'ize the existing API
+- Skeleton + Guideless for fast (frame-less) icalls.
+
 */
 
 /*
@@ -106,6 +154,10 @@ void mono_thread_info_pop_stack_mark (MonoThreadInfo *, void *);
 void mono_local_handles_frame_alloc (MonoLocalHandlesFrame *, int);
 void mono_local_handles_frame_pop (MonoLocalHandlesFrame *);
 MonoLocalHandle mono_local_handles_frame_pop_ret (MonoLocalHandlesFrame *, MonoLocalHandle);
+
+MonoLocalHandle mono_local_handles_alloc_handle (MonoLocalHandlesFrame *, void*);
+
+
 /*
 Local handle creation and manipulation code.
 
@@ -125,6 +177,7 @@ NOTES:
 */
 
 #define LOCAL_HANDLE_NEW(MP) (mono_local_handles_alloc_handle(&__frame, (MP)))
+#define HANDLE_DCL(LH) MonoLocalHandle LH = mono_local_handles_alloc_handle(&__frame, LH ##_raw)
 
 #define HANDLE_GET(LH) ((LH).__CANT_TOUCH_THIS__)
 #define HANDLE_SET_MP(TYPE, LH, FIELD, VALUE) do { \
@@ -138,11 +191,8 @@ NOTES:
 	((TYPE*)HANDLE_GET((LH)))->FIELD = (VALUE);	\
 } while (0)
 
-//STR helpers
+//MonooString handle helpers
 #define STR_HANDLE_GET(LH) ((MonoString*)(LH).__CANT_TOUCH_THIS__)
-
-
-MonoLocalHandle mono_local_handles_alloc_handle (MonoLocalHandlesFrame *, void*);
 
 #endif
 

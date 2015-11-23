@@ -537,13 +537,15 @@ ves_icall_System_Globalization_CultureInfo_construct_internal_locale_from_specif
 	return ret;
 }
 */
+
+
 MonoBoolean
 ves_icall_System_Globalization_RegionInfo_construct_internal_region_from_lcid (MonoRegionInfo *this_obj_raw,
 		gint lcid)
 {
  	ICALL_ENTRY();
 	LOCAL_HANDLE_PUSH_FRAME ();
-	MonoLocalHandle this_obj = LOCAL_HANDLE_NEW (this_obj_raw);
+	HANDLE_DCL (this_obj);
 
 	gboolean res = FALSE;
 	const RegionInfoEntry *ri;
@@ -566,8 +568,8 @@ ves_icall_System_Globalization_RegionInfo_construct_internal_region_from_name (M
 {
  	ICALL_ENTRY();
 	LOCAL_HANDLE_PUSH_FRAME ();
-	MonoLocalHandle this_obj = LOCAL_HANDLE_NEW (this_obj_raw);
-	MonoLocalHandle name = LOCAL_HANDLE_NEW (name_raw);
+	HANDLE_DCL (this_obj);
+	HANDLE_DCL (name);
 
 	gboolean res = FALSE;
 	const RegionInfoNameEntry *ne;
@@ -653,8 +655,8 @@ void ves_icall_System_Globalization_CompareInfo_assign_sortkey (MonoCompareInfo 
 {
 	ICALL_ENTRY();
 	LOCAL_HANDLE_PUSH_FRAME ();
-	MonoLocalHandle key = LOCAL_HANDLE_NEW (key_raw);
-	MonoLocalHandle source = LOCAL_HANDLE_NEW (source_raw);
+	HANDLE_DCL (key);
+	HANDLE_DCL (source);
 
 	MonoLocalHandle arr;
 	gint32 keylen, i;
