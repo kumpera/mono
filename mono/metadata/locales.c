@@ -27,6 +27,10 @@
 #include <mono/metadata/runtime-interface.h>
 #include <mono/utils/bsearch.h>
 
+DEF_HANDLE_TYPE (MonoRegionInfo);
+DEF_HANDLE_TYPE (MonoSortKey);
+
+
 #ifndef DISABLE_NORMALIZATION
 #include <mono/metadata/normalization-tables.h>
 #endif
@@ -295,20 +299,20 @@ construct_culture (MonoCultureInfo *this_obj, const CultureInfoEntry *ci)
 }
 
 static MonoBoolean
-construct_region (MonoLocalHandle this_obj, const RegionInfoEntry *ri)
+construct_region (MonoRegionInfoHandle this_obj, const RegionInfoEntry *ri)
 {
 	MonoDomain *domain = mono_domain_get ();
 
-	HANDLE_SET_VAL (MonoRegionInfo, this_obj, geo_id, ri->geo_id);
-	HANDLE_SET_MP (MonoRegionInfo, this_obj, iso2name, mono_string_new (domain, idx2string (ri->iso2name)));
-	HANDLE_SET_MP (MonoRegionInfo, this_obj, iso3name, mono_string_new (domain, idx2string (ri->iso3name)));
-	HANDLE_SET_MP (MonoRegionInfo, this_obj, win3name, mono_string_new (domain, idx2string (ri->win3name)));
-	HANDLE_SET_MP (MonoRegionInfo, this_obj, english_name, mono_string_new (domain, idx2string (ri->english_name)));
-	HANDLE_SET_MP (MonoRegionInfo, this_obj, native_name, mono_string_new (domain, idx2string (ri->native_name)));
-	HANDLE_SET_MP (MonoRegionInfo, this_obj, currency_symbol, mono_string_new (domain, idx2string (ri->currency_symbol)));
-	HANDLE_SET_MP (MonoRegionInfo, this_obj, iso_currency_symbol, mono_string_new (domain, idx2string (ri->iso_currency_symbol)));
-	HANDLE_SET_MP (MonoRegionInfo, this_obj, currency_english_name, mono_string_new (domain, idx2string (ri->currency_english_name)));
-	HANDLE_SET_MP (MonoRegionInfo, this_obj, currency_native_name, mono_string_new (domain, idx2string (ri->currency_native_name)));
+	HANDLE_SET_VAL (this_obj, geo_id, ri->geo_id);
+	HANDLE_SET_MP (this_obj, iso2name, mono_string_new (domain, idx2string (ri->iso2name)));
+	HANDLE_SET_MP (this_obj, iso3name, mono_string_new (domain, idx2string (ri->iso3name)));
+	HANDLE_SET_MP (this_obj, win3name, mono_string_new (domain, idx2string (ri->win3name)));
+	HANDLE_SET_MP (this_obj, english_name, mono_string_new (domain, idx2string (ri->english_name)));
+	HANDLE_SET_MP (this_obj, native_name, mono_string_new (domain, idx2string (ri->native_name)));
+	HANDLE_SET_MP (this_obj, currency_symbol, mono_string_new (domain, idx2string (ri->currency_symbol)));
+	HANDLE_SET_MP (this_obj, iso_currency_symbol, mono_string_new (domain, idx2string (ri->iso_currency_symbol)));
+	HANDLE_SET_MP (this_obj, currency_english_name, mono_string_new (domain, idx2string (ri->currency_english_name)));
+	HANDLE_SET_MP (this_obj, currency_native_name, mono_string_new (domain, idx2string (ri->currency_native_name)));
 	
 	return TRUE;
 }
@@ -545,7 +549,7 @@ ves_icall_System_Globalization_RegionInfo_construct_internal_region_from_lcid (M
 {
  	ICALL_ENTRY();
 	LOCAL_HANDLE_PUSH_FRAME ();
-	HANDLE_DCL (this_obj);
+	HANDLE_DCL_TYPED (MonoRegionInfo, this_obj);
 
 	gboolean res = FALSE;
 	const RegionInfoEntry *ri;
@@ -568,8 +572,8 @@ ves_icall_System_Globalization_RegionInfo_construct_internal_region_from_name (M
 {
  	ICALL_ENTRY();
 	LOCAL_HANDLE_PUSH_FRAME ();
-	HANDLE_DCL (this_obj);
-	HANDLE_DCL (name);
+	HANDLE_DCL_TYPED (MonoRegionInfo, this_obj);
+	HANDLE_DCL_TYPED (MonoString, name);
 
 	gboolean res = FALSE;
 	const RegionInfoNameEntry *ne;
@@ -655,20 +659,20 @@ void ves_icall_System_Globalization_CompareInfo_assign_sortkey (MonoCompareInfo 
 {
 	ICALL_ENTRY();
 	LOCAL_HANDLE_PUSH_FRAME ();
-	HANDLE_DCL (key);
-	HANDLE_DCL (source);
+	HANDLE_DCL_TYPED (MonoSortKey, key);
+	HANDLE_DCL_TYPED (MonoString, source);
 
-	MonoLocalHandle arr;
+	MonoArrayHandle arr;
 	gint32 keylen, i;
 
-	keylen = mono_string_length (STR_HANDLE_GET (source));
+	keylen = mono_string_length (HANDLE_GET (source));
 	
 	arr = mono_array_new_handle (mono_domain_get (), mono_get_byte_class (), keylen);
 	for(i = 0; i< keylen; i++) {
-		mono_array_set (HANDLE_GET (arr), guint8, i, mono_string_chars (STR_HANDLE_GET (source))[i]);
+		mono_array_set (HANDLE_GET (arr), guint8, i, mono_string_chars (HANDLE_GET (source))[i]);
 	}
 	
-	HANDLE_SET_LH (MonoSortKey, key, key, arr);
+	HANDLE_SET_LH (key, key, arr);
 
 	LOCAL_HANDLE_POP_FRAME ();
 	ICALL_EXIT ();

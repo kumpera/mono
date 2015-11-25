@@ -1644,7 +1644,7 @@ mono_error_set_pending_exception (MonoError *error);
 MonoArray *
 mono_glist_to_array (GList *list, MonoClass *eclass);
 
-MonoLocalHandle
+MonoArrayHandle
 mono_array_new_handle (MonoDomain *domain, MonoClass *eclass, uintptr_t n);
 
 #endif /* __MONO_OBJECT_INTERNALS_H__ */

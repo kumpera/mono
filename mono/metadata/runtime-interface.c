@@ -23,16 +23,21 @@ mono_local_handles_frame_pop (MonoLocalHandlesFrame *frame)
 {
 }
 
-MonoLocalHandle
-mono_local_handles_frame_pop_ret (MonoLocalHandlesFrame *frame, MonoLocalHandle handle)
+void*
+mono_local_handles_frame_pop_ret (MonoLocalHandlesFrame *frame, void *handle)
 {
 	return handle;
 }
 
 
-MonoLocalHandle
+void*
 mono_local_handles_alloc_handle (MonoLocalHandlesFrame *frame, void *mop)
 {
-	MonoLocalHandle res = { mop };
-	return res;
+	return mop;
+}
+
+void
+mono_local_handles_set_value (MonoHandleInternalValue *handle_addr, void *mop)
+{
+	*handle_addr = mop;
 }

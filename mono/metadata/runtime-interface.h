@@ -121,10 +121,6 @@ typedef struct {
 	int index, size;
 } MonoLocalHandlesFrame;
 
-typedef struct {
-	void *__CANT_TOUCH_THIS__;
-} MonoLocalHandle;
-
 /*
 Local handles frame setup teardown.
 
@@ -146,17 +142,20 @@ TODO:
 #define LOCAL_HANDLE_POP_FRAME()	\
 	mono_local_handles_frame_pop (&__frame);
 
-#define LOCAL_HANDLE_POP_FRAME_RET(LH) (mono_local_handles_frame_pop_ret (&__frame, LH));
+#define LOCAL_HANDLE_POP_FRAME_RET(LH) (LH).__CANT_TOUCH_THIS__ = mono_local_handles_frame_pop_ret (&__frame, (MonoHandleInternalValue)(LH).__CANT_TOUCH_THIS__), (LH)
 
 void* mono_thread_info_push_stack_mark (MonoThreadInfo *, void *);
 void mono_thread_info_pop_stack_mark (MonoThreadInfo *, void *);
 
 void mono_local_handles_frame_alloc (MonoLocalHandlesFrame *, int);
 void mono_local_handles_frame_pop (MonoLocalHandlesFrame *);
-MonoLocalHandle mono_local_handles_frame_pop_ret (MonoLocalHandlesFrame *, MonoLocalHandle);
 
-MonoLocalHandle mono_local_handles_alloc_handle (MonoLocalHandlesFrame *, void*);
+typedef void* MonoHandleInternalValue;
 
+void* mono_local_handles_frame_pop_ret (MonoLocalHandlesFrame *, MonoHandleInternalValue);
+MonoHandleInternalValue mono_local_handles_alloc_handle (MonoLocalHandlesFrame *, void*);
+
+void mono_local_handles_set_value (MonoHandleInternalValue *handle_addr, void *);
 
 /*
 Local handle creation and manipulation code.
@@ -176,23 +175,38 @@ NOTES:
 
 */
 
-#define LOCAL_HANDLE_NEW(MP) (mono_local_handles_alloc_handle(&__frame, (MP)))
-#define HANDLE_DCL(LH) MonoLocalHandle LH = mono_local_handles_alloc_handle(&__frame, LH ##_raw)
 
 #define HANDLE_GET(LH) ((LH).__CANT_TOUCH_THIS__)
-#define HANDLE_SET_MP(TYPE, LH, FIELD, VALUE) do { \
-	MONO_OBJECT_SETREF (((TYPE*)HANDLE_GET((LH))), FIELD, (VALUE));	\
+#define HANDLE_SETVAL_MP(LH, VALUE) do { mono_local_handles_set_value ((MonoHandleInternalValue*)&LH.__CANT_TOUCH_THIS__, VALUE); } while (0)
+
+#define HANDLE_SET_MP(LH, FIELD, VALUE) do { \
+	MONO_OBJECT_SETREF ((HANDLE_GET((LH))), FIELD, (VALUE));	\
 } while (0)
-#define HANDLE_SET_LH(TYPE, LH, FIELD, VALUE) do { \
-	MONO_OBJECT_SETREF (((TYPE*)HANDLE_GET((LH))), FIELD, HANDLE_GET(VALUE));	\
+#define HANDLE_SET_LH(LH, FIELD, VALUE) do { \
+	MONO_OBJECT_SETREF ((HANDLE_GET((LH))), FIELD, HANDLE_GET(VALUE));	\
 } while (0)
 
-#define HANDLE_SET_VAL(TYPE, LH, FIELD, VALUE) do { \
-	((TYPE*)HANDLE_GET((LH)))->FIELD = (VALUE);	\
+#define HANDLE_SET_VAL(LH, FIELD, VALUE) do { \
+	(HANDLE_GET((LH)))->FIELD = (VALUE);	\
 } while (0)
 
-//MonooString handle helpers
-#define STR_HANDLE_GET(LH) ((MonoString*)(LH).__CANT_TOUCH_THIS__)
+
+/*
+An experiment in typed handles.
+*/
+
+#define DEF_HANDLE_TYPE(TYPE) \
+typedef struct {	\
+	TYPE *__CANT_TOUCH_THIS__;	\
+} TYPE ## Handle;
+
+
+#define HANDLE_DCL_TYPED(TYPE, LH) TYPE ## Handle LH = { mono_local_handles_alloc_handle(&__frame, LH ##_raw) }
+#define HANDLE_NEW_TYPED(TYPE, NAME) TYPE ## Handle NAME = { mono_local_handles_alloc_handle(&__frame, NULL) }
+
+DEF_HANDLE_TYPE (MonoObject);
+DEF_HANDLE_TYPE (MonoString);
+DEF_HANDLE_TYPE (MonoArray);
 
 #endif
 
