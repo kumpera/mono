@@ -516,6 +516,7 @@ mono_delegate_free_ftnptr (MonoDelegate *delegate)
 		if (gchandle)
 			mono_gchandle_free (gchandle);
 
+		printf ("--FF %p\n", ji);
 		mono_runtime_free_method (mono_object_domain (delegate), method);
 	}
 }

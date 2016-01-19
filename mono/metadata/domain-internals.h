@@ -67,6 +67,7 @@ struct _MonoJitInfoTable
 {
 	MonoDomain	       *domain;
 	int			num_chunks;
+	MonoJitInfo *next_tombstone;
 	MonoJitInfoTableChunk  *chunks [MONO_ZERO_LEN_ARRAY];
 };
 
@@ -202,6 +203,7 @@ struct _MonoJitInfo {
 		gpointer tramp_info;
 	} d;
 	struct _MonoJitInfo *next_jit_code_hash;
+	struct _MonoJitInfo *next_puppy_to_free;
 	gpointer    code_start;
 	guint32     unwind_info;
 	int         code_size;

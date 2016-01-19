@@ -317,12 +317,12 @@ mono_thread_hazardous_free_or_queue (gpointer p, MonoHazardousFreeFunc free_func
 
 	/* First try to free a few entries in the delayed free
 	   table. */
-	for (i = 0; i < 3; ++i)
-		try_free_delayed_free_item (lock_free_context);
+	// for (i = 0; i < 3; ++i)
+	// 	try_free_delayed_free_item (lock_free_context);
 
 	/* Now see if the pointer we're freeing is hazardous.  If it
 	   isn't, free it.  Otherwise put it in the delay list. */
-	if (is_pointer_hazardous (p)) {
+	if (is_pointer_hazardous (p) || TRUE) {
 		DelayedFreeItem item = { p, free_func, free_func_might_lock };
 
 		++hazardous_pointer_count;
@@ -344,6 +344,9 @@ void
 mono_thread_hazardous_try_free_some (void)
 {
 	int i;
+	
+	g_usleep (1000 * 10);
+	printf ("****trying to free some\n");
 	for (i = 0; i < 10; ++i)
 		try_free_delayed_free_item (FALSE);
 }

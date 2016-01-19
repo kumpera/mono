@@ -94,6 +94,7 @@ mono_jit_info_table_new (MonoDomain *domain)
 
 	table->domain = domain;
 	table->num_chunks = 1;
+	table->next_tombstone = NULL;
 	table->chunks [0] = jit_info_table_new_chunk ();
 
 	return table;
@@ -105,15 +106,21 @@ mono_jit_info_table_free (MonoJitInfoTable *table)
 	int i;
 	int num_chunks = table->num_chunks;
 	MonoDomain *domain = table->domain;
+	MonoJitInfo *tombstone;
 
 	mono_domain_lock (domain);
 
+	printf ("DEALLOC JI TABLE %p\n", table);
 	table->domain->num_jit_info_tables--;
 	if (table->domain->num_jit_info_tables <= 1) {
 		GSList *list;
-
-		for (list = table->domain->jit_info_free_queue; list; list = list->next)
+		printf ("DELAY JIs:\n");
+		for (list = table->domain->jit_info_free_queue; list; list = list->next) {
+			printf ("%p ", list->data);
+			memset (list->data, 0, sizeof (MonoJitInfo));
 			g_free (list->data);
+		}
+		printf ("\n");
 
 		g_slist_free (table->domain->jit_info_free_queue);
 		table->domain->jit_info_free_queue = NULL;
@@ -122,6 +129,11 @@ mono_jit_info_table_free (MonoJitInfoTable *table)
 	/* At this point we assume that there are no other threads
 	   still accessing the table, so we don't have to worry about
 	   hazardous pointers. */
+	for (tombstone = table->next_tombstone; tombstone; ) {
+		MonoJitInfo *next = tombstone->next_puppy_to_free;
+		// g_free (next);
+		tombstone = next;
+	}	
 
 	for (i = 0; i < num_chunks; ++i) {
 		MonoJitInfoTableChunk *chunk = table->chunks [i];
@@ -131,13 +143,17 @@ mono_jit_info_table_free (MonoJitInfoTable *table)
 		if (--chunk->refcount > 0)
 			continue;
 
-		num_elements = chunk->num_elements;
-		for (j = 0; j < num_elements; ++j) {
-			MonoJitInfo *ji = chunk->data [j];
-
-			if (IS_JIT_INFO_TOMBSTONE (ji))
-				g_free (ji);
-		}
+		// printf ("freeing chunk %p:\n", chunk);
+		// num_elements = chunk->num_elements;
+		// for (j = 0; j < num_elements; ++j) {
+		// 	MonoJitInfo *ji = chunk->data [j];
+		// 
+		// 	printf ("%p [%s] ", ji, IS_JIT_INFO_TOMBSTONE (ji) ? "d" : "a");
+		// 	if (IS_JIT_INFO_TOMBSTONE (ji)) {
+		// 		g_free (ji);
+		// 	}
+		// }
+		// printf ("\n");
 
 		g_free (chunk);
 	}
@@ -384,6 +400,7 @@ jit_info_table_realloc (MonoJitInfoTable *old)
 	result = (MonoJitInfoTable *)g_malloc (MONO_SIZEOF_JIT_INFO_TABLE + sizeof (MonoJitInfoTableChunk*) * num_chunks);
 	result->domain = old->domain;
 	result->num_chunks = num_chunks;
+	result->next_tombstone = NULL;
 
 	for (i = 0; i < num_chunks; ++i)
 		result->chunks [i] = jit_info_table_new_chunk ();
@@ -456,6 +473,7 @@ jit_info_table_copy_and_split_chunk (MonoJitInfoTable *table, MonoJitInfoTableCh
 
 	new_table->domain = table->domain;
 	new_table->num_chunks = table->num_chunks + 1;
+	new_table->next_tombstone = NULL;
 
 	j = 0;
 	for (i = 0; i < table->num_chunks; ++i) {
@@ -504,6 +522,7 @@ jit_info_table_copy_and_purify_chunk (MonoJitInfoTable *table, MonoJitInfoTableC
 
 	new_table->domain = table->domain;
 	new_table->num_chunks = table->num_chunks;
+	new_table->next_tombstone = NULL;
 
 	j = 0;
 	for (i = 0; i < table->num_chunks; ++i) {
@@ -657,13 +676,15 @@ mono_jit_info_table_add (MonoDomain *domain, MonoJitInfo *ji)
 }
 
 static MonoJitInfo*
-mono_jit_info_make_tombstone (MonoJitInfo *ji)
+mono_jit_info_make_tombstone (MonoJitInfoTable *table, MonoJitInfo *ji)
 {
 	MonoJitInfo *tombstone = g_new0 (MonoJitInfo, 1);
 
 	tombstone->code_start = ji->code_start;
 	tombstone->code_size = ji->code_size;
 	tombstone->d.method = JIT_INFO_TOMBSTONE_MARKER;
+	tombstone->next_puppy_to_free = table->next_tombstone;
+	table->next_tombstone = tombstone;
 
 	return tombstone;
 }
@@ -675,10 +696,12 @@ static void
 mono_jit_info_free_or_queue (MonoDomain *domain, MonoJitInfo *ji)
 {
 	if (domain->num_jit_info_tables <= 1) {
+		printf ("meh %p\n", ji);
 		/* Can it actually happen that we only have one table
 		   but ji is still hazardous? */
 		mono_thread_hazardous_free_or_queue (ji, g_free, TRUE, FALSE);
 	} else {
+		printf ("bingo!! %p\n", ji);
 		domain->jit_info_free_queue = g_slist_prepend (domain->jit_info_free_queue, ji);
 	}
 }
@@ -716,7 +739,7 @@ jit_info_table_remove (MonoJitInfoTable *table, MonoJitInfo *ji)
  found:
 	g_assert (chunk->data [pos] == ji);
 
-	chunk->data [pos] = mono_jit_info_make_tombstone (ji);
+	chunk->data [pos] = mono_jit_info_make_tombstone (table, ji);
 
 	/* Debugging code, should be removed. */
 	//jit_info_table_check (table);
