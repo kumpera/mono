@@ -60,6 +60,7 @@ struct _MonoJitInfoTableChunk
 	int		       refcount;
 	volatile int           num_elements;
 	volatile gint8        *last_code_end;
+	MonoJitInfo *next_tombstone;
 	MonoJitInfo * volatile data [MONO_JIT_INFO_TABLE_CHUNK_SIZE];
 };
 
@@ -67,7 +68,6 @@ struct _MonoJitInfoTable
 {
 	MonoDomain	       *domain;
 	int			num_chunks;
-	MonoJitInfo *next_tombstone;
 	MonoJitInfoTableChunk  *chunks [MONO_ZERO_LEN_ARRAY];
 };
 
