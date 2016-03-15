@@ -1547,6 +1547,14 @@ switch_arch (char* argv[], const char* target_arch)
 }
 
 #endif
+
+static gboolean
+str_begins_with (const char *str1, const char *str2)
+{
+	int len = strlen (str2);
+	return strncmp (str1, str2, len) == 0;
+}
+
 /**
  * mono_main:
  * @argc: number of arguments in the argv array
@@ -1911,6 +1919,8 @@ mono_main (int argc, char* argv[])
 		} else if (strcmp (argv [i], "--nacl-null-checks-off") == 0){
 			nacl_null_checks_off = TRUE;
 #endif
+		} else if (str_begins_with (argv [i], "--record-compilation=")) {
+			aot_profiler_init_recording (g_strdup (argv [i] + strlen ("--record-compilation=")));
 		} else {
 			fprintf (stderr, "Unknown command line option: '%s'\n", argv [i]);
 			return 1;

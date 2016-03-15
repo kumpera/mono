@@ -415,6 +415,7 @@ common_sources = \
 	aot-compiler.h		\
 	aot-compiler.c		\
 	aot-runtime.c		\
+	aot-prof.c	\
 	graph.c			\
 	mini-codegen.c		\
 	mini-exceptions.c	\

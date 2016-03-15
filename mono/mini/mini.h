@@ -3189,4 +3189,8 @@ gboolean MONO_SIG_HANDLER_SIGNATURE (mono_chain_signal);
 #define ARCH_VARARG_ICALLS 0
 #endif
 
+void aot_profiler_init_recording (char *profiling_file);
+void aot_profiler_init_filtering (char *profiling_file);
+gboolean aot_profiler_filter_method (MonoMethod *method);
+
 #endif /* __MONO_MINI_H__ */

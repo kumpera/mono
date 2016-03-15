@@ -6852,6 +6852,8 @@ mono_aot_parse_options (const char *aot_options, MonoAotOptions *opts)
 			opts->llvm_only = TRUE;
 		} else if (str_begins_with (arg, "data-outfile=")) {
 			opts->data_outfile = g_strdup (arg + strlen ("data-outfile="));
+		} else if (str_begins_with (arg, "prof=")) {
+			aot_profiler_init_filtering (g_strdup (arg + strlen ("prof=")));
 		} else if (str_begins_with (arg, "help") || str_begins_with (arg, "?")) {
 			printf ("Supported options for --aot:\n");
 			printf ("    outfile=\n");
@@ -7151,6 +7153,9 @@ compile_method (MonoAotCompile *acfg, MonoMethod *method)
 	JitFlags flags;
 
 	if (acfg->aot_opts.metadata_only)
+		return;
+
+	if (!aot_profiler_filter_method (method))
 		return;
 
 	mono_acfg_lock (acfg);
