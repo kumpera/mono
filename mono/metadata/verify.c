@@ -5007,7 +5007,7 @@ mono_method_verify (MonoMethod *method, int level)
 			init_stack_with_value_at_exception_boundary (&ctx, ctx.code + clause->handler_offset, clause->data.catch_class);
 		}
 		else if (clause->flags == MONO_EXCEPTION_CLAUSE_FILTER) {
-			init_stack_with_value_at_exception_boundary (&ctx, ctx.code + clause->data.filter_offset, mono_defaults.exception_class);
+			init_stack_with_value_at_exception_boundary (&ctx, ctx.code + clause->data.filter_offset, mono_defaults.object_class);
 			init_stack_with_value_at_exception_boundary (&ctx, ctx.code + clause->handler_offset, mono_defaults.exception_class);	
 		}
 	}
