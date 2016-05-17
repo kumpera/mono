@@ -278,7 +278,7 @@ sgen_client_restart_world (int generation, GGTimingInfo *timing)
 
 	if (timing) {
 		timing [0].stw_time = usec;
-		timing [0].bridge_time = bridge_usec;
+		// timing [0].bridge_time = bridge_usec; //this data is BS
 	}
 }
 

@@ -20,6 +20,7 @@
 
 extern volatile gboolean bridge_processing_in_progress;
 extern MonoGCBridgeCallbacks bridge_callbacks;
+extern uint64_t bridge_stw_time, bridge_callback_time, bridge_processing_time;
 
 gboolean sgen_need_bridge_processing (void);
 void sgen_bridge_reset_data (void);

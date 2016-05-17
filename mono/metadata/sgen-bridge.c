@@ -26,6 +26,8 @@ static SgenBridgeProcessor bridge_processor;
 static SgenBridgeProcessor compare_to_bridge_processor;
 
 volatile gboolean bridge_processing_in_progress = FALSE;
+uint64_t bridge_stw_time, bridge_callback_time, bridge_processing_time;
+
 
 void
 mono_gc_wait_for_bridge_processing (void)
@@ -109,15 +111,21 @@ sgen_bridge_reset_data (void)
 void
 sgen_bridge_processing_stw_step (void)
 {
+	SGEN_TV_DECLARE (start_time);
+	SGEN_TV_DECLARE (end_time);
 	/*
 	 * bridge_processing_in_progress must be set with the world
 	 * stopped.  If not there would be race conditions.
 	 */
 	bridge_processing_in_progress = TRUE;
 
+	SGEN_TV_GETTIME (start_time);
 	bridge_processor.processing_stw_step ();
 	if (compare_bridge_processors ())
 		compare_to_bridge_processor.processing_stw_step ();
+	SGEN_TV_GETTIME (end_time);
+
+	bridge_stw_time = SGEN_TV_ELAPSED (start_time, end_time);
 }
 
 static gboolean
@@ -349,6 +357,12 @@ sgen_compare_bridge_processor_results (SgenBridgeProcessor *a, SgenBridgeProcess
 void
 sgen_bridge_processing_finish (int generation)
 {
+	//bridge_stw_time, bridge_callback_time, bridge_processing_time;
+	SGEN_TV_DECLARE (start_time);
+	SGEN_TV_DECLARE (end_time);
+	bridge_processing_time = 0;
+
+	SGEN_TV_GETTIME (start_time);
 	bridge_processor.processing_build_callback_data (generation);
 	if (compare_bridge_processors ())
 		compare_to_bridge_processor.processing_build_callback_data (generation);
@@ -358,8 +372,15 @@ sgen_bridge_processing_finish (int generation)
 		goto after_callback;
 	}
 
+	SGEN_TV_GETTIME (end_time);
+	bridge_processing_time = SGEN_TV_ELAPSED (start_time, end_time);
+	start_time = end_time;
+
 	bridge_callbacks.cross_references (bridge_processor.num_sccs, bridge_processor.api_sccs,
 			bridge_processor.num_xrefs, bridge_processor.api_xrefs);
+	SGEN_TV_GETTIME (end_time);
+	bridge_callback_time = SGEN_TV_ELAPSED (start_time, end_time);
+	start_time = end_time;
 
 	if (compare_bridge_processors ())
 		sgen_compare_bridge_processor_results (&bridge_processor, &compare_to_bridge_processor);
@@ -376,6 +397,8 @@ sgen_bridge_processing_finish (int generation)
 		compare_to_bridge_processor.processing_after_callback (generation);
 
 	bridge_processing_in_progress = FALSE;
+	SGEN_TV_GETTIME (end_time);
+	bridge_processing_time += SGEN_TV_ELAPSED (start_time, end_time);
 }
 
 MonoGCBridgeObjectKind
@@ -436,7 +459,7 @@ bridge_test_cross_reference (int num_sccs, MonoGCBridgeSCC **sccs, int num_xrefs
 	//	g_print ("--- SCC %d\n", i);
 		for (j = 0; j < sccs [i]->num_objs; ++j) {
 	//		g_print ("  %s\n", sgen_safe_name (sccs [i]->objs [j]));
-			if (i & 1) /*retain half of the bridged objects */
+	//		if (i & 1) /*retain half of the bridged objects */
 				sccs [i]->is_alive = TRUE;
 		}
 	}
