@@ -24,6 +24,11 @@
 #include "tabledefs.h"
 #include "utils/mono-logger-internals.h"
 
+/*
+Minimum fanout before we start caching it out.
+*/
+#define MIN_CACHE_FANOUT 400
+
 typedef struct {
 	int size;
 	int capacity;
@@ -199,7 +204,9 @@ Optimizations:
 typedef struct {
 	DynPtrArray other_colors;
 	DynPtrArray bridges;
-	int api_index    : 31;
+	int api_index    : 20;
+	unsigned incoming_colors : 8;
+	unsigned cached  : 1;
 	unsigned visited : 1;
 } ColorData;
 
@@ -220,13 +227,15 @@ typedef struct {
 
 
 
-static DynPtrArray scan_stack, loop_stack, registered_bridges;
+static DynPtrArray scan_stack, loop_stack, registered_bridges, large_colors;
 static DynPtrArray color_merge_array;
 
 static int ignored_objects;
 static int object_index;
 static int num_colors_with_bridges;
 static int xref_count;
+static int large_color_extra_refs;
+static int xref_reset_count;
 
 static size_t setup_time, tarjan_time, scc_setup_time, gather_xref_time, xref_setup_time, cleanup_time;
 static SgenBridgeProcessor *bridge_processor;
@@ -548,6 +557,11 @@ new_color (gboolean force_new)
 	cd = alloc_color_data ();
 	cd->api_index = -1;
 	dyn_array_ptr_set_all (&cd->other_colors, &color_merge_array);
+	for (i = 0; i < dyn_array_ptr_size (&color_merge_array); ++i) {
+		ColorData *points_to = (ColorData *)dyn_array_ptr_get (&color_merge_array, i);
+		points_to->incoming_colors = MIN (points_to->incoming_colors + 1, 0xFF);
+	}
+
 	/* if i >= 0, it means we prepared a given slot to receive the new color */
 	if (i >= 0)
 		merge_cache [i][0].color = cd;
@@ -776,6 +790,16 @@ create_scc (ScanData *data)
 		cd->visited = FALSE;
 	}
 	dyn_array_ptr_set_size (&color_merge_array, 0);
+
+	if (color_data && dyn_array_ptr_size (&color_data->bridges) == 0 &&
+		(color_data->incoming_colors * dyn_array_ptr_size (&color_data->other_colors)) > MIN_CACHE_FANOUT &&
+		!color_data->cached) {
+		color_data->cached = 1;
+		// printf ("found a good candidate %p cost %d\n",
+		// 	color_data,
+		// 	color_data->incoming_colors * dyn_array_ptr_size (&color_data->other_colors));
+		dyn_array_ptr_add (&large_colors, color_data);
+	}
 	found_bridge = FALSE;
 }
 
@@ -853,6 +877,7 @@ static void
 reset_data (void)
 {
 	dyn_array_ptr_set_size (&registered_bridges, 0);
+	dyn_array_ptr_set_size (&large_colors, 0);
 }
 
 static void
@@ -861,6 +886,7 @@ cleanup (void)
 	dyn_array_ptr_set_size (&scan_stack, 0);
 	dyn_array_ptr_set_size (&loop_stack, 0);
 	dyn_array_ptr_set_size (&registered_bridges, 0);
+	dyn_array_ptr_set_size (&large_colors, 0);
 	free_object_buckets ();
 	free_color_buckets ();
 	reset_cache ();
@@ -967,6 +993,36 @@ processing_stw_step (void)
 	clear_after_processing ();
 }
 
+static void
+gather_xrefs2 (ColorData *color)
+{
+	int i;
+	for (i = 0; i < dyn_array_ptr_size (&color->other_colors); ++i) {
+		ColorData *src = (ColorData *)dyn_array_ptr_get (&color->other_colors, i);
+		if (src->visited)
+			continue;
+		src->visited = TRUE;
+		if (dyn_array_ptr_size (&src->bridges))
+			dyn_array_ptr_add (&color_merge_array, src);
+		else
+			gather_xrefs2 (src);
+	}
+}
+
+static void
+reset_xrefs2 (ColorData *color)
+{
+	int i;
+	for (i = 0; i < dyn_array_ptr_size (&color->other_colors); ++i) {
+		ColorData *src = (ColorData *)dyn_array_ptr_get (&color->other_colors, i);
+		if (!src->visited)
+			continue;
+		src->visited = FALSE;
+		++xref_reset_count;
+		if (!dyn_array_ptr_size (&src->bridges))
+			reset_xrefs2 (src);
+	}
+}
 
 static void
 gather_xrefs (ColorData *color)
@@ -993,15 +1049,17 @@ reset_xrefs (ColorData *color)
 		if (!src->visited)
 			continue;
 		src->visited = FALSE;
+		++xref_reset_count;
 		if (!dyn_array_ptr_size (&src->bridges))
 			reset_xrefs (src);
 	}
 }
 
+
 static void
 processing_build_callback_data (int generation)
 {
-	int j, api_index;
+	int i, j, api_index;
 	MonoGCBridgeSCC **api_sccs;
 	MonoGCBridgeXRef *api_xrefs;
 	gint64 curtime;
@@ -1046,6 +1104,25 @@ processing_build_callback_data (int generation)
 	}
 
 	scc_setup_time = step_timer (&curtime);
+
+	for (i = 0; i < dyn_array_ptr_size (&large_colors); ++i) {
+		ColorData *cd = (ColorData*)dyn_array_ptr_get (&large_colors, i);
+		if (dyn_array_ptr_size (&cd->bridges) > 0) {
+			cd->cached = 0;
+			printf ("oops %p\n", cd);
+			continue;
+		}
+		dyn_array_ptr_set_size (&color_merge_array, 0);
+		gather_xrefs2 (cd);
+		reset_xrefs2 (cd);
+		cd->visited = FALSE;
+
+		int old_size = dyn_array_ptr_size (&cd->other_colors);
+		dyn_array_ptr_set_all (&cd->other_colors, &color_merge_array);
+		large_color_extra_refs += dyn_array_ptr_size (&cd->other_colors) - old_size;
+
+		printf ("processed %p had %d now has %d\n", cd, old_size, dyn_array_ptr_size (&cd->other_colors));
+	}
 
 	for (cur = root_color_bucket; cur; cur = cur->next) {
 		ColorData *cd;
@@ -1121,10 +1198,11 @@ processing_after_callback (int generation)
 
 	cleanup_time = step_timer (&curtime);
 
-	mono_trace (G_LOG_LEVEL_INFO, MONO_TRACE_GC, "GC_TAR_BRIDGE bridges %d objects %d colors %d ignored %d sccs %d xref %d cache %d/%d setup %.2fms tarjan %.2fms scc-setup %.2fms gather-xref %.2fms xref-setup %.2fms cleanup %.2fms",
+	mono_trace (G_LOG_LEVEL_INFO, MONO_TRACE_GC, "GC_TAR_BRIDGE bridges %d objects %d colors %d ignored %d sccs %d xref %d cache %d/%d extra refs %d xref reset %d setup %.2fms tarjan %.2fms scc-setup %.2fms gather-xref %.2fms xref-setup %.2fms cleanup %.2fms",
 		bridge_count, object_count, color_count,
 		ignored_objects, scc_count, xref_count,
 		cache_hits, cache_misses,
+		large_color_extra_refs, xref_reset_count,
 		setup_time / 10000.0f,
 		tarjan_time / 10000.0f,
 		scc_setup_time / 10000.0f,
