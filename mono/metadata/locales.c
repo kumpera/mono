@@ -25,7 +25,9 @@
 #include <mono/metadata/locales.h>
 #include <mono/metadata/culture-info.h>
 #include <mono/metadata/culture-info-tables.h>
+#include <mono/metadata/handle.h>
 #include <mono/utils/bsearch.h>
+#include <mono/utils/mono-error-internals.h>
 
 #ifndef DISABLE_NORMALIZATION
 #include <mono/metadata/normalization-tables.h>
@@ -35,6 +37,9 @@
 #if defined(__APPLE__)
 #include <CoreFoundation/CoreFoundation.h>
 #endif
+
+TYPED_HANDLE_DECL (MonoCultureInfo, culture_info)
+TYPED_HANDLE_DECL (MonoCalendarData, calendar_data)
 
 #undef DEBUG
 
@@ -115,25 +120,25 @@ create_group_sizes_array (const gint *gs, gint ml, MonoError *error)
 	return ret;
 }
 
-static MonoArray*
+static MonoArrayHandle
 create_names_array_idx (const guint16 *names, int ml, MonoError *error)
 {
-	MonoArray *ret;
+	MonoArrayHandle ret = MONO_HANDLE_INIT;
 	MonoDomain *domain;
 	int i;
 
 	mono_error_init (error);
 
 	if (names == NULL)
-		return NULL;
+		return ret;
 
 	domain = mono_domain_get ();
 
-	ret = mono_array_new_cached (mono_domain_get (), mono_get_string_class (), ml, error);
-	return_val_if_nok (error, NULL);
+	ret = mono_array_new_handle (mono_domain_get (), mono_get_string_class (), ml, error);
+	return_val_if_nok (error, ret);
 
 	for(i = 0; i < ml; i++)
-		mono_array_setref (ret, i, mono_string_new (domain, idx2string (names [i])));
+		MONO_HANDLE_ARRAY_SETRAW (ret, i, mono_string_new (domain, idx2string (names [i])));
 
 	return ret;
 }
@@ -167,15 +172,25 @@ create_names_array_idx_dynamic (const guint16 *names, int ml, MonoError *error)
 	return ret;
 }
 
+/* Only use this on new_style icalls */
+#define icall_return_val_if_nok(VALUE)	\
+	if (!is_ok ((&error))){\
+		ret = (VALUE);	\
+		goto done;	\
+	}
+
 MonoBoolean
-ves_icall_System_Globalization_CalendarData_fill_calendar_data (MonoCalendarData *this_obj, MonoString *name, gint32 calendar_index)
+ves_icall_System_Globalization_CalendarData_fill_calendar_data (MonoCalendarData *this_obj_raw, MonoString *name, gint32 calendar_index)
 {
-	MonoError error;
+	ICALL_ENTRY ();
+	MONO_HANDLE_DCL (MonoCalendarData, this_obj);
+
 	MonoDomain *domain;
 	const DateTimeFormatEntry *dfe;
 	const CultureInfoNameEntry *ne;
 	const CultureInfoEntry *ci;
 	char *n;
+	gboolean ret = FALSE;
 
 	n = mono_string_to_utf8_checked (name, &error);
 	if (mono_error_set_pending_exception (&error))
@@ -183,64 +198,66 @@ ves_icall_System_Globalization_CalendarData_fill_calendar_data (MonoCalendarData
 	ne = (const CultureInfoNameEntry *)mono_binary_search (n, culture_name_entries, NUM_CULTURE_ENTRIES,
 			sizeof (CultureInfoNameEntry), culture_name_locator);
 	g_free (n);
-	if (ne == NULL) {
-		return FALSE;
-	}
+	if (ne == NULL)
+		goto done;
 
 	ci = &culture_entries [ne->culture_entry_index];
 	dfe = &datetime_format_entries [ci->datetime_format_index];
 
 	domain = mono_domain_get ();
 
-	MONO_OBJECT_SETREF (this_obj, NativeName, mono_string_new (domain, idx2string (ci->nativename)));
+	MONO_HANDLE_SETRAW (this_obj, NativeName, mono_string_new (domain, idx2string (ci->nativename)));
 	MonoArray *short_date_patterns = create_names_array_idx_dynamic (dfe->short_date_patterns,
 									 NUM_SHORT_DATE_PATTERNS, &error);
-	return_val_and_set_pending_if_nok (&error, FALSE);
-	MONO_OBJECT_SETREF (this_obj, ShortDatePatterns, short_date_patterns);
+	icall_return_val_if_nok (FALSE);
+	MONO_HANDLE_SETRAW (this_obj, ShortDatePatterns, short_date_patterns);
+
 	MonoArray *year_month_patterns =create_names_array_idx_dynamic (dfe->year_month_patterns,
 									NUM_YEAR_MONTH_PATTERNS, &error);
-	return_val_and_set_pending_if_nok (&error, FALSE);
-	MONO_OBJECT_SETREF (this_obj, YearMonthPatterns, year_month_patterns);
+	icall_return_val_if_nok (FALSE);
+	MONO_HANDLE_SETRAW (this_obj, YearMonthPatterns, year_month_patterns);
 
 	MonoArray *long_date_patterns = create_names_array_idx_dynamic (dfe->long_date_patterns,
 									NUM_LONG_DATE_PATTERNS, &error);
-	return_val_and_set_pending_if_nok (&error, FALSE);
-	MONO_OBJECT_SETREF (this_obj, LongDatePatterns, long_date_patterns);
+	icall_return_val_if_nok (FALSE);
+	MONO_HANDLE_SETRAW (this_obj, LongDatePatterns, long_date_patterns);
 
-	MONO_OBJECT_SETREF (this_obj, MonthDayPattern, mono_string_new (domain, idx2string (dfe->month_day_pattern)));
+	MONO_HANDLE_SETRAW (this_obj, MonthDayPattern, mono_string_new (domain, idx2string (dfe->month_day_pattern)));
 
-	MonoArray *day_names = create_names_array_idx (dfe->day_names, NUM_DAYS, &error);
-	return_val_and_set_pending_if_nok (&error, FALSE);
-	MONO_OBJECT_SETREF (this_obj, DayNames, day_names);
+	MonoArrayHandle day_names = create_names_array_idx (dfe->day_names, NUM_DAYS, &error);
+	icall_return_val_if_nok (FALSE);
+	MONO_HANDLE_SET (this_obj, DayNames, day_names);
 
-	MonoArray *abbr_day_names = create_names_array_idx (dfe->abbreviated_day_names, 
+	MonoArrayHandle abbr_day_names = create_names_array_idx (dfe->abbreviated_day_names, 
 							    NUM_DAYS, &error);
-	return_val_and_set_pending_if_nok (&error, FALSE);
-	MONO_OBJECT_SETREF (this_obj, AbbreviatedDayNames, abbr_day_names);
+	icall_return_val_if_nok (FALSE);
+	MONO_HANDLE_SET (this_obj, AbbreviatedDayNames, abbr_day_names);
 
-	MonoArray *ss_day_names = create_names_array_idx (dfe->shortest_day_names, NUM_DAYS, &error);
-	return_val_and_set_pending_if_nok (&error, FALSE);
-	MONO_OBJECT_SETREF (this_obj, SuperShortDayNames, ss_day_names);
+	MonoArrayHandle ss_day_names = create_names_array_idx (dfe->shortest_day_names, NUM_DAYS, &error);
+	icall_return_val_if_nok (FALSE);
+	MONO_HANDLE_SET (this_obj, SuperShortDayNames, ss_day_names);
 
-	MonoArray *month_names = create_names_array_idx (dfe->month_names, NUM_MONTHS, &error);
-	return_val_and_set_pending_if_nok (&error, FALSE);
-	MONO_OBJECT_SETREF (this_obj, MonthNames, month_names);
+	MonoArrayHandle month_names = create_names_array_idx (dfe->month_names, NUM_MONTHS, &error);
+	icall_return_val_if_nok (FALSE);
+	MONO_HANDLE_SET (this_obj, MonthNames, month_names);
 
-	MonoArray *abbr_mon_names = create_names_array_idx (dfe->abbreviated_month_names,
+	MonoArrayHandle abbr_mon_names = create_names_array_idx (dfe->abbreviated_month_names,
 							    NUM_MONTHS, &error);
-	return_val_and_set_pending_if_nok (&error, FALSE);
-	MONO_OBJECT_SETREF (this_obj, AbbreviatedMonthNames, abbr_mon_names);
+	icall_return_val_if_nok (FALSE);
+	MONO_HANDLE_SET (this_obj, AbbreviatedMonthNames, abbr_mon_names);
 
-	
-	MonoArray *gen_month_names = create_names_array_idx (dfe->month_genitive_names, NUM_MONTHS, &error);
-	return_val_and_set_pending_if_nok (&error, FALSE);
-	MONO_OBJECT_SETREF (this_obj, GenitiveMonthNames, gen_month_names);
+	MonoArrayHandle gen_month_names = create_names_array_idx (dfe->month_genitive_names, NUM_MONTHS, &error);
+	icall_return_val_if_nok (FALSE);
+	MONO_HANDLE_SET (this_obj, GenitiveMonthNames, gen_month_names);
 
-	MonoArray *gen_abbr_mon_names = create_names_array_idx (dfe->abbreviated_month_genitive_names, NUM_MONTHS, &error);
-	return_val_and_set_pending_if_nok (&error, FALSE);
-	MONO_OBJECT_SETREF (this_obj, GenitiveAbbreviatedMonthNames, gen_abbr_mon_names);
+	MonoArrayHandle gen_abbr_mon_names = create_names_array_idx (dfe->abbreviated_month_genitive_names, NUM_MONTHS, &error);
+	icall_return_val_if_nok (FALSE);
+	MONO_HANDLE_SET (this_obj, GenitiveAbbreviatedMonthNames, gen_abbr_mon_names);
 
-	return TRUE;
+	ret = TRUE;
+
+done:
+	ICALL_RETURN_VAL (ret);
 }
 
 void
@@ -325,32 +342,32 @@ ves_icall_System_Globalization_CultureData_fill_number_data (MonoNumberFormatInf
 }
 
 static MonoBoolean
-construct_culture (MonoCultureInfo *this_obj, const CultureInfoEntry *ci, MonoError *error)
+construct_culture (MonoCultureInfoHandle this_obj, const CultureInfoEntry *ci, MonoError *error)
 {
 	MonoDomain *domain = mono_domain_get ();
 
 	mono_error_init (error);
 
-	this_obj->lcid = ci->lcid;
-	MONO_OBJECT_SETREF (this_obj, name, mono_string_new (domain, idx2string (ci->name)));
-	MONO_OBJECT_SETREF (this_obj, englishname, mono_string_new (domain, idx2string (ci->englishname)));
-	MONO_OBJECT_SETREF (this_obj, nativename, mono_string_new (domain, idx2string (ci->nativename)));
-	MONO_OBJECT_SETREF (this_obj, win3lang, mono_string_new (domain, idx2string (ci->win3lang)));
-	MONO_OBJECT_SETREF (this_obj, iso3lang, mono_string_new (domain, idx2string (ci->iso3lang)));
-	MONO_OBJECT_SETREF (this_obj, iso2lang, mono_string_new (domain, idx2string (ci->iso2lang)));
+	MONO_HANDLE_SETVAL (this_obj, lcid, gint16, ci->lcid);
+	MONO_HANDLE_SETRAW (this_obj, name, mono_string_new (domain, idx2string (ci->name)));
+	MONO_HANDLE_SETRAW (this_obj, englishname, mono_string_new (domain, idx2string (ci->englishname)));
+	MONO_HANDLE_SETRAW (this_obj, nativename, mono_string_new (domain, idx2string (ci->nativename)));
+	MONO_HANDLE_SETRAW (this_obj, win3lang, mono_string_new (domain, idx2string (ci->win3lang)));
+	MONO_HANDLE_SETRAW (this_obj, iso3lang, mono_string_new (domain, idx2string (ci->iso3lang)));
+	MONO_HANDLE_SETRAW (this_obj, iso2lang, mono_string_new (domain, idx2string (ci->iso2lang)));
 
 	// It's null for neutral cultures
 	if (ci->territory > 0)
-		MONO_OBJECT_SETREF (this_obj, territory, mono_string_new (domain, idx2string (ci->territory)));
+		MONO_HANDLE_SETRAW (this_obj, territory, mono_string_new (domain, idx2string (ci->territory)));
 
-	MonoArray *native_calendar_names = create_names_array_idx (ci->native_calendar_names, NUM_CALENDARS, error);
+	MonoArrayHandle native_calendar_names = create_names_array_idx (ci->native_calendar_names, NUM_CALENDARS, error);
 	return_val_if_nok (error, FALSE);
-	MONO_OBJECT_SETREF (this_obj, native_calendar_names, native_calendar_names);
-	this_obj->parent_lcid = ci->parent_lcid;
-	this_obj->datetime_index = ci->datetime_format_index;
-	this_obj->number_index = ci->number_format_index;
-	this_obj->calendar_type = ci->calendar_type;
-	this_obj->text_info_data = &ci->text_info;
+	MONO_HANDLE_SET (this_obj, native_calendar_names, native_calendar_names);
+	MONO_HANDLE_SETVAL (this_obj, parent_lcid, gint16, ci->parent_lcid);
+	MONO_HANDLE_SETVAL (this_obj, datetime_index, gint16, ci->datetime_format_index);
+	MONO_HANDLE_SETVAL (this_obj, number_index, gint16, ci->number_format_index);
+	MONO_HANDLE_SETVAL (this_obj, calendar_type, gint16, ci->calendar_type);
+	MONO_HANDLE_SETVAL (this_obj, text_info_data, const TextInfoEntry*, &ci->text_info);
 	
 	return TRUE;
 }
@@ -535,46 +552,56 @@ get_current_locale_name (void)
 MonoString*
 ves_icall_System_Globalization_CultureInfo_get_current_locale_name (void)
 {
+	ICALL_ENTRY ();
+
 	gchar *locale;
-	MonoString* ret;
 	MonoDomain *domain;
+	MonoStringHandle ret = MONO_HANDLE_INIT;
 
 	locale = get_current_locale_name ();
-	if (locale == NULL)
-		return NULL;
+	if (!locale)
+		goto end;
 
 	domain = mono_domain_get ();
-	ret = mono_string_new (domain, locale);
+	ret = mono_string_new_handle (domain, locale);
 	g_free (locale);
 
-	return ret;
+end:
+	ICALL_RETURN_OBJ (ret);
 }
 
 MonoBoolean
-ves_icall_System_Globalization_CultureInfo_construct_internal_locale_from_lcid (MonoCultureInfo *this_obj,
+ves_icall_System_Globalization_CultureInfo_construct_internal_locale_from_lcid (MonoCultureInfo *this_obj_raw,
 		gint lcid)
 {
-	MonoError error;
+	ICALL_ENTRY ();
+	MONO_HANDLE_DCL (MonoCultureInfo, this_obj);
+
+	gboolean res = FALSE;
 	const CultureInfoEntry *ci;
 	
 	ci = culture_info_entry_from_lcid (lcid);
 	if(ci == NULL)
-		return FALSE;
+		goto end;
 
-	if (!construct_culture (this_obj, ci, &error)) {
-		mono_error_set_pending_exception (&error);
-		return FALSE;
-	}
-	return TRUE;
+	if (!construct_culture (this_obj, ci, &error))
+		goto end;
+	res = TRUE;
+
+end:
+	ICALL_RETURN_VAL (res);
 }
 
 MonoBoolean
-ves_icall_System_Globalization_CultureInfo_construct_internal_locale_from_name (MonoCultureInfo *this_obj,
+ves_icall_System_Globalization_CultureInfo_construct_internal_locale_from_name (MonoCultureInfo *this_obj_raw,
 		MonoString *name)
 {
-	MonoError error;
+	ICALL_ENTRY ();
+	MONO_HANDLE_DCL (MonoCultureInfo, this_obj);
+
 	const CultureInfoNameEntry *ne;
 	char *n;
+	gboolean ret = FALSE;
 	
 	n = mono_string_to_utf8_checked (name, &error);
 	if (mono_error_set_pending_exception (&error))
@@ -585,15 +612,17 @@ ves_icall_System_Globalization_CultureInfo_construct_internal_locale_from_name (
 	if (ne == NULL) {
 		/*g_print ("ne (%s) is null\n", n);*/
 		g_free (n);
-		return FALSE;
+		goto done;
 	}
 	g_free (n);
 
 	if (!construct_culture (this_obj, &culture_entries [ne->culture_entry_index], &error)) {
 		mono_error_set_pending_exception (&error);
-		return FALSE;
+		goto done;
 	}
-	return TRUE;
+	ret = TRUE;
+done:
+	ICALL_RETURN_VAL (ret);
 }
 /*
 MonoBoolean
@@ -651,14 +680,15 @@ MonoArray*
 ves_icall_System_Globalization_CultureInfo_internal_get_cultures (MonoBoolean neutral,
 		MonoBoolean specific, MonoBoolean installed)
 {
-	MonoError error;
-	MonoArray *ret;
+	ICALL_ENTRY ();
+
 	MonoClass *klass;
-	MonoCultureInfo *culture;
 	MonoDomain *domain;
 	const CultureInfoEntry *ci;
 	gint i, len;
 	gboolean is_neutral;
+
+	MonoArrayHandle ret = MONO_HANDLE_INIT;
 
 	domain = mono_domain_get ();
 
@@ -677,37 +707,40 @@ ves_icall_System_Globalization_CultureInfo_internal_get_cultures (MonoBoolean ne
 	if (neutral)
 		len++;
 
-	ret = mono_array_new_checked (domain, klass, len, &error);
+	ret = mono_array_new_handle (domain, klass, len, &error);
 	if (!is_ok (&error))
-		goto fail;
+		goto done;
 
 	if (len == 0)
-		return ret;
+		goto done;
 
 	len = 0;
 	if (neutral)
-		mono_array_setref (ret, len++, NULL);
+		MONO_HANDLE_ARRAY_SETREF (ret, len++, NULL_HANDLE);
 
 	for (i = 0; i < NUM_CULTURE_ENTRIES; i++) {
 		ci = &culture_entries [i];
 		is_neutral = ci->territory == 0;
 		if ((neutral && is_neutral) || (specific && !is_neutral)) {
-			culture = (MonoCultureInfo *) mono_object_new_checked (domain, klass, &error);
-			if (!is_ok (&error)) goto fail;
-			mono_runtime_object_init_checked ((MonoObject *) culture, &error);
-			if (!is_ok (&error)) goto fail;
+			MonoCultureInfoHandle culture = MONO_HANDLE_NEW (MonoCultureInfo, mono_object_new_checked (domain, klass, &error));
+
+			if (!is_ok (&error))
+				goto done;
+
+			mono_runtime_object_init_checked ((MonoObject*)MONO_HANDLE_RAW (culture), &error);
+			if (!is_ok (&error))
+				goto done;
+
 			if (!construct_culture (culture, ci, &error))
-				goto fail;
-			culture->use_user_override = TRUE;
-			mono_array_setref (ret, len++, culture);
+				goto done;
+
+			MONO_HANDLE_SETVAL (culture, use_user_override, MonoBoolean, TRUE);
+			MONO_HANDLE_ARRAY_SETREF (ret, len++, culture);
 		}
 	}
 
-	return ret;
-
-fail:
-	mono_error_set_pending_exception (&error);
-	return ret;
+done:
+	ICALL_RETURN_OBJ (ret);
 }
 
 int ves_icall_System_Globalization_CompareInfo_internal_compare (MonoCompareInfo *this_obj, MonoString *str1, gint32 off1, gint32 len1, MonoString *str2, gint32 off2, gint32 len2, gint32 options)
