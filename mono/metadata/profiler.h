@@ -112,6 +112,12 @@ typedef enum {
 	MONO_PROFILE_GC_ROOT_TYPEMASK = 0xff
 } MonoProfileGCRootType;
 
+typedef enum {
+	MONO_PROFILE_MEMDOM_APPDOMAIN = 1,
+	MONO_PROFILE_MEMDOM_IMAGE = 2,
+	MONO_PROFILE_MEMDOM_IMAGE_SET = 3,
+} MonoProfilerMemoryDomain;
+
 /*
  * Functions that the runtime will call on the profiler.
  */
@@ -160,6 +166,12 @@ typedef void (*MonoProfilerCodeChunkNew) (MonoProfiler *prof, void* chunk, int s
 typedef void (*MonoProfilerCodeChunkDestroy) (MonoProfiler *prof, void* chunk);
 typedef void (*MonoProfilerCodeBufferNew) (MonoProfiler *prof, void* buffer, int size, MonoProfilerCodeBufferType type, void *data);
 
+typedef void (*MonoProfilerMemdomNew) (MonoProfiler *prof, void* memdom, MonoProfilerMemoryDomain kind);
+typedef void (*MonoProfilerMemdomDestroy) (MonoProfiler *prof, void* memdom);
+typedef void (*MonoProfilerMemdomAlloc) (MonoProfiler *prof, void* memdom, size_t size, const char *tag);
+
+typedef void (*MonoProfilerAllocOp) (MonoProfiler *prof, void *address, size_t size, const char *tag);
+
 /*
  * Function the profiler may call.
  */
@@ -204,6 +216,10 @@ MONO_API void mono_profiler_install_code_chunk_destroy (MonoProfilerCodeChunkDes
 MONO_API void mono_profiler_install_code_buffer_new (MonoProfilerCodeBufferNew callback);
 
 MONO_API void mono_profiler_install_iomap (MonoProfileIomapFunc callback);
+
+MONO_API void mono_profiler_install_memdom (MonoProfilerMemdomNew new_cb, MonoProfilerMemdomDestroy destroy_cb, MonoProfilerMemdomAlloc alloc_cb);
+MONO_API void mono_profiler_install_malloc (MonoProfilerAllocOp malloc, MonoProfilerAllocOp free);
+MONO_API void mono_profiler_install_valloc (MonoProfilerAllocOp valloc, MonoProfilerAllocOp vfree);
 
 MONO_API void mono_profiler_load             (const char *desc);
 

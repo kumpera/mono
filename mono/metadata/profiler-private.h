@@ -84,5 +84,16 @@ void mono_profiler_runtime_initialized (void);
 int64_t mono_profiler_get_sampling_rate (void);
 MonoProfileSamplingMode mono_profiler_get_sampling_mode (void);
 
+void mono_profiler_memdom_new (gpointer memdom, MonoProfilerMemoryDomain kind);
+void mono_profiler_memdom_destroy (gpointer memdom);
+void mono_profiler_memdom_alloc (gpointer memdom, size_t size, const char *tag);
+
+/* Only use this for large allocs. */
+void mono_profiler_malloc (void *address, size_t size, const char *tag);
+void mono_profiler_free (void *address, size_t size, const char *tag);
+
+void mono_profiler_valloc (void *address, size_t size, const char *tag);
+void mono_profiler_vfree (void *address, size_t size, const char *tag);
+
 #endif /* __MONO_PROFILER_PRIVATE_H__ */
 

@@ -107,6 +107,14 @@ struct _ProfilerDesc {
 	MonoProfilerCodeChunkNew code_chunk_new;
 	MonoProfilerCodeChunkDestroy code_chunk_destroy;
 	MonoProfilerCodeBufferNew code_buffer_new;
+
+	MonoProfilerMemdomNew memdom_new;
+	MonoProfilerMemdomDestroy memdom_destroy;
+	MonoProfilerMemdomAlloc memdom_alloc;
+	MonoProfilerAllocOp malloc_event;
+	MonoProfilerAllocOp free_event;
+	MonoProfilerAllocOp valloc_event;
+	MonoProfilerAllocOp vfree_event;
 };
 
 static ProfilerDesc *prof_list = NULL;
@@ -995,6 +1003,80 @@ mono_profiler_code_buffer_new (gpointer buffer, int size, MonoProfilerCodeBuffer
 			prof->code_buffer_new (prof->profiler, buffer, size, type, (void*)data);
 	}
 }
+
+void
+mono_profiler_install_memdom (MonoProfilerMemdomNew new_cb, MonoProfilerMemdomDestroy destroy_cb, MonoProfilerMemdomAlloc alloc_cb)
+{
+	if (!prof_list)
+		return;
+
+	prof_list->memdom_new = new_cb;
+	prof_list->memdom_destroy = destroy_cb;
+	prof_list->memdom_alloc = alloc_cb;
+}
+
+void
+mono_profiler_install_malloc (MonoProfilerAllocOp malloc, MonoProfilerAllocOp free)
+{
+	if (!prof_list)
+		return;
+
+	prof_list->malloc_event = malloc;
+	prof_list->free_event = free;
+}
+
+void
+mono_profiler_install_valloc (MonoProfilerAllocOp valloc, MonoProfilerAllocOp vfree)
+{
+	if (!prof_list)
+		return;
+
+	prof_list->valloc_event = valloc;
+	prof_list->vfree_event = vfree;
+}
+
+#define PROF_EVENT_1(EVENT_NAME, CB_NAME, ARG0_TYPE)	\
+void \
+EVENT_NAME (ARG0_TYPE arg0) \
+{	\
+	ProfilerDesc *prof;	\
+	for (prof = prof_list; prof; prof = prof->next) {	\
+		if (prof->CB_NAME)	\
+			prof->CB_NAME (prof->profiler, arg0);	\
+	}	\
+}
+
+#define PROF_EVENT_2(EVENT_NAME, CB_NAME, ARG0_TYPE, ARG1_TYPE)	\
+void \
+EVENT_NAME (ARG0_TYPE arg0, ARG1_TYPE arg1) \
+{	\
+	ProfilerDesc *prof;	\
+	for (prof = prof_list; prof; prof = prof->next) {	\
+		if (prof->CB_NAME)	\
+			prof->CB_NAME (prof->profiler, arg0, arg1);	\
+	}	\
+}
+
+#define PROF_EVENT_3(EVENT_NAME, CB_NAME, ARG0_TYPE, ARG1_TYPE, ARG2_TYPE)	\
+void \
+EVENT_NAME (ARG0_TYPE arg0, ARG1_TYPE arg1, ARG2_TYPE arg2) \
+{	\
+	ProfilerDesc *prof;	\
+	for (prof = prof_list; prof; prof = prof->next) {	\
+		if (prof->CB_NAME)	\
+			prof->CB_NAME (prof->profiler, arg0, arg1, arg2);	\
+	}	\
+}
+
+PROF_EVENT_2(mono_profiler_memdom_new, memdom_new, gpointer, MonoProfilerMemoryDomain)
+PROF_EVENT_1(mono_profiler_memdom_destroy, memdom_destroy, gpointer)
+PROF_EVENT_3(mono_profiler_memdom_alloc, memdom_alloc, void*, size_t, const char*)
+
+PROF_EVENT_3(mono_profiler_malloc, malloc_event, void*, size_t, const char*)
+PROF_EVENT_3(mono_profiler_free, free_event, void*, size_t, const char*)
+
+PROF_EVENT_3(mono_profiler_valloc, valloc_event, void*, size_t, const char*)
+PROF_EVENT_3(mono_profiler_vfree, vfree_event, void*, size_t, const char*)
 
 static GHashTable *coverage_hash = NULL;
 
