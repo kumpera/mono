@@ -740,6 +740,8 @@ mono_image_init (MonoImage *image)
 	image->method_signatures = g_hash_table_new (NULL, NULL);
 
 	image->property_hash = mono_property_hash_new ();
+
+	mono_profiler_memdom_new (image, MONO_PROFILE_MEMDOM_IMAGE);
 }
 
 #if G_BYTE_ORDER != G_LITTLE_ENDIAN
@@ -1872,6 +1874,7 @@ mono_image_close_except_pools (MonoImage *image)
 	}
 
 	mono_profiler_module_event (image, MONO_PROFILE_END_UNLOAD);
+	mono_profiler_memdom_destroy (image);
 
 	return TRUE;
 }

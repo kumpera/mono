@@ -27,6 +27,7 @@
 #include "marshal.h"
 #include "debug-helpers.h"
 #include "abi-details.h"
+#include "profiler-private.h"
 #include <mono/utils/mono-error-internals.h>
 #include <mono/utils/bsearch.h>
 #include <mono/utils/atomic.h>
@@ -2381,6 +2382,7 @@ get_image_set (MonoImage **images, int nimages)
 			set->images [i]->image_sets = g_slist_prepend (set->images [i]->image_sets, set);
 
 		g_ptr_array_add (image_sets, set);
+		mono_profiler_memdom_new (set, MONO_PROFILE_MEMDOM_IMAGE_SET);
 	}
 
 	if (nimages == 1 && images [0] == mono_defaults.corlib) {
@@ -2397,6 +2399,7 @@ static void
 delete_image_set (MonoImageSet *set)
 {
 	int i;
+	mono_profiler_memdom_destroy (set);
 
 	g_hash_table_destroy (set->gclass_cache);
 	g_hash_table_destroy (set->ginst_cache);

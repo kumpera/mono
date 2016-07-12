@@ -445,6 +445,7 @@ mono_domain_create (void)
 	domain->search_path = NULL;
 
 	mono_profiler_appdomain_event (domain, MONO_PROFILE_START_LOAD);
+	mono_profiler_memdom_new (domain, MONO_PROFILE_MEMDOM_APPDOMAIN);
 
 	domain->mp = mono_mempool_new ();
 	domain->code_mp = mono_code_manager_new ();
@@ -1083,6 +1084,7 @@ mono_domain_free (MonoDomain *domain, gboolean force)
 		return;
 
 	mono_profiler_appdomain_event (domain, MONO_PROFILE_START_UNLOAD);
+	mono_profiler_memdom_destroy (domain);
 
 	mono_debug_domain_unload (domain);
 
