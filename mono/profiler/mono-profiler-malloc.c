@@ -29,9 +29,9 @@
 #include <malloc/malloc.h>
 
 //XXX for now all configuration is here
-#define PRINT_ALLOCATION FALSE
-#define PRINT_MEMDOM FALSE
-#define PRINT_RT_ALLOC FALSE
+#define PRINT_ALLOCATION TRUE
+#define PRINT_MEMDOM TRUE
+#define PRINT_RT_ALLOC TRUE
 
 void mono_profiler_startup (const char *desc);
 static void dump_alloc_stats (void);
@@ -40,9 +40,101 @@ struct _MonoProfiler {
 	int filling;
 };
 
+/* Misc stuff */
+static pthread_mutex_t alloc_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 static void
-prof_shutdown (MonoProfiler *prof)
+alloc_lock (void)
+{
+	pthread_mutex_lock (&alloc_mutex);
+}
+
+static void
+alloc_unlock (void)
+{
+	pthread_mutex_unlock (&alloc_mutex);
+}
+
+/* maybe we could make it dynamic later */
+#define TABLE_SIZE 1019
+
+static int
+hash_ptr (size_t ptr)
+{
+	return abs ((int)((ptr * 1737350767) ^ ((ptr * 196613) >> 16)));
+}
+
+
+static int
+hash_str (const char *str)
+{
+	int hash = 0;
+
+	while (*str++)
+		hash = (hash << 5) - (hash + *str);
+
+	return abs (hash);
+}
+
+typedef struct _AllocInfo AllocInfo;
+
+struct _AllocInfo {
+	void *address;
+	size_t size;
+	size_t waste;
+	const char *tag;
+	AllocInfo *next;
+};
+
+typedef struct _TagInfo TagInfo;
+
+/* malloc tracking */
+struct _TagInfo {
+	const char *tag;
+	size_t size;
+	size_t waste;
+	TagInfo *next;
+};
+
+
+static AllocInfo* get_alloc (void *address);
+
+static TagInfo *tag_table [TABLE_SIZE];
+static size_t rt_alloc_bytes, rt_alloc_count, rt_alloc_waste;
+
+
+static void
+update_tag (const char *tag, size_t size, size_t waste)
+{
+	int bucket = hash_str (tag) % TABLE_SIZE;
+
+	TagInfo *info;
+	for (info = tag_table [bucket]; info; info = info->next) {
+		if (!strcmp (tag, info->tag))
+			break;
+	}
+
+	if (!info) {
+		info = malloc (sizeof (TagInfo));
+		info->tag = tag;
+		info->size = info->waste = 0;
+		info->next = tag_table [bucket];
+		tag_table [bucket] = info;
+	}
+	info->size += size;
+	info->waste += waste;
+
+	rt_alloc_bytes += size;
+	rt_alloc_waste += waste;
+	if (size > 0)
+		++rt_alloc_count;
+	else
+		--rt_alloc_count;
+
+}
+
+static void __attribute__((noinline))
+break_on_bad_runtime_malloc (void)
 {
 }
 
@@ -80,15 +172,40 @@ memdom_alloc (MonoProfiler *prof, void* memdom, size_t size, const char *tag)
 static void
 runtime_malloc_event (MonoProfiler *prof, void *address, size_t size, const char *tag)
 {
-	if (PRINT_RT_ALLOC)
-		printf ("malloc %p %zu %s\n", address, size, tag);
+	alloc_lock ();
+	AllocInfo *info = get_alloc (address);
+	if (!info) {
+		printf ("stray alloc that didn't come from g_malloc %p\n", address);
+		break_on_bad_runtime_malloc ();
+		goto done;
+	}
+
+	if (info->tag) {
+		printf ("runtime reported same pointer twice %p %s x %s\n", address, info->tag, tag);
+		break_on_bad_runtime_malloc ();
+		goto done;
+	}
+
+	if (info->size != size) {
+		printf ("runtime reported pointer with different sizes %p %zu x %zu\n", address, info->size, size);
+		break_on_bad_runtime_malloc ();
+		goto done;
+	}
+
+	info->tag = tag;
+	update_tag (tag, info->size, info->waste);
+
+done:
+	alloc_unlock ();
+
+	dump_alloc_stats ();
 }
 
 static void
-runtime_free_event (MonoProfiler *prof, void *address, size_t size, const char *tag)
+runtime_free_event (MonoProfiler *prof, void *address)
 {
-	if (PRINT_RT_ALLOC)
-		printf ("free %p %zu %s\n", address, size, tag);
+	// if (PRINT_RT_ALLOC)
+	// 	printf ("free %p\n", address);
 }
 
 static void
@@ -99,43 +216,16 @@ runtime_valloc_event (MonoProfiler *prof, void *address, size_t size, const char
 }
 
 static void
-runtime_vfree_event (MonoProfiler *prof, void *address, size_t size, const char *tag)
+runtime_vfree_event (MonoProfiler *prof, void *address, size_t size)
 {
 	if (PRINT_RT_ALLOC)
-		printf ("vfree %p %zu %s\n", address, size, tag);
+		printf ("vfree %p %zu\n", address, size);
 }
-
-
-typedef struct _AllocInfo AllocInfo;
 
 /* malloc tracking */
-struct _AllocInfo {
-	void *address;
-	size_t size;
-	size_t waste;
-	AllocInfo *next;
-};
-
-static pthread_mutex_t alloc_mutex = PTHREAD_MUTEX_INITIALIZER;
-
-static void
-alloc_lock (void)
-{
-	pthread_mutex_lock (&alloc_mutex);
-}
-
-static void
-alloc_unlock (void)
-{
-	pthread_mutex_unlock (&alloc_mutex);
-}
-
-/* maybe we could make it dynamic later */
-#define TABLE_SIZE 1019
 static AllocInfo *alloc_table [TABLE_SIZE];
 
 static size_t alloc_bytes, alloc_count, alloc_waste;
-
 
 static void __attribute__((noinline))
 break_on_malloc_waste (void)
@@ -143,10 +233,18 @@ break_on_malloc_waste (void)
 	
 }
 
-static size_t
-hash_ptr (size_t ptr)
+static AllocInfo*
+get_alloc (void *address)
 {
-	return (int)((ptr * 1737350767) ^ ((ptr * 196613) >> 16));
+	size_t addr = (size_t)address;
+	int bucket = hash_ptr (addr) % TABLE_SIZE;
+
+	AllocInfo *info;
+	for (info = alloc_table [bucket]; info; info = info->next) {
+		if (info->address == address)
+			return info;
+	}
+	return NULL;
 }
 
 static void
@@ -166,6 +264,10 @@ del_alloc (void *address)
 			alloc_waste -= info->waste;
 
 			*prev = info->next;
+
+			if (info->tag)
+				update_tag (info->tag, -info->size, -info->waste);
+
 			g_free (info);
 			break;
 		}
@@ -173,9 +275,8 @@ del_alloc (void *address)
 	alloc_unlock ();
 }
 
-
 static void
-add_alloc (void *address, size_t size)
+add_alloc (void *address, size_t size, const char *tag)
 {
 	size_t addr = (size_t)address;
 	int bucket = hash_ptr (addr) % TABLE_SIZE;
@@ -183,6 +284,7 @@ add_alloc (void *address, size_t size)
 	AllocInfo *info = malloc (sizeof (AllocInfo));
 	info->address = address;
 	info->size = size;
+	info->tag = NULL;
 	info->waste = malloc_size (address) - size;
 
 	alloc_lock ();
@@ -197,7 +299,6 @@ add_alloc (void *address, size_t size)
 
 	if (info->waste > 10)
 		break_on_malloc_waste ();
-
 }
 
 static void
@@ -208,10 +309,32 @@ dump_alloc_stats (void)
 	if (!PRINT_ALLOCATION)
 		return;
 	++last_time;
-	if (last_time % 100)
+	if (last_time % 500)
 		return;
-	printf ("alloc %zu alloc count %zu waste %zu\n",
-		alloc_bytes, alloc_count, alloc_waste);
+
+	alloc_lock ();
+	printf ("alloc %zu alloc count %zu waste %zu\n", alloc_bytes, alloc_count, alloc_waste);
+	printf ("rt alloc %zu alloc count %zu waste %zu\n", rt_alloc_bytes, rt_alloc_count, rt_alloc_waste);
+	printf ("   reported %.2f memory and %.2f allocs\n",
+		rt_alloc_bytes / (float)alloc_bytes,
+		rt_alloc_count / (float)alloc_count);
+
+
+	printf ("tag summary:\n");
+	TagInfo *info;
+	int i;
+	int max_bucket = 0;
+	for (i = 0; i < TABLE_SIZE; ++i) {
+		int c = 0;
+		for (info = tag_table[i]; info; info = info->next) {
+			++c;
+			printf ("   %s: alloc %zu waste %zu\n", info->tag, info->size, info->waste);
+		}
+		max_bucket = MAX (max_bucket, c);
+	}
+	printf ("---- (collision max %d)\n", max_bucket);
+
+	alloc_unlock ();
 }
 
 
@@ -219,7 +342,7 @@ static void *
 platform_malloc (size_t size)
 {
 	void * res = malloc (size);
-	add_alloc (res, size);
+	add_alloc (res, size, NULL);
 
 	dump_alloc_stats ();
 	return res;
@@ -228,9 +351,12 @@ platform_malloc (size_t size)
 static void *
 platform_realloc (void *mem, size_t count)
 {
+	AllocInfo *old = get_alloc (mem);
+	const char *tag = old ? old->tag : NULL;
+
 	del_alloc (mem);
 	void * res = realloc (mem, count);
-	add_alloc (res, count);
+	add_alloc (res, count, tag);
 
 	dump_alloc_stats ();
 	return res;
@@ -249,12 +375,16 @@ static void*
 platform_calloc (size_t count, size_t size)
 {
 	void * res = calloc (count, size);
-	add_alloc (res, count * size);
+	add_alloc (res, count * size, NULL);
 
 	dump_alloc_stats ();
 	return res;
 }
 
+static void
+prof_shutdown (MonoProfiler *prof)
+{
+}
 
 /* the entry point */
 void
