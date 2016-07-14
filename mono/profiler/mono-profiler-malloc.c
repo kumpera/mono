@@ -29,9 +29,9 @@
 #include <malloc/malloc.h>
 
 //XXX for now all configuration is here
-#define PRINT_ALLOCATION TRUE
-#define PRINT_MEMDOM TRUE
-#define PRINT_RT_ALLOC TRUE
+#define PRINT_ALLOCATION FALSE
+#define PRINT_MEMDOM FALSE
+#define PRINT_RT_ALLOC FALSE
 
 void mono_profiler_startup (const char *desc);
 static void dump_alloc_stats (void);
@@ -104,7 +104,7 @@ static size_t rt_alloc_bytes, rt_alloc_count, rt_alloc_waste;
 
 
 static void
-update_tag (const char *tag, size_t size, size_t waste)
+update_tag (const char *tag, ssize_t size, ssize_t waste)
 {
 	int bucket = hash_str (tag) % TABLE_SIZE;
 
@@ -126,6 +126,7 @@ update_tag (const char *tag, size_t size, size_t waste)
 
 	rt_alloc_bytes += size;
 	rt_alloc_waste += waste;
+
 	if (size > 0)
 		++rt_alloc_count;
 	else
@@ -302,17 +303,10 @@ add_alloc (void *address, size_t size, const char *tag)
 }
 
 static void
-dump_alloc_stats (void)
+dump_stats (void)
 {
-	static int last_time;
-
-	if (!PRINT_ALLOCATION)
-		return;
-	++last_time;
-	if (last_time % 500)
-		return;
-
 	alloc_lock ();
+	printf ("-------\n");
 	printf ("alloc %zu alloc count %zu waste %zu\n", alloc_bytes, alloc_count, alloc_waste);
 	printf ("rt alloc %zu alloc count %zu waste %zu\n", rt_alloc_bytes, rt_alloc_count, rt_alloc_waste);
 	printf ("   reported %.2f memory and %.2f allocs\n",
@@ -337,6 +331,24 @@ dump_alloc_stats (void)
 	alloc_unlock ();
 }
 
+static void
+icall_dump_allocs (void)
+{
+	dump_stats ();
+}
+
+static void
+dump_alloc_stats (void)
+{
+	static int last_time;
+
+	if (!PRINT_ALLOCATION)
+		return;
+	++last_time;
+	if (last_time % 20)
+		return;
+	dump_stats ();
+}
 
 static void *
 platform_malloc (size_t size)
@@ -382,6 +394,12 @@ platform_calloc (size_t count, size_t size)
 }
 
 static void
+runtime_inited (MonoProfiler *prof)
+{
+	mono_add_internal_call ("Mono.MemProf::DumpAllocationInfo", icall_dump_allocs);
+}
+
+static void
 prof_shutdown (MonoProfiler *prof)
 {
 }
@@ -398,6 +416,7 @@ mono_profiler_startup (const char *desc)
 	mono_profiler_install_memdom (memdom_new, memdom_destroy, memdom_alloc);
 	mono_profiler_install_malloc (runtime_malloc_event, runtime_free_event);
 	mono_profiler_install_valloc (runtime_valloc_event, runtime_vfree_event);
+	mono_profiler_install_runtime_initialized (runtime_inited);
 
 	MonoAllocatorVTable alloc_vt = {
 		.version = MONO_ALLOCATOR_VTABLE_VERSION,
