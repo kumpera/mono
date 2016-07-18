@@ -51,6 +51,7 @@
 #include <mono/metadata/runtime.h>
 #include <mono/metadata/reflection-internals.h>
 #include <mono/metadata/monitor.h>
+#include <mono/metadata/mono-alloc.h>
 #include <mono/utils/mono-math.h>
 #include <mono/utils/mono-compiler.h>
 #include <mono/utils/mono-counters.h>
@@ -2979,7 +2980,7 @@ mini_get_vtable_trampoline (MonoVTable *vt, int slot_index)
 			new_size = vtable_trampolines_size ? vtable_trampolines_size * 2 : 128;
 			while (new_size <= index)
 				new_size *= 2;
-			new_table = g_new0 (gpointer, new_size);
+			new_table = m_new0 (gpointer, new_size, "jit:vtable_trampolines");
 
 			if (vtable_trampolines)
 				memcpy (new_table, vtable_trampolines, vtable_trampolines_size * sizeof (gpointer));
@@ -3101,7 +3102,7 @@ mono_get_delegate_virtual_invoke_impl (MonoMethodSignature *sig, MonoMethod *met
 			guint8 **new_cache;
 			int new_cache_size = idx + 1;
 
-			new_cache = g_new0 (guint8*, new_cache_size);
+			new_cache = m_new0 (guint8*, new_cache_size, "jit:delegate_virtual_invoke_impl_cache");
 			if (cache)
 				memcpy (new_cache, cache, cache_size * sizeof (guint8*));
 			g_free (cache);

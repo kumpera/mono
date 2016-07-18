@@ -40,6 +40,7 @@
 #include <mono/metadata/verify-internals.h>
 #include <mono/metadata/verify.h>
 #include <mono/metadata/image-internals.h>
+#include <mono/metadata/mono-alloc.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #ifdef HAVE_UNISTD_H
@@ -1138,7 +1139,7 @@ do_mono_image_open (const char *fname, MonoImageOpenStatus *status,
 		}
 	}
 
-	image = g_new0 (MonoImage, 1);
+	image = m_new0 (MonoImage, 1, "image");
 	image->raw_buffer_used = TRUE;
 	image->raw_data_len = mono_file_map_size (filed);
 	image->raw_data = (char *)mono_file_map (image->raw_data_len, MONO_MMAP_READ|MONO_MMAP_PRIVATE, mono_file_map_fd (filed), 0, &image->raw_data_handle);

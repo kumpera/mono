@@ -40,6 +40,7 @@
 #include <mono/metadata/marshal.h>
 #include <mono/metadata/lock-tracer.h>
 #include <mono/metadata/verify-internals.h>
+#include <mono/metadata/mono-alloc.h>
 #include <mono/utils/mono-logger-internals.h>
 #include <mono/utils/mono-dl.h>
 #include <mono/utils/mono-membar.h>
@@ -531,7 +532,7 @@ inflate_generic_signature_checked (MonoImage *image, MonoMethodSignature *sig, M
 	if (!context)
 		return sig;
 
-	res = (MonoMethodSignature *)g_malloc0 (MONO_SIZEOF_METHOD_SIGNATURE + ((gint32)sig->param_count) * sizeof (MonoType*));
+	res = (MonoMethodSignature *)m_malloc0 (MONO_SIZEOF_METHOD_SIGNATURE + ((gint32)sig->param_count) * sizeof (MonoType*), "metadata:method-signature");
 	res->param_count = sig->param_count;
 	res->sentinelpos = -1;
 	res->ret = mono_class_inflate_generic_type_checked (sig->ret, context, error);
@@ -1762,6 +1763,7 @@ mono_get_method_checked (MonoImage *image, guint32 token, MonoClass *klass, Mono
 
 		if (mono_metadata_token_table (token) == MONO_TABLE_METHOD)
 			g_hash_table_insert (image->method_cache, GINT_TO_POINTER (mono_metadata_token_index (token)), result);
+
 		else if (!image_is_dynamic (image))
 			g_hash_table_insert (image->methodref_cache, GINT_TO_POINTER (token), result);
 	}

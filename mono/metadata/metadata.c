@@ -31,6 +31,7 @@
 #include <mono/utils/mono-error-internals.h>
 #include <mono/utils/bsearch.h>
 #include <mono/utils/atomic.h>
+#include <mono/metadata/mono-alloc.h>
 
 /* Auxiliary structure used for caching inflated signatures */
 typedef struct {
@@ -2367,9 +2368,9 @@ get_image_set (MonoImage **images, int nimages)
 
 	// If we iterated all the way through l without breaking, the imageset does not already exist and we shuold create it
 	if (!l) {
-		set = g_new0 (MonoImageSet, 1);
+		set = m_new0 (MonoImageSet, 1, "imageset");
 		set->nimages = nimages;
-		set->images = g_new0 (MonoImage*, nimages);
+		set->images = m_new0 (MonoImage*, nimages, "imageset:images");
 		mono_os_mutex_init_recursive (&set->lock);
 		for (i = 0; i < nimages; ++i)
 			set->images [i] = images [i];
