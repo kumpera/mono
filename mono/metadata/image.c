@@ -1156,7 +1156,7 @@ do_mono_image_open (const char *fname, MonoImageOpenStatus *status,
 			*status = MONO_IMAGE_IMAGE_INVALID;
 		return NULL;
 	}
-	iinfo = g_new0 (MonoCLIImageInfo, 1);
+	iinfo = m_new0 (MonoCLIImageInfo, 1, "cli-image-info");
 	image->image_info = iinfo;
 	image->name = mono_path_resolve_symlinks (fname);
 	image->ref_only = refonly;
