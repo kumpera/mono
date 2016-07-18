@@ -187,6 +187,10 @@ typedef struct {
 	size_t count;
 } TagInfo;
 
+typedef struct {
+	HashNode node;
+	int kind;
+} MemDomInfo;
 
 static HashTable tag_table;
 static size_t rt_alloc_bytes, rt_alloc_count, rt_alloc_waste;
@@ -234,21 +238,40 @@ static const char *memdom_name[] = {
 	"image-set",
 };
 
+#define MEMDOM_MAX 4
+static size_t memdom_count [MEMDOM_MAX];
+static HashTable memdom_table;
 
 static void
 memdom_new (MonoProfiler *prof, void* memdom, MonoProfilerMemoryDomain kind)
 {
+	alloc_lock ();
+	MemDomInfo *info = malloc (sizeof (MemDomInfo));
+	info->kind = kind;
+
+	hashtable_add (&memdom_table, &info->node, memdom);
+	++memdom_count [kind];
+
+
 	if (PRINT_MEMDOM)
 		printf ("memdom new %p type %s\n", memdom, memdom_name [kind]);
-	dump_alloc_stats ();
+	alloc_unlock ();
 }
 
 static void
 memdom_destroy (MonoProfiler *prof, void* memdom)
 {
+	alloc_lock ();
+	MemDomInfo *info = (MemDomInfo*)hashtable_remove (&memdom_table, memdom);
+
+	if (info) {
+		--memdom_count [info->kind];
+		g_free (info);
+	}
+
 	if (PRINT_MEMDOM)
 		printf ("memdom destroy %p\n", memdom);
-	dump_alloc_stats ();
+	alloc_unlock ();
 }
 
 static void
@@ -318,13 +341,6 @@ done:
 	alloc_unlock ();
 
 	dump_alloc_stats ();
-}
-
-static void
-runtime_free_event (MonoProfiler *prof, void *address)
-{
-	// if (PRINT_RT_ALLOC)
-	// 	printf ("free %p\n", address);
 }
 
 static void
@@ -419,6 +435,7 @@ add_alloc (void *address, size_t size, const char *tag)
 static void
 dump_stats (void)
 {
+	int i;
 	alloc_lock ();
 	printf ("-------\n");
 	printf ("alloc %zu alloc count %zu waste %zu\n", alloc_bytes, alloc_count, alloc_waste);
@@ -450,6 +467,9 @@ dump_stats (void)
 		});
 	}
 
+	printf ("---memdom:\n");
+	for (i = 1; i < MEMDOM_MAX; ++i)
+		printf ("\t%s count %zu\n", memdom_name [i], memdom_count [i]);
 
 	alloc_unlock ();
 }
@@ -537,9 +557,11 @@ mono_profiler_startup (const char *desc)
 
 	hashtable_init (&tag_table, hash_str, equals_str);
 	hashtable_init (&alloc_table, hash_ptr, equals_ptr);
+	hashtable_init (&memdom_table, hash_ptr, equals_ptr);
+
 	mono_profiler_install (prof, prof_shutdown);
 	mono_profiler_install_memdom (memdom_new, memdom_destroy, memdom_alloc);
-	mono_profiler_install_malloc (runtime_malloc_event, runtime_free_event);
+	mono_profiler_install_malloc (runtime_malloc_event);
 	mono_profiler_install_valloc (runtime_valloc_event, runtime_vfree_event);
 	mono_profiler_install_runtime_initialized (runtime_inited);
 

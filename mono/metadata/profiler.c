@@ -114,7 +114,6 @@ struct _ProfilerDesc {
 	MonoProfilerMemdomDestroy memdom_destroy;
 	MonoProfilerMemdomAlloc memdom_alloc;
 	MonoProfilerAlloc malloc_event;
-	MonoProfilerFree free_event;
 	MonoProfilerAlloc valloc_event;
 	MonoProfilerVFree vfree_event;
 };
@@ -1018,14 +1017,12 @@ mono_profiler_install_memdom (MonoProfilerMemdomNew new_cb, MonoProfilerMemdomDe
 }
 
 void
-mono_profiler_install_malloc (MonoProfilerAlloc malloc, MonoProfilerFree free)
+mono_profiler_install_malloc (MonoProfilerAlloc malloc)
 {
 	if (!prof_list)
 		return;
 
 	prof_list->malloc_event = malloc;
-	prof_list->free_event = free;
-
 	eg_mem_set_profcallback (mono_profiler_malloc);
 }
 
@@ -1077,7 +1074,6 @@ PROF_EVENT_1(mono_profiler_memdom_destroy, memdom_destroy, gpointer)
 PROF_EVENT_3(mono_profiler_memdom_alloc, memdom_alloc, void*, size_t, const char*)
 
 PROF_EVENT_3(mono_profiler_malloc, malloc_event, void*, size_t, const char*)
-PROF_EVENT_1(mono_profiler_free, free_event, void*)
 
 PROF_EVENT_3(mono_profiler_valloc, valloc_event, void*, size_t, const char*)
 PROF_EVENT_2(mono_profiler_vfree, vfree_event, void*, size_t)
