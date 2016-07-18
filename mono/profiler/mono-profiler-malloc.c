@@ -188,41 +188,51 @@ typedef struct {
 } TagInfo;
 
 typedef struct {
+	HashTable table;
+	size_t alloc_bytes;
+	size_t alloc_waste;
+	size_t alloc_count;
+} TagBag;
+
+typedef struct {
 	HashNode node;
 	int kind;
 } MemDomInfo;
 
-static HashTable tag_table;
-static size_t rt_alloc_bytes, rt_alloc_count, rt_alloc_waste;
-
+static TagBag malloc_tags;
 static HashTable alloc_table;
 static size_t alloc_bytes, alloc_count, alloc_waste;
 
-
+static void
+tagbag_init (TagBag *bag)
+{
+	hashtable_init (&bag->table, hash_str, equals_str);
+	bag->alloc_bytes = bag->alloc_waste = bag->alloc_count = 0;
+}
 
 static void
-update_tag (const char *tag, ssize_t size, ssize_t waste)
+update_tag (TagBag *tag_bag, const char *tag, ssize_t size, ssize_t waste)
 {
-	TagInfo *info = hashtable_find (&tag_table, tag);
+	TagInfo *info = hashtable_find (&tag_bag->table, tag);
 
 	if (!info) {
 		info = malloc (sizeof (TagInfo));
 		info->size = info->waste = info->count = 0;
-		hashtable_add (&tag_table, &info->node, tag);
+		hashtable_add (&tag_bag->table, &info->node, tag);
 	}
 
 	info->size += size;
 	info->waste += waste;
 
-	rt_alloc_bytes += size;
-	rt_alloc_waste += waste;
+	tag_bag->alloc_bytes += size;
+	tag_bag->alloc_waste += waste;
 
 	if (size > 0) {
 		++info->count;
-		++rt_alloc_count;
+		++tag_bag->alloc_count;
 	} else {
 		--info->count;
-		--rt_alloc_count;
+		--tag_bag->alloc_count;
 	}
 }
 
@@ -329,7 +339,7 @@ runtime_malloc_event (MonoProfiler *prof, void *address, size_t size, const char
 	}
 
 	info->tag = tag;
-	update_tag (tag, info->size, info->waste);
+	update_tag (&malloc_tags, tag, info->size, info->waste);
 
 	if (!strcmp (tag, "ghashtable")) {
 		const char *f = filter_bt (3, "g_hash_table");
@@ -379,7 +389,7 @@ del_alloc (void *address)
 		alloc_waste -= info->waste;
 
 		if (info->tag)
-			update_tag (info->tag, -info->size, -info->waste);
+			update_tag (&malloc_tags, info->tag, -info->size, -info->waste);
 
 		g_free (info);
 	}
@@ -439,28 +449,28 @@ dump_stats (void)
 	alloc_lock ();
 	printf ("-------\n");
 	printf ("alloc %zu alloc count %zu waste %zu\n", alloc_bytes, alloc_count, alloc_waste);
-	printf ("rt alloc %zu alloc count %zu waste %zu\n", rt_alloc_bytes, rt_alloc_count, rt_alloc_waste);
+	printf ("rt alloc %zu alloc count %zu waste %zu\n", malloc_tags.alloc_bytes, malloc_tags.alloc_count, malloc_tags.alloc_waste);
 	printf ("   reported %.2f memory and %.2f allocs\n",
-		rt_alloc_bytes / (float)alloc_bytes,
-		rt_alloc_count / (float)alloc_count);
+		malloc_tags.alloc_bytes / (float)alloc_bytes,
+		malloc_tags.alloc_count / (float)alloc_count);
 
 	printf ("tag summary:\n");
 
-	HT_FOREACH (&tag_table, TagInfo, info, {
+	HT_FOREACH (&malloc_tags.table, TagInfo, info, {
 		if (info->size)
 			printf ("   %s: alloc %zu waste %zu count %zu\n", info->node.key, info->size, info->waste, info->count);
 	});
 	printf ("----\n");
 
 	if (STRAY_ALLOCS) {
-		HT_FOREACH (&tag_table, AllocInfo, info, {
+		HT_FOREACH (&alloc_table, AllocInfo, info, {
 				if (!info->tag)
 					printf ("stay alloc from %s\n", info->alloc_func);
 		});
 	}
 
 	if (POKE_HASH_TABLES) {
-		HT_FOREACH (&tag_table, AllocInfo, info, {
+		HT_FOREACH (&alloc_table, AllocInfo, info, {
 			if (!info->tag || strcmp ("ghashtable", info->tag))
 				continue;
 			printf ("hashtable size %d from %s\n", g_hash_table_size ((GHashTable*)info->node.key), info->alloc_func);
@@ -555,7 +565,7 @@ mono_profiler_startup (const char *desc)
 
 	prof = g_new0 (MonoProfiler, 1);
 
-	hashtable_init (&tag_table, hash_str, equals_str);
+	tagbag_init (&malloc_tags);
 	hashtable_init (&alloc_table, hash_ptr, equals_ptr);
 	hashtable_init (&memdom_table, hash_ptr, equals_ptr);
 
@@ -578,5 +588,3 @@ mono_profiler_startup (const char *desc)
 
 
 }
-
-
