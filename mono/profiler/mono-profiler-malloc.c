@@ -59,19 +59,98 @@ alloc_unlock (void)
 	pthread_mutex_unlock (&alloc_mutex);
 }
 
+/* Hashtable implementation. Can't use glib's as it reports memory usage itself */
+
 /* maybe we could make it dynamic later */
 #define TABLE_SIZE 1019
 
-static int
-hash_ptr (size_t ptr)
+typedef struct _HashNode HashNode;
+
+struct _HashNode {
+	const void *key;
+	HashNode *next;
+};
+
+typedef bool (*ht_equals) (const void *keyA, const void *keyB);
+typedef unsigned int (*ht_hash) (const void *key);
+
+typedef struct {
+	ht_hash hash;
+	ht_equals equals;
+	void* table [TABLE_SIZE];
+} HashTable;
+
+static void
+hashtable_init (HashTable *table, ht_hash hash, ht_equals equals)
 {
-	return abs ((int)((ptr * 1737350767) ^ ((ptr * 196613) >> 16)));
+	table->hash = hash;
+	table->equals = equals;
+	memset (table->table, 0, TABLE_SIZE * sizeof (void*));
+}
+
+static void*
+hashtable_find (HashTable *table, const void *key)
+{
+	int bucket = table->hash (key) % TABLE_SIZE;
+
+	HashNode *node = NULL;
+	for (node = table->table [bucket]; node; node = node->next) {
+		if (table->equals (key, node->key))
+			break;
+	}
+	return node;
+}
+
+static void
+hashtable_add (HashTable *table, HashNode *node, const void *key)
+{
+	int bucket = table->hash (key) % TABLE_SIZE;
+	node->key = key;
+	node->next = table->table [bucket];
+	table->table [bucket] = node;
+}
+
+static HashNode*
+hashtable_remove (HashTable *table, const void *key)
+{
+	int bucket = table->hash (key) % TABLE_SIZE;
+
+	HashNode **prev;
+
+	for (prev = (HashNode**)&table->table [bucket]; *prev; prev = &(*prev)->next) {
+		HashNode *node = *prev;
+		if (table->equals (node->key, key)) {
+			*prev = node->next;
+			node->next = NULL;
+			return node;
+		}
+	}
+	return NULL;
+}
+
+#define HT_FOREACH(HT,NODE_TYPE,NODE_VAR,CODE_BLOCK) {	\
+	int __i;	\
+	for (__i = 0; __i < TABLE_SIZE; ++__i) {	\
+		HashNode *__node;	\
+		for (__node = (HT)->table [__i]; __node; __node = __node->next) { 	\
+			NODE_TYPE *NODE_VAR = (NODE_TYPE *)__node; 	\
+			CODE_BLOCK \
+		}	\
+	}	\
+}
+
+static unsigned int
+hash_ptr (const void *ptr)
+{
+	size_t addr = (size_t)ptr;
+	return abs ((int)((addr * 1737350767) ^ ((addr * 196613) >> 16)));
 }
 
 
-static int
-hash_str (const char *str)
+static unsigned int
+hash_str (const void *key)
 {
+	const char *str = key;
 	int hash = 0;
 
 	while (*str++)
@@ -80,53 +159,54 @@ hash_str (const char *str)
 	return abs (hash);
 }
 
-typedef struct _AllocInfo AllocInfo;
+static bool
+equals_ptr (const void *a, const void *b)
+{
+	return a == b;
+}
 
-struct _AllocInfo {
-	void *address;
+static bool
+equals_str (const void *a, const void *b)
+{
+	return !strcmp (a, b);
+}
+
+typedef struct {
+	HashNode node;
 	size_t size;
 	size_t waste;
 	const char *tag;
 	const char *alloc_func;
-	AllocInfo *next;
-};
-
-typedef struct _TagInfo TagInfo;
+} AllocInfo;
 
 /* malloc tracking */
-struct _TagInfo {
-	const char *tag;
+typedef struct {
+	HashNode node;
 	size_t size;
 	size_t waste;
 	size_t count;
-	TagInfo *next;
-};
+} TagInfo;
 
 
-static AllocInfo* get_alloc (void *address);
-
-static TagInfo *tag_table [TABLE_SIZE];
+static HashTable tag_table;
 static size_t rt_alloc_bytes, rt_alloc_count, rt_alloc_waste;
+
+static HashTable alloc_table;
+static size_t alloc_bytes, alloc_count, alloc_waste;
+
 
 
 static void
 update_tag (const char *tag, ssize_t size, ssize_t waste)
 {
-	int bucket = hash_str (tag) % TABLE_SIZE;
-
-	TagInfo *info;
-	for (info = tag_table [bucket]; info; info = info->next) {
-		if (!strcmp (tag, info->tag))
-			break;
-	}
+	TagInfo *info = hashtable_find (&tag_table, tag);
 
 	if (!info) {
 		info = malloc (sizeof (TagInfo));
-		info->tag = tag;
 		info->size = info->waste = info->count = 0;
-		info->next = tag_table [bucket];
-		tag_table [bucket] = info;
+		hashtable_add (&tag_table, &info->node, tag);
 	}
+
 	info->size += size;
 	info->waste += waste;
 
@@ -140,7 +220,6 @@ update_tag (const char *tag, ssize_t size, ssize_t waste)
 		--info->count;
 		--rt_alloc_count;
 	}
-
 }
 
 static void __attribute__((noinline))
@@ -202,11 +281,12 @@ filter_bt (int skip, const char *filter_funcs)
 	}
 	return NULL;
 }
+
 static void
 runtime_malloc_event (MonoProfiler *prof, void *address, size_t size, const char *tag)
 {
 	alloc_lock ();
-	AllocInfo *info = get_alloc (address);
+	AllocInfo *info = hashtable_find (&alloc_table, address);
 	if (!info) {
 		printf ("stray alloc that didn't come from g_malloc %p\n", address);
 		break_on_bad_runtime_malloc ();
@@ -261,11 +341,6 @@ runtime_vfree_event (MonoProfiler *prof, void *address, size_t size)
 		printf ("vfree %p %zu\n", address, size);
 }
 
-/* malloc tracking */
-static AllocInfo *alloc_table [TABLE_SIZE];
-
-static size_t alloc_bytes, alloc_count, alloc_waste;
-
 static void __attribute__((noinline))
 break_on_malloc_waste (void)
 {
@@ -276,63 +351,36 @@ break_on_large_alloc (void)
 {
 }
 
-static AllocInfo*
-get_alloc (void *address)
-{
-	size_t addr = (size_t)address;
-	int bucket = hash_ptr (addr) % TABLE_SIZE;
-
-	AllocInfo *info;
-	for (info = alloc_table [bucket]; info; info = info->next) {
-		if (info->address == address)
-			return info;
-	}
-	return NULL;
-}
-
 static void
 del_alloc (void *address)
 {
-	size_t addr = (size_t)address;
-	int bucket = hash_ptr (addr) % TABLE_SIZE;
-
-	AllocInfo **prev;
-
 	alloc_lock ();
-	for (prev = &alloc_table [bucket]; *prev; prev = &(*prev)->next) {
-		AllocInfo *info = *prev;
-		if (info->address == address) {
-			alloc_bytes -= info->size;
-			--alloc_count;
-			alloc_waste -= info->waste;
+	AllocInfo *info = (AllocInfo*)hashtable_remove (&alloc_table, address);
 
-			*prev = info->next;
+	if (info) {
+		alloc_bytes -= info->size;
+		--alloc_count;
+		alloc_waste -= info->waste;
 
-			if (info->tag)
-				update_tag (info->tag, -info->size, -info->waste);
+		if (info->tag)
+			update_tag (info->tag, -info->size, -info->waste);
 
-			g_free (info);
-			break;
-		}
+		g_free (info);
 	}
+
 	alloc_unlock ();
 }
 
 static void
 add_alloc (void *address, size_t size, const char *tag)
 {
-	size_t addr = (size_t)address;
-	int bucket = hash_ptr (addr) % TABLE_SIZE;
-
 	AllocInfo *info = malloc (sizeof (AllocInfo));
-	info->address = address;
 	info->size = size;
 	info->tag = NULL;
 	info->waste = malloc_size (address) - size;
 
 	alloc_lock ();
-	info->next = alloc_table [bucket];
-	alloc_table [bucket] = info;
+	hashtable_add (&alloc_table, &info->node, address);
 
 	alloc_bytes += size;
 	++alloc_count;
@@ -379,41 +427,27 @@ dump_stats (void)
 		rt_alloc_bytes / (float)alloc_bytes,
 		rt_alloc_count / (float)alloc_count);
 
-
 	printf ("tag summary:\n");
-	TagInfo *info;
-	int i;
-	int max_bucket = 0;
-	for (i = 0; i < TABLE_SIZE; ++i) {
-		int c = 0;
-		for (info = tag_table[i]; info; info = info->next) {
-			++c;
-			if (info->size)
-				printf ("   %s: alloc %zu waste %zu count %zu\n", info->tag, info->size, info->waste, info->count);
-		}
-		max_bucket = MAX (max_bucket, c);
-	}
-	printf ("---- (collision max %d)\n", max_bucket);
+
+	HT_FOREACH (&tag_table, TagInfo, info, {
+		if (info->size)
+			printf ("   %s: alloc %zu waste %zu count %zu\n", info->node.key, info->size, info->waste, info->count);
+	});
+	printf ("----\n");
 
 	if (STRAY_ALLOCS) {
-		AllocInfo *ainfo;
-		for (i = 0; i < TABLE_SIZE; ++i) {
-			for (ainfo = alloc_table[i]; ainfo; ainfo = ainfo->next) {
-				if (!ainfo->tag)
-					printf ("stay alloc from %s\n", ainfo->alloc_func);
-			}
-		}
+		HT_FOREACH (&tag_table, AllocInfo, info, {
+				if (!info->tag)
+					printf ("stay alloc from %s\n", info->alloc_func);
+		});
 	}
 
 	if (POKE_HASH_TABLES) {
-		AllocInfo *ainfo;
-		for (i = 0; i < TABLE_SIZE; ++i) {
-			for (ainfo = alloc_table[i]; ainfo; ainfo = ainfo->next) {
-				if (!ainfo->tag || strcmp ("ghashtable", ainfo->tag))
-					continue;
-				printf ("hashtable size %d from %s\n", g_hash_table_size (ainfo->address), ainfo->alloc_func);
-			}
-		}		
+		HT_FOREACH (&tag_table, AllocInfo, info, {
+			if (!info->tag || strcmp ("ghashtable", info->tag))
+				continue;
+			printf ("hashtable size %d from %s\n", g_hash_table_size ((GHashTable*)info->node.key), info->alloc_func);
+		});
 	}
 
 
@@ -452,7 +486,7 @@ platform_malloc (size_t size)
 static void *
 platform_realloc (void *mem, size_t count)
 {
-	AllocInfo *old = get_alloc (mem);
+	AllocInfo *old = hashtable_find (&alloc_table, mem);
 	const char *tag = old ? old->tag : NULL;
 
 	del_alloc (mem);
@@ -501,6 +535,8 @@ mono_profiler_startup (const char *desc)
 
 	prof = g_new0 (MonoProfiler, 1);
 
+	hashtable_init (&tag_table, hash_str, equals_str);
+	hashtable_init (&alloc_table, hash_ptr, equals_ptr);
 	mono_profiler_install (prof, prof_shutdown);
 	mono_profiler_install_memdom (memdom_new, memdom_destroy, memdom_alloc);
 	mono_profiler_install_malloc (runtime_malloc_event, runtime_free_event);
