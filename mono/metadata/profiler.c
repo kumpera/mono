@@ -26,6 +26,8 @@
 #include "mono/utils/mono-dl.h"
 #include <mono/utils/mono-logger-internals.h>
 #include <string.h>
+#include <eg-alloc.h>
+
 #ifdef HAVE_UNISTD_H
 #include <unistd.h>
 #endif
@@ -111,10 +113,10 @@ struct _ProfilerDesc {
 	MonoProfilerMemdomNew memdom_new;
 	MonoProfilerMemdomDestroy memdom_destroy;
 	MonoProfilerMemdomAlloc memdom_alloc;
-	MonoProfilerAllocOp malloc_event;
-	MonoProfilerAllocOp free_event;
-	MonoProfilerAllocOp valloc_event;
-	MonoProfilerAllocOp vfree_event;
+	MonoProfilerAlloc malloc_event;
+	MonoProfilerFree free_event;
+	MonoProfilerAlloc valloc_event;
+	MonoProfilerVFree vfree_event;
 };
 
 static ProfilerDesc *prof_list = NULL;
@@ -1016,17 +1018,19 @@ mono_profiler_install_memdom (MonoProfilerMemdomNew new_cb, MonoProfilerMemdomDe
 }
 
 void
-mono_profiler_install_malloc (MonoProfilerAllocOp malloc, MonoProfilerAllocOp free)
+mono_profiler_install_malloc (MonoProfilerAlloc malloc, MonoProfilerFree free)
 {
 	if (!prof_list)
 		return;
 
 	prof_list->malloc_event = malloc;
 	prof_list->free_event = free;
+
+	eg_mem_set_profcallback (mono_profiler_malloc);
 }
 
 void
-mono_profiler_install_valloc (MonoProfilerAllocOp valloc, MonoProfilerAllocOp vfree)
+mono_profiler_install_valloc (MonoProfilerAlloc valloc, MonoProfilerVFree vfree)
 {
 	if (!prof_list)
 		return;
@@ -1073,10 +1077,10 @@ PROF_EVENT_1(mono_profiler_memdom_destroy, memdom_destroy, gpointer)
 PROF_EVENT_3(mono_profiler_memdom_alloc, memdom_alloc, void*, size_t, const char*)
 
 PROF_EVENT_3(mono_profiler_malloc, malloc_event, void*, size_t, const char*)
-PROF_EVENT_3(mono_profiler_free, free_event, void*, size_t, const char*)
+PROF_EVENT_1(mono_profiler_free, free_event, void*)
 
 PROF_EVENT_3(mono_profiler_valloc, valloc_event, void*, size_t, const char*)
-PROF_EVENT_3(mono_profiler_vfree, vfree_event, void*, size_t, const char*)
+PROF_EVENT_2(mono_profiler_vfree, vfree_event, void*, size_t)
 
 static GHashTable *coverage_hash = NULL;
 

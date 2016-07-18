@@ -170,7 +170,9 @@ typedef void (*MonoProfilerMemdomNew) (MonoProfiler *prof, void* memdom, MonoPro
 typedef void (*MonoProfilerMemdomDestroy) (MonoProfiler *prof, void* memdom);
 typedef void (*MonoProfilerMemdomAlloc) (MonoProfiler *prof, void* memdom, size_t size, const char *tag);
 
-typedef void (*MonoProfilerAllocOp) (MonoProfiler *prof, void *address, size_t size, const char *tag);
+typedef void (*MonoProfilerAlloc) (MonoProfiler *prof, void *address, size_t size, const char *tag);
+typedef void (*MonoProfilerFree) (MonoProfiler *prof, void *address);
+typedef void (*MonoProfilerVFree) (MonoProfiler *prof, void *address, size_t size);
 
 /*
  * Function the profiler may call.
@@ -218,8 +220,8 @@ MONO_API void mono_profiler_install_code_buffer_new (MonoProfilerCodeBufferNew c
 MONO_API void mono_profiler_install_iomap (MonoProfileIomapFunc callback);
 
 MONO_API void mono_profiler_install_memdom (MonoProfilerMemdomNew new_cb, MonoProfilerMemdomDestroy destroy_cb, MonoProfilerMemdomAlloc alloc_cb);
-MONO_API void mono_profiler_install_malloc (MonoProfilerAllocOp malloc, MonoProfilerAllocOp free);
-MONO_API void mono_profiler_install_valloc (MonoProfilerAllocOp valloc, MonoProfilerAllocOp vfree);
+MONO_API void mono_profiler_install_malloc (MonoProfilerAlloc malloc, MonoProfilerFree free);
+MONO_API void mono_profiler_install_valloc (MonoProfilerAlloc valloc, MonoProfilerVFree vfree);
 
 MONO_API void mono_profiler_load             (const char *desc);
 

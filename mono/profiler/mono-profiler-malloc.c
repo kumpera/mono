@@ -27,11 +27,15 @@
 
 //OSX only
 #include <malloc/malloc.h>
+#include <execinfo.h>
+#include <dlfcn.h>
 
 //XXX for now all configuration is here
 #define PRINT_ALLOCATION FALSE
 #define PRINT_MEMDOM FALSE
 #define PRINT_RT_ALLOC FALSE
+#define STRAY_ALLOCS FALSE
+#define POKE_HASH_TABLES FALSE
 
 void mono_profiler_startup (const char *desc);
 static void dump_alloc_stats (void);
@@ -83,6 +87,7 @@ struct _AllocInfo {
 	size_t size;
 	size_t waste;
 	const char *tag;
+	const char *alloc_func;
 	AllocInfo *next;
 };
 
@@ -93,6 +98,7 @@ struct _TagInfo {
 	const char *tag;
 	size_t size;
 	size_t waste;
+	size_t count;
 	TagInfo *next;
 };
 
@@ -117,7 +123,7 @@ update_tag (const char *tag, ssize_t size, ssize_t waste)
 	if (!info) {
 		info = malloc (sizeof (TagInfo));
 		info->tag = tag;
-		info->size = info->waste = 0;
+		info->size = info->waste = info->count = 0;
 		info->next = tag_table [bucket];
 		tag_table [bucket] = info;
 	}
@@ -127,10 +133,13 @@ update_tag (const char *tag, ssize_t size, ssize_t waste)
 	rt_alloc_bytes += size;
 	rt_alloc_waste += waste;
 
-	if (size > 0)
+	if (size > 0) {
+		++info->count;
 		++rt_alloc_count;
-	else
+	} else {
+		--info->count;
 		--rt_alloc_count;
+	}
 
 }
 
@@ -170,6 +179,29 @@ memdom_alloc (MonoProfiler *prof, void* memdom, size_t size, const char *tag)
 		printf ("memdom %p alloc %zu %s\n", memdom, size, tag);
 }
 
+static const char*
+filter_bt (int skip, const char *filter_funcs)
+{
+	void *bt_ptrs [10];
+ 	int c = backtrace (bt_ptrs, 10);
+	if (c) {
+		int i;
+		const char *it = NULL;
+		for (i = 0; i < c - (skip + 1); ++i) {
+			Dl_info info;
+			if (!dladdr (bt_ptrs [skip + i], &info))
+				continue;
+			if (strstr (info.dli_sname, "_malloc") || strstr (info.dli_sname, "report_alloc"))
+				continue;
+			if (strstr (info.dli_sname, filter_funcs))
+				continue;
+			it = info.dli_sname;
+			break;
+		}
+		return it;
+	}
+	return NULL;
+}
 static void
 runtime_malloc_event (MonoProfiler *prof, void *address, size_t size, const char *tag)
 {
@@ -195,6 +227,12 @@ runtime_malloc_event (MonoProfiler *prof, void *address, size_t size, const char
 
 	info->tag = tag;
 	update_tag (tag, info->size, info->waste);
+
+	if (!strcmp (tag, "ghashtable")) {
+		const char *f = filter_bt (3, "g_hash_table");
+		// printf ("hashtable %p allocated from %s\n", address, f);
+		info->alloc_func = f;
+	}
 
 done:
 	alloc_unlock ();
@@ -231,7 +269,11 @@ static size_t alloc_bytes, alloc_count, alloc_waste;
 static void __attribute__((noinline))
 break_on_malloc_waste (void)
 {
-	
+}
+
+static void __attribute__((noinline))
+break_on_large_alloc (void)
+{
 }
 
 static AllocInfo*
@@ -296,10 +338,34 @@ add_alloc (void *address, size_t size, const char *tag)
 	++alloc_count;
 	alloc_waste += info->waste;
 
+	if (STRAY_ALLOCS) {
+		int skip = 2;
+		void *bt_ptrs [10];
+	 	int c = backtrace (bt_ptrs, 10);
+		if (c) {
+			int i;
+			const char *it = NULL;
+			for (i = 0; i < c - (skip + 1); ++i) {
+				Dl_info info;
+				if (!dladdr (bt_ptrs [skip + i], &info))
+					continue;
+				if (strstr (info.dli_sname, "g_malloc") || strstr (info.dli_sname, "g_calloc") || strstr (info.dli_sname, "m_malloc")
+					|| strstr (info.dli_sname, "g_realloc") || strstr (info.dli_sname, "g_memdup") || strstr (info.dli_sname, "g_slist_alloc") || strstr (info.dli_sname, "g_list_alloc")
+					|| strstr (info.dli_sname, "g_strndup") || strstr (info.dli_sname, "g_vasprintf") || strstr (info.dli_sname, "g_slist_prepend"))
+					continue;
+				it = info.dli_sname;
+				break;
+			}
+			info->alloc_func = it;
+		}
+	}
+
 	alloc_unlock ();
 
 	if (info->waste > 10)
 		break_on_malloc_waste ();
+	if (size > 1000)
+		break_on_large_alloc ();
 }
 
 static void
@@ -322,11 +388,34 @@ dump_stats (void)
 		int c = 0;
 		for (info = tag_table[i]; info; info = info->next) {
 			++c;
-			printf ("   %s: alloc %zu waste %zu\n", info->tag, info->size, info->waste);
+			if (info->size)
+				printf ("   %s: alloc %zu waste %zu count %zu\n", info->tag, info->size, info->waste, info->count);
 		}
 		max_bucket = MAX (max_bucket, c);
 	}
 	printf ("---- (collision max %d)\n", max_bucket);
+
+	if (STRAY_ALLOCS) {
+		AllocInfo *ainfo;
+		for (i = 0; i < TABLE_SIZE; ++i) {
+			for (ainfo = alloc_table[i]; ainfo; ainfo = ainfo->next) {
+				if (!ainfo->tag)
+					printf ("stay alloc from %s\n", ainfo->alloc_func);
+			}
+		}
+	}
+
+	if (POKE_HASH_TABLES) {
+		AllocInfo *ainfo;
+		for (i = 0; i < TABLE_SIZE; ++i) {
+			for (ainfo = alloc_table[i]; ainfo; ainfo = ainfo->next) {
+				if (!ainfo->tag || strcmp ("ghashtable", ainfo->tag))
+					continue;
+				printf ("hashtable size %d from %s\n", g_hash_table_size (ainfo->address), ainfo->alloc_func);
+			}
+		}		
+	}
+
 
 	alloc_unlock ();
 }
@@ -352,7 +441,7 @@ dump_alloc_stats (void)
 
 static void *
 platform_malloc (size_t size)
-{
+{	
 	void * res = malloc (size);
 	add_alloc (res, size, NULL);
 
