@@ -1005,6 +1005,8 @@ mono_profiler_code_buffer_new (gpointer buffer, int size, MonoProfilerCodeBuffer
 	}
 }
 
+gboolean mono_report_memdom_allocs;
+
 void
 mono_profiler_install_memdom (MonoProfilerMemdomNew new_cb, MonoProfilerMemdomDestroy destroy_cb, MonoProfilerMemdomAlloc alloc_cb)
 {
@@ -1014,6 +1016,8 @@ mono_profiler_install_memdom (MonoProfilerMemdomNew new_cb, MonoProfilerMemdomDe
 	prof_list->memdom_new = new_cb;
 	prof_list->memdom_destroy = destroy_cb;
 	prof_list->memdom_alloc = alloc_cb;
+	if (alloc_cb)
+		mono_report_memdom_allocs = TRUE;
 }
 
 void

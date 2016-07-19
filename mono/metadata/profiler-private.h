@@ -86,6 +86,8 @@ MonoProfileSamplingMode mono_profiler_get_sampling_mode (void);
 
 void mono_profiler_memdom_new (gpointer memdom, MonoProfilerMemoryDomain kind);
 void mono_profiler_memdom_destroy (gpointer memdom);
+
+extern gboolean mono_report_memdom_allocs;
 void mono_profiler_memdom_alloc (gpointer memdom, size_t size, const char *tag);
 
 /* Only use this for large allocs. */

@@ -2264,7 +2264,7 @@ mono_class_create_runtime_vtable (MonoDomain *domain, MonoClass *klass, MonoErro
 		/* this is a bounded memory retention issue: may want to 
 		 * handle it differently when we'll have a rcu-like system.
 		 */
-		runtime_info = (MonoClassRuntimeInfo *)mono_image_alloc0 (klass->image, MONO_SIZEOF_CLASS_RUNTIME_INFO + new_size * sizeof (gpointer));
+		runtime_info = (MonoClassRuntimeInfo *)mono_image_alloc0 (klass->image, MONO_SIZEOF_CLASS_RUNTIME_INFO + new_size * sizeof (gpointer), "class:runtime-info");
 		runtime_info->max_domain = new_size - 1;
 		/* copy the stuff from the older info */
 		if (old_info) {
@@ -7313,7 +7313,7 @@ mono_string_to_utf8_internal (MonoMemPool *mp, MonoImage *image, MonoString *s, 
 	if (mp)
 		mp_s = (char *)mono_mempool_alloc (mp, len);
 	else
-		mp_s = (char *)mono_image_alloc (image, len);
+		mp_s = (char *)mono_image_alloc (image, len, "string-to-utf8");
 
 	memcpy (mp_s, r, len);
 

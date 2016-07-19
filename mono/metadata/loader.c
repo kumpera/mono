@@ -1065,7 +1065,7 @@ mono_dllmap_insert (MonoImage *assembly, const char *dll, const char *func, cons
 		global_dll_map = entry;
 		global_loader_data_unlock ();
 	} else {
-		entry = (MonoDllMap *)mono_image_alloc0 (assembly, sizeof (MonoDllMap));
+		entry = (MonoDllMap *)mono_image_alloc0 (assembly, sizeof (MonoDllMap), "dllmap");
 		entry->dll = dll? mono_image_strdup (assembly, dll): NULL;
 		entry->target = tdll? mono_image_strdup (assembly, tdll): NULL;
 		entry->func = func? mono_image_strdup (assembly, func): NULL;
@@ -1633,9 +1633,9 @@ mono_get_method_from_token (MonoImage *image, guint32 token, MonoClass *klass,
 
 	if ((cols [2] & METHOD_ATTRIBUTE_PINVOKE_IMPL) ||
 	    (cols [1] & METHOD_IMPL_ATTRIBUTE_INTERNAL_CALL)) {
-		result = (MonoMethod *)mono_image_alloc0 (image, sizeof (MonoMethodPInvoke));
+		result = (MonoMethod *)mono_image_alloc0 (image, sizeof (MonoMethodPInvoke), "method:pinvoke");
 	} else {
-		result = (MonoMethod *)mono_image_alloc0 (image, sizeof (MonoMethod));
+		result = (MonoMethod *)mono_image_alloc0 (image, sizeof (MonoMethod), "method:normal");
 		methods_size += sizeof (MonoMethod);
 	}
 

@@ -541,7 +541,7 @@ decode_klass_ref (MonoAotModule *module, guint8 *buf, guint8 **endbuf, MonoError
 				t->data.generic_param = mono_generic_container_get_param (container, num);
 			} else {
 				/* Anonymous */
-				MonoGenericParam *par = (MonoGenericParam*)mono_image_alloc0 (module->assembly->image, sizeof (MonoGenericParamFull));
+				MonoGenericParam *par = (MonoGenericParam*)mono_image_alloc0 (module->assembly->image, sizeof (MonoGenericParamFull), "aot-runtime:anon-generic-param");
 				par->owner = container;
 				par->num = num;
 				t->data.generic_param = par;

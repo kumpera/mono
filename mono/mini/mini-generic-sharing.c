@@ -358,7 +358,7 @@ alloc_template (MonoClass *klass)
 	num_templates_allocted++;
 	num_templates_bytes += size;
 
-	return (MonoRuntimeGenericContextTemplate *)mono_image_alloc0 (klass->image, size);
+	return (MonoRuntimeGenericContextTemplate *)mono_image_alloc0 (klass->image, size, "gsharing:runtime-generic-context-template");
 }
 
 /* LOCKING: Takes the loader lock */
@@ -370,7 +370,7 @@ alloc_oti (MonoImage *image)
 	num_oti_allocted++;
 	num_oti_bytes += size;
 
-	return (MonoRuntimeGenericContextInfoTemplate *)mono_image_alloc0 (image, size);
+	return (MonoRuntimeGenericContextInfoTemplate *)mono_image_alloc0 (image, size, "gsharing:runtime-gneeirc-context-info-template");
 }
 
 #define MONO_RGCTX_SLOT_USED_MARKER	((gpointer)&mono_defaults.object_class->byval_arg)
@@ -3311,7 +3311,7 @@ mini_get_shared_gparam (MonoType *t, MonoType *constraint)
 	mono_image_unlock (image);
 	if (res)
 		return res;
-	copy = (MonoGSharedGenericParam *)mono_image_alloc0 (image, sizeof (MonoGSharedGenericParam));
+	copy = (MonoGSharedGenericParam *)mono_image_alloc0 (image, sizeof (MonoGSharedGenericParam), "gsharing:generic-param-dup");
 	memcpy (&copy->param, par, sizeof (MonoGenericParamFull));
 	copy->param.info.pklass = NULL;
 	name = get_shared_gparam_name (constraint->type, ((MonoGenericParamFull*)copy)->info.name);
