@@ -1426,7 +1426,7 @@ static gpointer
 mono_class_alloc (MonoClass *klass, int size, const char *what)
 {
 	if (klass->generic_class)
-		return mono_image_set_alloc (klass->generic_class->owner, size);
+		return mono_image_set_alloc (klass->generic_class->owner, size, what);
 	else
 		return mono_image_alloc (klass->image, size, what);
 }
@@ -6004,7 +6004,7 @@ mono_generic_class_get_class (MonoGenericClass *gclass)
 		return gclass->cached_class;
 	}
 
-	klass = (MonoClass *)mono_image_set_alloc0 (gclass->owner, sizeof (MonoClass));
+	klass = (MonoClass *)mono_image_set_alloc0 (gclass->owner, sizeof (MonoClass), "class");
 
 	gklass = gclass->container_class;
 

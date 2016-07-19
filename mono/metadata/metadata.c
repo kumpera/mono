@@ -2438,7 +2438,7 @@ mono_image_set_unlock (MonoImageSet *set)
 }
 
 gpointer
-mono_image_set_alloc (MonoImageSet *set, guint size)
+mono_image_set_alloc (MonoImageSet *set, guint size, const char *what)
 {
 	gpointer res;
 
@@ -2447,12 +2447,13 @@ mono_image_set_alloc (MonoImageSet *set, guint size)
 		set->mempool = mono_mempool_new_size (INITIAL_IMAGE_SET_SIZE);
 	res = mono_mempool_alloc (set->mempool, size);
 	mono_image_set_unlock (set);
+	mono_profiler_memdom_alloc (set, size, what);
 
 	return res;
 }
 
 gpointer
-mono_image_set_alloc0 (MonoImageSet *set, guint size)
+mono_image_set_alloc0 (MonoImageSet *set, guint size, const char *what)
 {
 	gpointer res;
 
@@ -2461,6 +2462,7 @@ mono_image_set_alloc0 (MonoImageSet *set, guint size)
 		set->mempool = mono_mempool_new_size (INITIAL_IMAGE_SET_SIZE);
 	res = mono_mempool_alloc0 (set->mempool, size);
 	mono_image_set_unlock (set);
+	mono_profiler_memdom_alloc (set, size, what);
 
 	return res;
 }
@@ -2475,6 +2477,8 @@ mono_image_set_strdup (MonoImageSet *set, const char *s)
 		set->mempool = mono_mempool_new_size (INITIAL_IMAGE_SET_SIZE);
 	res = mono_mempool_strdup (set->mempool, s);
 	mono_image_set_unlock (set);
+	if (mono_report_memdom_allocs)
+		mono_profiler_memdom_alloc (set, strlen (s) + 1, "strdup");
 
 	return res;
 }
@@ -2920,7 +2924,7 @@ mono_metadata_get_generic_inst (int type_argc, MonoType **type_argv)
 
 	ginst = (MonoGenericInst *)g_hash_table_lookup (set->ginst_cache, ginst);
 	if (!ginst) {
-		ginst = (MonoGenericInst *)mono_image_set_alloc0 (set, size);
+		ginst = (MonoGenericInst *)mono_image_set_alloc0 (set, size, "generic-inst");
 #ifndef MONO_SMALL_CONFIG
 		ginst->id = ++next_generic_inst_id;
 #endif
@@ -2989,11 +2993,11 @@ mono_metadata_lookup_generic_class (MonoClass *container_class, MonoGenericInst 
 	}
 
 	if (is_dynamic) {
-		MonoDynamicGenericClass *dgclass = mono_image_set_new0 (set, MonoDynamicGenericClass, 1);
+		MonoDynamicGenericClass *dgclass = mono_image_set_new0 (set, MonoDynamicGenericClass, 1, "dynamic-generic-class");
 		gclass = &dgclass->generic_class;
 		gclass->is_dynamic = 1;
 	} else {
-		gclass = mono_image_set_new0 (set, MonoGenericClass, 1);
+		gclass = mono_image_set_new0 (set, MonoGenericClass, 1, "generic-class");
 	}
 
 	gclass->is_tb_open = is_tb_open;

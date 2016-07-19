@@ -12608,9 +12608,9 @@ reflection_generic_class_initialize (MonoReflectionGenericClass *type, MonoArray
 
 	dgclass->count_fields = fields ? mono_array_length (fields) : 0;
 
-	dgclass->fields = mono_image_set_new0 (gclass->owner, MonoClassField, dgclass->count_fields);
-	dgclass->field_objects = mono_image_set_new0 (gclass->owner, MonoObject*, dgclass->count_fields);
-	dgclass->field_generic_types = mono_image_set_new0 (gclass->owner, MonoType*, dgclass->count_fields);
+	dgclass->fields = mono_image_set_new0 (gclass->owner, MonoClassField, dgclass->count_fields, "sre:fields");
+	dgclass->field_objects = mono_image_set_new0 (gclass->owner, MonoObject*, dgclass->count_fields, "sre:field-objects");
+	dgclass->field_generic_types = mono_image_set_new0 (gclass->owner, MonoType*, dgclass->count_fields, "sre:field-generic-types");
 
 	for (i = 0; i < dgclass->count_fields; i++) {
 		MonoObject *obj = (MonoObject *)mono_array_get (fields, gpointer, i);

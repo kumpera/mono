@@ -237,10 +237,21 @@ tagbag_cleanup (TagBag *bag)
 	hashtable_cleanup (&bag->table);
 }
 
+static void __attribute__((noinline))
+break_on_zero_size (void)
+{
+}
+
 static void
 update_tag (TagBag *tag_bag, const char *tag, ssize_t size, ssize_t waste)
 {
 	TagInfo *info = hashtable_find (&tag_bag->table, tag);
+
+	if (size == 0)
+		break_on_zero_size ();
+	// if (!strcmp ("class:fields", tag)) {
+	// 	printf ("update %s root %d size %zd\n", tag, tag_bag == &malloc_tags, size);
+	// }
 
 	if (!info) {
 		info = malloc (sizeof (TagInfo));
@@ -254,7 +265,7 @@ update_tag (TagBag *tag_bag, const char *tag, ssize_t size, ssize_t waste)
 	tag_bag->alloc_bytes += size;
 	tag_bag->alloc_waste += waste;
 
-	if (size > 0) {
+	if (size >= 0) {
 		++info->count;
 		++tag_bag->alloc_count;
 	} else {
@@ -511,7 +522,7 @@ dump_memdom (MemDomInfo *memdom)
 		break;
 	}
 	}
-	printf ("%s:", name);
+	printf ("%s:\n", name);
 
 	size_t mt_reported = 0;
 	HT_FOREACH (&memdom->tags.table, TagInfo, info, {
@@ -521,7 +532,7 @@ dump_memdom (MemDomInfo *memdom)
 		}
 	});
 	if (mt_reported)
-		printf (">> REPORTED %zu bytes\n", mt_reported);
+		printf (">> REPORTED %zu bytes allocated %d\n", mt_reported, mono_mempool_get_allocated (mempool));
 	printf ("...\n");
 }
 
