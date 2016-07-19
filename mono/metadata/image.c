@@ -1682,6 +1682,7 @@ mono_image_close_except_pools (MonoImage *image)
 		mono_images_unlock ();
 		return FALSE;
 	}
+	mono_profiler_memdom_destroy (image);
 
 	loaded_images         = get_loaded_images_hash (image->ref_only);
 	loaded_images_by_name = get_loaded_images_by_name_hash (image->ref_only);
@@ -1875,7 +1876,6 @@ mono_image_close_except_pools (MonoImage *image)
 	}
 
 	mono_profiler_module_event (image, MONO_PROFILE_END_UNLOAD);
-	mono_profiler_memdom_destroy (image);
 
 	return TRUE;
 }
