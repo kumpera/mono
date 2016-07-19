@@ -18,6 +18,10 @@
 #include <mono/metadata/tabledefs.h>
 #include <mono/metadata/debug-helpers.h>
 #include <mono/metadata/assembly.h>
+
+#include <mono/metadata/domain-internals.h>
+#include <mono/metadata/metadata-internals.h>
+
 #include <string.h>
 #include <errno.h>
 #include <stdlib.h>
@@ -86,6 +90,22 @@ hashtable_init (HashTable *table, ht_hash hash, ht_equals equals)
 	table->hash = hash;
 	table->equals = equals;
 	memset (table->table, 0, TABLE_SIZE * sizeof (void*));
+}
+
+static void
+hashtable_cleanup (HashTable *table)
+{
+	int i;
+
+	for (i = 0; i < TABLE_SIZE; ++i) {
+		HashNode *node = NULL;
+		for (node = table->table [i]; node;) {
+			HashNode *next = node->next;
+			g_free (node);
+			node = next;
+		}
+		table->table [i] = NULL;
+	}
 }
 
 static void*
@@ -197,6 +217,7 @@ typedef struct {
 typedef struct {
 	HashNode node;
 	int kind;
+	TagBag tags;
 } MemDomInfo;
 
 static TagBag malloc_tags;
@@ -208,6 +229,12 @@ tagbag_init (TagBag *bag)
 {
 	hashtable_init (&bag->table, hash_str, equals_str);
 	bag->alloc_bytes = bag->alloc_waste = bag->alloc_count = 0;
+}
+
+static void
+tagbag_cleanup (TagBag *bag)
+{
+	hashtable_cleanup (&bag->table);
 }
 
 static void
@@ -258,6 +285,7 @@ memdom_new (MonoProfiler *prof, void* memdom, MonoProfilerMemoryDomain kind)
 	alloc_lock ();
 	MemDomInfo *info = malloc (sizeof (MemDomInfo));
 	info->kind = kind;
+	tagbag_init (&info->tags);
 
 	hashtable_add (&memdom_table, &info->node, memdom);
 	++memdom_count [kind];
@@ -276,6 +304,7 @@ memdom_destroy (MonoProfiler *prof, void* memdom)
 
 	if (info) {
 		--memdom_count [info->kind];
+		tagbag_cleanup (&info->tags);
 		g_free (info);
 	}
 
@@ -287,6 +316,11 @@ memdom_destroy (MonoProfiler *prof, void* memdom)
 static void
 memdom_alloc (MonoProfiler *prof, void* memdom, size_t size, const char *tag)
 {
+	alloc_lock ();
+	MemDomInfo *info = hashtable_find (&memdom_table, memdom);
+	if (info)
+		update_tag (&info->tags, tag, size, 0);
+	alloc_unlock ();
 	if (PRINT_RT_ALLOC)
 		printf ("memdom %p alloc %zu %s\n", memdom, size, tag);
 }
@@ -443,6 +477,55 @@ add_alloc (void *address, size_t size, const char *tag)
 }
 
 static void
+dump_memdom (MemDomInfo *memdom)
+{
+	char name [1024];
+	name [0] = 0;
+	MonoMemPool *mempool = NULL;
+	switch (memdom->kind) {
+	case MONO_PROFILE_MEMDOM_APPDOMAIN: {
+		MonoDomain *domain = (MonoDomain *)memdom->node.key;
+		snprintf (name, 1023, "domain_%d", domain->domain_id);
+		mempool = domain->mp;
+		break;
+	}
+
+	case MONO_PROFILE_MEMDOM_IMAGE: {
+		MonoImage *image = (MonoImage *)memdom->node.key;
+		snprintf (name, 1023, "image_%s", image->module_name);
+		mempool = image->mempool;
+		break;
+	}
+
+	case MONO_PROFILE_MEMDOM_IMAGE_SET: {
+		MonoImageSet *set = (MonoImageSet*)memdom->node.key;
+		strlcat (name, "imageset", sizeof (name));
+		int i;
+		for (i = 0; i < set->nimages; ++i) {
+			if (strlcat (name, "_", sizeof (name)) >= sizeof(name))
+				break;
+			if (strlcat (name, set->images [i]->module_name, sizeof (name)) >= sizeof(name))
+				break;
+		}
+		mempool = set->mempool;
+		break;
+	}
+	}
+	printf ("%s:", name);
+
+	size_t mt_reported = 0;
+	HT_FOREACH (&memdom->tags.table, TagInfo, info, {
+		if (info->size) {
+			printf ("   %s: alloc %zu waste %zu count %zu\n", info->node.key, info->size, info->waste, info->count);
+			mt_reported += info->size;
+		}
+	});
+	if (mt_reported)
+		printf (">> REPORTED %zu bytes\n", mt_reported);
+	printf ("...\n");
+}
+
+static void
 dump_stats (void)
 {
 	int i;
@@ -481,6 +564,9 @@ dump_stats (void)
 	for (i = 1; i < MEMDOM_MAX; ++i)
 		printf ("\t%s count %zu\n", memdom_name [i], memdom_count [i]);
 
+	HT_FOREACH (&memdom_table, MemDomInfo, info, {
+		dump_memdom (info);
+	});
 	alloc_unlock ();
 }
 
@@ -585,6 +671,5 @@ mono_profiler_startup (const char *desc)
 
 	if (!mono_set_allocator_vtable (&alloc_vt))
 		printf ("set allocator failed :(\n");
-
 
 }
