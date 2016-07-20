@@ -370,7 +370,7 @@ alloc_oti (MonoImage *image)
 	num_oti_allocted++;
 	num_oti_bytes += size;
 
-	return (MonoRuntimeGenericContextInfoTemplate *)mono_image_alloc0 (image, size, "gsharing:runtime-gneeirc-context-info-template");
+	return (MonoRuntimeGenericContextInfoTemplate *)mono_image_alloc0 (image, size, "gsharing:runtime-generic-context-info-template");
 }
 
 #define MONO_RGCTX_SLOT_USED_MARKER	((gpointer)&mono_defaults.object_class->byval_arg)
