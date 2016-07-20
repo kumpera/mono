@@ -35,7 +35,7 @@
 #include <dlfcn.h>
 
 //XXX for now all configuration is here
-#define PRINT_ALLOCATION FALSE
+#define PRINT_ALLOCATION TRUE
 #define PRINT_MEMDOM FALSE
 #define PRINT_RT_ALLOC FALSE
 #define STRAY_ALLOCS FALSE
@@ -43,6 +43,7 @@
 
 void mono_profiler_startup (const char *desc);
 static void dump_alloc_stats (void);
+static FILE* outfile;
 
 struct _MonoProfiler {
 	int filling;
@@ -334,6 +335,8 @@ memdom_alloc (MonoProfiler *prof, void* memdom, size_t size, const char *tag)
 	alloc_unlock ();
 	if (PRINT_RT_ALLOC)
 		printf ("memdom %p alloc %zu %s\n", memdom, size, tag);
+
+	// dump_alloc_stats ();
 }
 
 static const char*
@@ -386,11 +389,11 @@ runtime_malloc_event (MonoProfiler *prof, void *address, size_t size, const char
 	info->tag = tag;
 	update_tag (&malloc_tags, tag, info->size, info->waste);
 
-	if (!strcmp (tag, "ghashtable")) {
-		const char *f = filter_bt (3, "g_hash_table");
-		// printf ("hashtable %p allocated from %s\n", address, f);
-		info->alloc_func = f;
-	}
+	// if (!strcmp (tag, "ghashtable")) {
+	// 	const char *f = filter_bt (3, "g_hash_table");
+	// 	// printf ("hashtable %p allocated from %s\n", address, f);
+	// 	info->alloc_func = f;
+	// }
 
 done:
 	alloc_unlock ();
@@ -488,6 +491,35 @@ add_alloc (void *address, size_t size, const char *tag)
 }
 
 static void
+dump_tag_bag (TagBag *bag, const char *name, size_t mempool_size)
+{
+	fprintf (outfile, ",\n");
+	fprintf (outfile, "\t\t\"%s\": {\n", name);
+	fprintf (outfile,"\t\t\t\"alloc-bytes\": %zu,\n", bag->alloc_bytes);
+	fprintf (outfile,"\t\t\t\"alloc-count\": %zu,\n", bag->alloc_count);
+	fprintf (outfile,"\t\t\t\"alloc-waste\": %zu,\n", bag->alloc_waste);
+	if (mempool_size)
+		fprintf (outfile,"\t\t\t\"mempool-size\": %zu,\n", mempool_size);
+	fprintf (outfile, "\t\t\t\"tags\": [\n");
+
+
+	size_t size, waste, count;
+	size = waste = count = 0;
+	HT_FOREACH (&bag->table, TagInfo, info, {
+		if (info->size) {
+			fprintf (outfile, "\t\t\t\t[ \"%s\", %zu, %zu, %zu],\n", info->node.key, info->size, info->waste, info->count);
+			size += info->size;
+			waste += info->waste;
+			count += info->count;
+		}
+	});
+	fprintf (outfile, "\t\t\t\t[\"total\", %zu, %zu, %zu]\n", size, waste, count);
+
+	fprintf (outfile, "\t\t\t]\n");
+	fprintf (outfile, "\t\t}");
+}
+
+static void
 dump_memdom (MemDomInfo *memdom)
 {
 	char name [1024];
@@ -522,39 +554,31 @@ dump_memdom (MemDomInfo *memdom)
 		break;
 	}
 	}
-	printf ("%s:\n", name);
 
-	size_t mt_reported = 0;
-	HT_FOREACH (&memdom->tags.table, TagInfo, info, {
-		if (info->size) {
-			printf ("   %s: alloc %zu waste %zu count %zu\n", info->node.key, info->size, info->waste, info->count);
-			mt_reported += info->size;
-		}
-	});
-	if (mt_reported)
-		printf (">> REPORTED %zu bytes allocated %d\n", mt_reported, mono_mempool_get_allocated (mempool));
-	printf ("...\n");
+	dump_tag_bag (&memdom->tags, name, mempool ? mono_mempool_get_allocated (mempool) : 0);
 }
 
 static void
 dump_stats (void)
 {
-	int i;
 	alloc_lock ();
-	printf ("-------\n");
-	printf ("alloc %zu alloc count %zu waste %zu\n", alloc_bytes, alloc_count, alloc_waste);
-	printf ("rt alloc %zu alloc count %zu waste %zu\n", malloc_tags.alloc_bytes, malloc_tags.alloc_count, malloc_tags.alloc_waste);
-	printf ("   reported %.2f memory and %.2f allocs\n",
-		malloc_tags.alloc_bytes / (float)alloc_bytes,
-		malloc_tags.alloc_count / (float)alloc_count);
 
-	printf ("tag summary:\n");
+	if (!outfile) {
+		alloc_unlock ();
+		return;
+	}
 
-	HT_FOREACH (&malloc_tags.table, TagInfo, info, {
-		if (info->size)
-			printf ("   %s: alloc %zu waste %zu count %zu\n", info->node.key, info->size, info->waste, info->count);
-	});
-	printf ("----\n");
+	static int dump_count;
+	if (dump_count)
+		fprintf (outfile, ",\n");
+	++dump_count;
+
+	fprintf (outfile, "\t{\n");
+	fprintf (outfile, "\t\t\"alloc\": %zu,\n", alloc_bytes);
+	fprintf (outfile, "\t\t\"alloc-count\": %zu,\n", alloc_count);
+	fprintf (outfile, "\t\t\"alloc-waste\": %zu", alloc_waste);
+
+	dump_tag_bag (&malloc_tags, "malloc", 0);
 
 	if (STRAY_ALLOCS) {
 		HT_FOREACH (&alloc_table, AllocInfo, info, {
@@ -571,13 +595,13 @@ dump_stats (void)
 		});
 	}
 
-	printf ("---memdom:\n");
-	for (i = 1; i < MEMDOM_MAX; ++i)
-		printf ("\t%s count %zu\n", memdom_name [i], memdom_count [i]);
-
 	HT_FOREACH (&memdom_table, MemDomInfo, info, {
 		dump_memdom (info);
 	});
+
+	fprintf (outfile, "\n\t}");
+
+
 	alloc_unlock ();
 }
 
@@ -595,7 +619,7 @@ dump_alloc_stats (void)
 	if (!PRINT_ALLOCATION)
 		return;
 	++last_time;
-	if (last_time % 20)
+	if (last_time % 10000)
 		return;
 	dump_stats ();
 }
@@ -606,7 +630,7 @@ platform_malloc (size_t size)
 	void * res = malloc (size);
 	add_alloc (res, size, NULL);
 
-	dump_alloc_stats ();
+	// dump_alloc_stats ();
 	return res;
 }
 
@@ -620,7 +644,7 @@ platform_realloc (void *mem, size_t count)
 	void * res = realloc (mem, count);
 	add_alloc (res, count, tag);
 
-	dump_alloc_stats ();
+	// dump_alloc_stats ();
 	return res;
  }
 
@@ -630,7 +654,7 @@ platform_free (void *mem)
 	del_alloc (mem);
 	free (mem);
 
-	dump_alloc_stats ();
+	// dump_alloc_stats ();
 }
 
 static void*
@@ -639,7 +663,7 @@ platform_calloc (size_t count, size_t size)
 	void * res = calloc (count, size);
 	add_alloc (res, count * size, NULL);
 
-	dump_alloc_stats ();
+	// dump_alloc_stats ();
 	return res;
 }
 
@@ -652,15 +676,30 @@ runtime_inited (MonoProfiler *prof)
 static void
 prof_shutdown (MonoProfiler *prof)
 {
+	alloc_lock ();
+	fprintf (outfile, "\n]\n");
+	fflush (outfile);
+	fclose (outfile);
+	outfile = NULL;
+	alloc_unlock ();
 }
 
 /* the entry point */
 void
 mono_profiler_startup (const char *desc)
 {
+	char filename[1024];
 	MonoProfiler *prof;
 
 	prof = g_new0 (MonoProfiler, 1);
+
+	snprintf (filename, 1023, "malloc_log_%d.txt", getpid ());
+	outfile = fopen (filename, "w+");
+	if (!outfile) {
+		printf ("failed to open! due to %s\n", strerror (errno));
+		exit (-2);
+	}
+	fprintf (outfile, "[\n");
 
 	tagbag_init (&malloc_tags);
 	hashtable_init (&alloc_table, hash_ptr, equals_ptr);
