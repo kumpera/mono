@@ -180,7 +180,7 @@ lock_free_mempool_free (LockFreeMempool *mp)
 	chunk = mp->chunks;
 	while (chunk) {
 		next = (LockFreeMempoolChunk *)chunk->prev;
-		mono_vfree (chunk, mono_pagesize ());
+		mono_vfree (chunk, ALIGN_TO (chunk->size, mono_pagesize ()));
 		chunk = next;
 	}
 	g_free (mp);
