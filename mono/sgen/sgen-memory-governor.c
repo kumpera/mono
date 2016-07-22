@@ -371,11 +371,11 @@ prot_flags_for_activate (int activate)
 }
 
 void
-sgen_assert_memory_alloc (void *ptr, size_t requested_size, const char *assert_description)
+sgen_assert_memory_alloc (void *ptr, size_t requested_size, const char *description, gboolean non_fatal)
 {
-	if (ptr || !assert_description)
+	if (ptr || non_fatal)
 		return;
-	fprintf (stderr, "Error: Garbage collector could not allocate %zu bytes of memory for %s.\n", requested_size, assert_description);
+	fprintf (stderr, "Error: Garbage collector could not allocate %zu bytes of memory for %s.\n", requested_size, description);
 	exit (1);
 }
 
@@ -384,14 +384,15 @@ sgen_assert_memory_alloc (void *ptr, size_t requested_size, const char *assert_d
  * This must not require any lock.
  */
 void*
-sgen_alloc_os_memory (size_t size, SgenAllocFlags flags, const char *assert_description)
+sgen_alloc_os_memory (size_t size, SgenAllocFlags flags, const char *description)
 {
 	void *ptr;
 
-	g_assert (!(flags & ~(SGEN_ALLOC_HEAP | SGEN_ALLOC_ACTIVATE)));
+	g_assert (!(flags & ~(SGEN_ALLOC_HEAP | SGEN_ALLOC_ACTIVATE | SGEN_ALLOC_NON_FATAL)));
 
-	ptr = mono_valloc (0, size, prot_flags_for_activate (flags & SGEN_ALLOC_ACTIVATE));
-	sgen_assert_memory_alloc (ptr, size, assert_description);
+	//FIX this interface
+	ptr = mono_valloc (0, size, prot_flags_for_activate (flags & SGEN_ALLOC_ACTIVATE), description);
+	sgen_assert_memory_alloc (ptr, size, description, (flags & SGEN_ALLOC_NON_FATAL) != 0);
 	if (ptr) {
 		SGEN_ATOMIC_ADD_P (total_alloc, size);
 		total_alloc_max = MAX (total_alloc_max, total_alloc);
@@ -401,14 +402,14 @@ sgen_alloc_os_memory (size_t size, SgenAllocFlags flags, const char *assert_desc
 
 /* size must be a power of 2 */
 void*
-sgen_alloc_os_memory_aligned (size_t size, mword alignment, SgenAllocFlags flags, const char *assert_description)
+sgen_alloc_os_memory_aligned (size_t size, mword alignment, SgenAllocFlags flags, const char *description)
 {
 	void *ptr;
 
-	g_assert (!(flags & ~(SGEN_ALLOC_HEAP | SGEN_ALLOC_ACTIVATE)));
+	g_assert (!(flags & ~(SGEN_ALLOC_HEAP | SGEN_ALLOC_ACTIVATE | SGEN_ALLOC_NON_FATAL)));
 
-	ptr = mono_valloc_aligned (size, alignment, prot_flags_for_activate (flags & SGEN_ALLOC_ACTIVATE));
-	sgen_assert_memory_alloc (ptr, size, assert_description);
+	ptr = mono_valloc_aligned (size, alignment, prot_flags_for_activate (flags & SGEN_ALLOC_ACTIVATE), description);
+	sgen_assert_memory_alloc (ptr, size, description, (flags & SGEN_ALLOC_NON_FATAL) != 0);
 	if (ptr) {
 		SGEN_ATOMIC_ADD_P (total_alloc, size);
 		total_alloc_max = MAX (total_alloc_max, total_alloc);

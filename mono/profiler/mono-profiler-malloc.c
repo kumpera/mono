@@ -21,6 +21,7 @@
 
 #include <mono/metadata/domain-internals.h>
 #include <mono/metadata/metadata-internals.h>
+#include <mono/utils/mono-mmap.h>
 
 #include <string.h>
 #include <errno.h>
@@ -28,6 +29,7 @@
 #include <glib.h>
 #include <sys/stat.h>
 #include <pthread.h>
+#include <sys/mman.h>
 
 //OSX only
 #include <malloc/malloc.h>
@@ -49,8 +51,12 @@ struct _MonoProfiler {
 	int filling;
 };
 
+/*config */
+static bool log_malloc, log_valloc, log_memdom;
+
 /* Misc stuff */
 static pthread_mutex_t alloc_mutex = PTHREAD_MUTEX_INITIALIZER;
+
 
 static void
 alloc_lock (void)
@@ -401,19 +407,241 @@ done:
 	dump_alloc_stats ();
 }
 
-static void
-runtime_valloc_event (MonoProfiler *prof, void *address, size_t size, const char *tag)
+enum {
+	RECORD_VALLOC = 1 << 10,
+	RECORD_VFREE = 1 << 11,
+	RECORD_MPROTECT = 1 << 12,
+};
+
+typedef struct {
+	gpointer address;
+	const char *tag;
+	size_t size;
+	int flags;
+} VAllocRecord;
+
+#define VALLOC_ENTRIES (4096 / sizeof (VAllocRecord) - 1)
+
+typedef struct _VAllocRecordBucket VAllocRecordBucket;
+
+struct _VAllocRecordBucket {
+	int index;
+	VAllocRecordBucket *next_bucket;
+	VAllocRecord entries [VALLOC_ENTRIES];
+};
+
+static volatile int valloc_log_state;
+
+#define FAIL(ERR) do { printf ("FAILED: %s\n", ERR); exit (-1); } while (0)
+
+static gboolean
+lock_exclusive (void)
 {
-	if (PRINT_RT_ALLOC)
-		printf ("valloc %p %zu %s\n", address, size, tag);
+	do {
+		/*
+		A positive value means the lock is taken.
+		TODO: Have a write-requested state to avoid writer starvation
+		*/
+		if (valloc_log_state == -1)
+			FAIL ("Somebody messed with the exclusive lock, already locked");
+
+		if (valloc_log_state) {
+			usleep (1);
+			continue;
+		}
+	} while (__sync_val_compare_and_swap (&valloc_log_state, 0, -1) != 0);
+	__sync_synchronize ();
+	return TRUE;
+}
+
+static void
+unlock_exclusive (void)
+{
+	__sync_synchronize ();
+
+	if (__sync_val_compare_and_swap (&valloc_log_state, -1, 0) != -1)
+		FAIL ("Somebody messed with the exclusive lock, already unlocked");
+}
+
+static void
+lock_shared (void)
+{
+	int old_count;
+	do {
+	retry:
+		old_count = valloc_log_state;
+		if (old_count < 0) {
+			/* Exclusively locked - retry */
+			/* FIXME: short back-off */
+			goto retry;
+		}
+	} while (__sync_val_compare_and_swap (&valloc_log_state, old_count, old_count + 1) != old_count);
+
+	__sync_synchronize ();
+}
+
+static void
+unlock_shared (void)
+{
+	int old_count;
+	__sync_synchronize ();
+
+	do {
+		old_count = valloc_log_state;
+		if (old_count < 1)
+			FAIL ("unlocking shared but lock count < 1");
+	} while (__sync_val_compare_and_swap (&valloc_log_state, old_count, old_count - 1) != old_count);
+}
+
+	
+static VAllocRecordBucket *current_bucket;
+
+static VAllocRecordBucket*
+alloc_bucket (void)
+{
+	VAllocRecordBucket *old, *bucket;
+
+	old = current_bucket;
+	if (old && old->index < VALLOC_ENTRIES)
+		return old;
+
+	bucket = mmap (NULL, sizeof (VAllocRecordBucket), PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+	bucket->index = 0;
+
+	do {
+		old = current_bucket;
+		bucket->next_bucket = old;
+	} while (__sync_val_compare_and_swap (&current_bucket, old, bucket) != old);
+	return bucket;
+}
+
+static VAllocRecord*
+get_next_record (void)
+{
+	VAllocRecordBucket *bucket;
+	int index;
+
+retry:
+	bucket = current_bucket;
+	if (!current_bucket)
+		bucket = alloc_bucket ();
+	while (bucket->index >= VALLOC_ENTRIES)
+		bucket = alloc_bucket ();
+
+	index = __sync_add_and_fetch (&bucket->index, 1) - 1;
+	if (index >= VALLOC_ENTRIES)
+		goto retry;	
+
+	return &bucket->entries [index];
+}
+
+
+#define ALIGN_TO(val,align) ((((guint64)val) + ((align) - 1)) & ~((align) - 1))
+
+static void
+add_vm_record (void *address, size_t size, const char *tag, int flags)
+{
+	lock_shared ();
+
+	VAllocRecord *record = get_next_record ();
+	record->address = address;
+	record->size = ALIGN_TO (size, 4096);	
+	record->flags = flags;
+	record->tag = tag;
+
+	unlock_shared ();
+}
+
+static const char *
+op_name (int flags)
+{
+	if (flags & RECORD_VALLOC)
+		return "valloc";
+	if (flags & RECORD_VFREE)
+		return "vfree";
+	if (flags & RECORD_MPROTECT)
+		return "mprotect";
+
+	return "no-clue";
+}
+
+static const char*
+op_flags (int flags)
+{
+	//super evil, callers will hate me for that :D
+	static char buffer [1024];
+
+	buffer [0] = 0;
+
+	if (flags & MONO_MMAP_READ)
+		strlcat (buffer, "read ", sizeof (buffer));
+	if (flags & MONO_MMAP_WRITE)
+		strlcat (buffer, "write ", sizeof (buffer));
+	if (flags & MONO_MMAP_EXEC)
+		strlcat (buffer, "exec ", sizeof (buffer));
+	if (flags & MONO_MMAP_DISCARD)
+		strlcat (buffer, "discard ", sizeof (buffer));
+	if (flags & MONO_MMAP_PRIVATE)
+		strlcat (buffer, "private ", sizeof (buffer));
+	if (flags & MONO_MMAP_SHARED)
+		strlcat (buffer, "shared ", sizeof (buffer));
+	if (flags & MONO_MMAP_ANON)
+		strlcat (buffer, "anon ", sizeof (buffer));
+	if (flags & MONO_MMAP_FIXED)
+		strlcat (buffer, "fixed ", sizeof (buffer));
+	if (flags & MONO_MMAP_32BIT)
+		strlcat (buffer, "32bits ", sizeof (buffer));
+
+	return buffer;
+}
+
+
+static void
+dump_vmmap (void)
+{
+	fprintf (outfile, "do we have records to dump? %p\n", current_bucket);
+
+	VAllocRecordBucket *bucket;
+	lock_exclusive ();
+	bucket = current_bucket;
+	current_bucket = NULL;
+	unlock_exclusive ();
+
+	while (bucket) {
+		int i;
+		for (i = 0; i < VALLOC_ENTRIES; ++i) {
+			VAllocRecord *rec = &bucket->entries [i];
+			if (rec->flags)
+				fprintf (outfile, "\t%s [%p - %p] (%zd bytes) { %s} (%s)\n",
+					op_name (rec->flags),
+					rec->address, (char*)rec->address + rec->size, rec->size, op_flags (rec->flags), rec->tag ? rec->tag : "-"); 
+		}
+		VAllocRecordBucket *next = bucket->next_bucket;
+		munmap (bucket, sizeof (VAllocRecordBucket));
+
+		bucket = next;
+	}
+
+}
+
+static void
+runtime_valloc_event (MonoProfiler *prof, void *address, size_t size, int flags, const char *tag)
+{
+	add_vm_record (address, size, tag, flags | RECORD_VALLOC);
 }
 
 static void
 runtime_vfree_event (MonoProfiler *prof, void *address, size_t size)
 {
-	if (PRINT_RT_ALLOC)
-		printf ("vfree %p %zu\n", address, size);
+	add_vm_record (address, size, NULL, RECORD_VFREE);
 }
+
+static void
+runtime_mprotect_event (MonoProfiler *prof, void *address, size_t size, int flags)
+{
+	add_vm_record (address, size, NULL, flags | RECORD_MPROTECT);
+}
+
 
 static void __attribute__((noinline))
 break_on_malloc_waste (void)
@@ -574,30 +802,38 @@ dump_stats (void)
 	++dump_count;
 
 	fprintf (outfile, "\t{\n");
-	fprintf (outfile, "\t\t\"alloc\": %zu,\n", alloc_bytes);
-	fprintf (outfile, "\t\t\"alloc-count\": %zu,\n", alloc_count);
-	fprintf (outfile, "\t\t\"alloc-waste\": %zu", alloc_waste);
 
-	dump_tag_bag (&malloc_tags, "malloc", 0);
+	if (log_malloc) {
+		fprintf (outfile, "\t\t\"alloc\": %zu,\n", alloc_bytes);
+		fprintf (outfile, "\t\t\"alloc-count\": %zu,\n", alloc_count);
+		fprintf (outfile, "\t\t\"alloc-waste\": %zu", alloc_waste);
 
-	if (STRAY_ALLOCS) {
-		HT_FOREACH (&alloc_table, AllocInfo, info, {
-				if (!info->tag)
-					printf ("stay alloc from %s\n", info->alloc_func);
+		dump_tag_bag (&malloc_tags, "malloc", 0);
+
+		if (STRAY_ALLOCS) {
+			HT_FOREACH (&alloc_table, AllocInfo, info, {
+					if (!info->tag)
+						printf ("stay alloc from %s\n", info->alloc_func);
+			});
+		}
+
+		if (POKE_HASH_TABLES) {
+			HT_FOREACH (&alloc_table, AllocInfo, info, {
+				if (!info->tag || strcmp ("ghashtable", info->tag))
+					continue;
+				printf ("hashtable size %d from %s\n", g_hash_table_size ((GHashTable*)info->node.key), info->alloc_func);
+			});
+		}
+	}
+
+	if (log_memdom) {
+		HT_FOREACH (&memdom_table, MemDomInfo, info, {
+			dump_memdom (info);
 		});
 	}
 
-	if (POKE_HASH_TABLES) {
-		HT_FOREACH (&alloc_table, AllocInfo, info, {
-			if (!info->tag || strcmp ("ghashtable", info->tag))
-				continue;
-			printf ("hashtable size %d from %s\n", g_hash_table_size ((GHashTable*)info->node.key), info->alloc_func);
-		});
-	}
-
-	HT_FOREACH (&memdom_table, MemDomInfo, info, {
-		dump_memdom (info);
-	});
+	if (log_valloc)
+		dump_vmmap ();
 
 	fprintf (outfile, "\n\t}");
 
@@ -684,6 +920,55 @@ prof_shutdown (MonoProfiler *prof)
 	alloc_unlock ();
 }
 
+static void
+usage (bool do_exit)
+{
+	printf ("Usage: mono --profile=malloc[:OPTION1[,OPTION2...]] program.exe\n");
+	printf ("Options:\n");
+	printf ("\thelp                 show this usage info\n");
+
+	if (do_exit)
+		exit (1);
+}
+
+
+static const char*
+match_option (const char* p, const char *opt, char **rval)
+{
+	int len = strlen (opt);
+	if (strncmp (p, opt, len) == 0) {
+		if (rval) {
+			if (p [len] == '=' && p [len + 1]) {
+				const char *opt = p + len + 1;
+				const char *end = strchr (opt, ',');
+				char *val;
+				int l;
+				if (end == NULL) {
+					l = strlen (opt);
+				} else {
+					l = end - opt;
+				}
+				val = (char *)malloc (l + 1);
+				memcpy (val, opt, l);
+				val [l] = 0;
+				*rval = val;
+				return opt + l;
+			}
+			if (p [len] == 0 || p [len] == ',') {
+				*rval = NULL;
+				return p + len + (p [len] == ',');
+			}
+			usage (true);
+		} else {
+			if (p [len] == 0)
+				return p + len;
+			if (p [len] == ',')
+				return p + len + 1;
+		}
+	}
+	return p;
+}
+
 /* the entry point */
 void
 mono_profiler_startup (const char *desc)
@@ -694,7 +979,34 @@ mono_profiler_startup (const char *desc)
 	prof = g_new0 (MonoProfiler, 1);
 
 	snprintf (filename, 1023, "malloc_log_%d.txt", getpid ());
-	outfile = fopen (filename, "w+");
+
+	const char *p = desc, *opt = NULL;
+	if (strncmp (p, "malloc", 6))
+		usage (true);
+	p += 6;
+	if (*p == ':')
+		p++;
+	for (; *p; p = opt) {
+		// char *val;
+		if (*p == ',') {
+			opt = p + 1;
+			continue;
+		}
+
+		if ((opt = match_option (p, "help", NULL)) != p) {
+			usage (false);
+		} else if ((opt = match_option (p, "log-malloc", NULL)) != p) {
+			log_malloc = TRUE;
+		} else if ((opt = match_option (p, "log-valloc", NULL)) != p) {
+			log_valloc = TRUE;
+		}  else if ((opt = match_option (p, "log-memdom", NULL)) != p) {
+			log_memdom = TRUE;
+		}
+	}
+	
+
+	// outfile = fopen (filename, "w+");
+	outfile = stdout;
 	if (!outfile) {
 		printf ("failed to open! due to %s\n", strerror (errno));
 		exit (-2);
@@ -708,7 +1020,7 @@ mono_profiler_startup (const char *desc)
 	mono_profiler_install (prof, prof_shutdown);
 	mono_profiler_install_memdom (memdom_new, memdom_destroy, memdom_alloc);
 	mono_profiler_install_malloc (runtime_malloc_event);
-	mono_profiler_install_valloc (runtime_valloc_event, runtime_vfree_event);
+	mono_profiler_install_valloc (runtime_valloc_event, runtime_vfree_event, runtime_mprotect_event);
 	mono_profiler_install_runtime_initialized (runtime_inited);
 
 	MonoAllocatorVTable alloc_vt = {

@@ -114,8 +114,9 @@ struct _ProfilerDesc {
 	MonoProfilerMemdomDestroy memdom_destroy;
 	MonoProfilerMemdomAlloc memdom_alloc;
 	MonoProfilerAlloc malloc_event;
-	MonoProfilerAlloc valloc_event;
+	MonoProfilerVAlloc valloc_event;
 	MonoProfilerVFree vfree_event;
+	MonoProfilerMProtect mprotect_event;
 };
 
 static ProfilerDesc *prof_list = NULL;
@@ -1031,13 +1032,14 @@ mono_profiler_install_malloc (MonoProfilerAlloc malloc)
 }
 
 void
-mono_profiler_install_valloc (MonoProfilerAlloc valloc, MonoProfilerVFree vfree)
+mono_profiler_install_valloc (MonoProfilerVAlloc valloc, MonoProfilerVFree vfree, MonoProfilerMProtect mprotect)
 {
 	if (!prof_list)
 		return;
 
 	prof_list->valloc_event = valloc;
 	prof_list->vfree_event = vfree;
+	prof_list->mprotect_event = mprotect;
 }
 
 #define PROF_EVENT_1(EVENT_NAME, CB_NAME, ARG0_TYPE)	\
@@ -1073,14 +1075,26 @@ EVENT_NAME (ARG0_TYPE arg0, ARG1_TYPE arg1, ARG2_TYPE arg2) \
 	}	\
 }
 
+#define PROF_EVENT_4(EVENT_NAME, CB_NAME, ARG0_TYPE, ARG1_TYPE, ARG2_TYPE, ARG3_TYPE)	\
+void \
+EVENT_NAME (ARG0_TYPE arg0, ARG1_TYPE arg1, ARG2_TYPE arg2, ARG3_TYPE arg3) \
+{	\
+	ProfilerDesc *prof;	\
+	for (prof = prof_list; prof; prof = prof->next) {	\
+		if (prof->CB_NAME)	\
+			prof->CB_NAME (prof->profiler, arg0, arg1, arg2, arg3);	\
+	}	\
+}
+
 PROF_EVENT_2(mono_profiler_memdom_new, memdom_new, gpointer, MonoProfilerMemoryDomain)
 PROF_EVENT_1(mono_profiler_memdom_destroy, memdom_destroy, gpointer)
 PROF_EVENT_3(mono_profiler_memdom_alloc, memdom_alloc, void*, size_t, const char*)
 
 PROF_EVENT_3(mono_profiler_malloc, malloc_event, void*, size_t, const char*)
 
-PROF_EVENT_3(mono_profiler_valloc, valloc_event, void*, size_t, const char*)
+PROF_EVENT_4(mono_profiler_valloc, valloc_event, void*, size_t, int, const char*)
 PROF_EVENT_2(mono_profiler_vfree, vfree_event, void*, size_t)
+PROF_EVENT_3(mono_profiler_mprotect, mprotect_event, void*, size_t, int)
 
 static GHashTable *coverage_hash = NULL;
 
@@ -1306,7 +1320,7 @@ void
 mono_profiler_load (const char *desc)
 {
 	char *cdesc = NULL;
-	mono_gc_base_init ();
+	// mono_gc_base_init ();
 
 	if (!desc || (strcmp ("default", desc) == 0)) {
 		desc = "log:report";

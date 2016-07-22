@@ -198,7 +198,7 @@ lock_free_mempool_chunk_new (LockFreeMempool *mp, int len)
 	size = mono_pagesize ();
 	while (size - sizeof (LockFreeMempoolChunk) < len)
 		size += mono_pagesize ();
-	chunk = (LockFreeMempoolChunk *)mono_valloc (0, size, MONO_MMAP_READ|MONO_MMAP_WRITE);
+	chunk = (LockFreeMempoolChunk *)mono_valloc (0, size, MONO_MMAP_READ|MONO_MMAP_WRITE, "lockfree-mempool");
 	g_assert (chunk);
 	chunk->mem = (guint8 *)ALIGN_PTR_TO ((char*)chunk + sizeof (LockFreeMempoolChunk), 16);
 	chunk->size = ((char*)chunk + size) - (char*)chunk->mem;
