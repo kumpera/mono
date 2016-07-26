@@ -43,6 +43,8 @@
 #define STRAY_ALLOCS FALSE
 #define POKE_HASH_TABLES FALSE
 
+#define PRINT_VM_OPS FALSE
+
 void mono_profiler_startup (const char *desc);
 static void dump_alloc_stats (void);
 static FILE* outfile;
@@ -414,9 +416,9 @@ enum {
 };
 
 typedef struct {
-	char *address;
+	char *addr_start;
+	char *addr_end;
 	const char *tag;
-	size_t length;
 	int flags;
 } VAllocRecord;
 
@@ -550,8 +552,8 @@ add_vm_record (void *address, size_t size, const char *tag, int flags)
 	lock_shared ();
 
 	VAllocRecord *record = get_next_record ();
-	record->address = address;
-	record->length = ALIGN_TO (size, 4096);
+	record->addr_start = address;
+	record->addr_end = (char*)address + ALIGN_TO (size, 4096);
 	record->flags = flags;
 	record->tag = tag;
 
@@ -579,6 +581,9 @@ op_flags (int flags)
 
 	buffer [0] = 0;
 
+	if (!flags)
+		strlcat (buffer, "none ", sizeof (buffer));
+
 	if (flags & MONO_MMAP_READ)
 		strlcat (buffer, "read ", sizeof (buffer));
 	if (flags & MONO_MMAP_WRITE)
@@ -603,8 +608,8 @@ op_flags (int flags)
 
 typedef struct _VMEntry VMEntry;
 struct _VMEntry {
-	char *address;
-	size_t length;
+	char *addr_start;
+	char *addr_end;
 	int prot;
 	const char *tag;
 	VMEntry *next;
@@ -612,15 +617,21 @@ struct _VMEntry {
 
 static VMEntry *vm_entries;
 
+static bool
+entry_overlaps (VMEntry *e, char *addr_start, char *addr_end)
+{
+	return (e->addr_start <= addr_start && e->addr_end > addr_start) ||
+					(e->addr_start > addr_start && e->addr_start < addr_end);
+}
+
 static VMEntry*
-find_overlap (char *address, size_t size, VMEntry ***prev_entry_slot)
+find_overlap (char *addr_start, char *addr_end, VMEntry ***prev_entry_slot)
 {
 	VMEntry **prev;
 
 	for (prev = &vm_entries; *prev; prev = &(*prev)->next) {
 		VMEntry *e = *prev;
-		if ((e->address <= address && (e->address + e->length) > address) ||
-		(e->address > address && (e->address < address + size))) {
+		if (entry_overlaps (e, addr_start, addr_end)) {
 			if (prev_entry_slot)
 				*prev_entry_slot = prev;
 			return e;
@@ -634,20 +645,68 @@ find_overlap (char *address, size_t size, VMEntry ***prev_entry_slot)
 
 #define PROT_MASK (MONO_MMAP_READ | MONO_MMAP_WRITE | MONO_MMAP_EXEC)
 
+
+static VMEntry*
+split_vm_entry (VMEntry *entry, char *start, char *end)
+{
+	if (start == entry->addr_start) {
+		if (end == entry->addr_end) {
+			return entry; //no split needed
+		} else {
+			//split area is the head
+			VMEntry *tail = malloc (sizeof (VMEntry));
+			tail->addr_start = end;
+			tail->addr_end = entry->addr_end;
+			tail->prot = entry->prot;
+			tail->tag = entry->tag;
+			tail->next = entry->next;
+
+			entry->addr_end = end;
+			entry->next = tail;
+			return entry;
+		}
+	} else  {
+		VMEntry *mid = malloc (sizeof (VMEntry));
+		char *entry_addr_end = entry->addr_end;
+		mid->addr_start = start;
+		mid->addr_end = end;
+		mid->prot = entry->prot;
+		mid->tag = entry->tag;
+		mid->next = entry->next;
+
+		entry->next = mid;
+		entry->addr_end = start;
+
+		//split ahead is the tail
+		if (end != entry_addr_end) {
+			VMEntry *tail = malloc (sizeof (VMEntry));
+			tail->addr_start = end;
+			tail->addr_end = entry_addr_end;
+			tail->prot = entry->prot;
+			tail->tag = entry->tag;
+			tail->next = entry->next;
+
+			entry->next = tail;
+		}
+		return mid;
+	}
+}
+
+
 static void
 record_op (VAllocRecord *rec)
 {
 	if (rec->flags & RECORD_VALLOC) {
-		VMEntry * entry = find_overlap (rec->address, rec->length, NULL);
+		VMEntry * entry = find_overlap (rec->addr_start, rec->addr_end, NULL);
 		if (entry) {
 			fprintf (outfile, "found alloc to existing entry [%p %p] new [%p %p]\n",
-				entry->address, entry->address + entry->length,
-				rec->address, rec->address + rec->length);
+				entry->addr_start, entry->addr_end,
+				rec->addr_start, rec->addr_end);
 			FAIL ("BAD ALLOC FOUND\n");
 		}
 		entry = malloc (sizeof (VMEntry));
-		entry->address = rec->address;
-		entry->length = rec->length;
+		entry->addr_start = rec->addr_start;
+		entry->addr_end = rec->addr_end;
 		entry->prot = rec->flags & PROT_MASK;
 		entry->tag = rec->tag;
 		entry->next = vm_entries;
@@ -655,57 +714,98 @@ record_op (VAllocRecord *rec)
 	} else if (rec->flags & RECORD_VFREE) {
 		//this is terribly naive, but given how low frequency and volume this is, meh.
 		VMEntry **prev = NULL;
-		VMEntry * entry = find_overlap (rec->address, rec->length, &prev);
+		VMEntry * entry = find_overlap (rec->addr_start, rec->addr_end, &prev);
 		if (!entry) {
-			fprintf (outfile, "bad vfree [%p %p] to unmmaped region\n", rec->address, rec->address + rec->length);
+			fprintf (outfile, "bad vfree [%p %p] to unmmaped region\n", rec->addr_start, rec->addr_end);
 			FAIL ("BAD VFREE FOUND\n");
 		}
 
 		//the vfree must be fully covered by the region
-		if (rec->address < entry->address || (rec->address + rec->length) > (entry->address + entry->length)) {
+		if (rec->addr_start < entry->addr_start || rec->addr_end > entry->addr_end) {
 			fprintf (outfile, "bad vfree [%p %p] escapes corresponding regions [%p %p]\n",
-				rec->address, rec->address + rec->length,
-				entry->address, entry->address + entry->length);
+				rec->addr_start, rec->addr_end,
+				entry->addr_start, entry->addr_end);
 			FAIL ("BAD VFREE FOUND\n");
 		}
 
-		//full covered region
-		if (rec->length == entry->length) {
-			*prev = entry->next;
-			free (entry);
+		if (rec->addr_start == entry->addr_start) {
+			if (rec->addr_end == entry->addr_end) {
+				*prev = entry->next;
+				free (entry);
+			} else {
+				entry->addr_start = rec->addr_end;
+			}
 		} else  {
-			//are we splitting the region?
-			if (rec->address > entry->address && (rec->address + rec->length) < (entry->address + entry->length)) {
+			if (rec->addr_end == entry->addr_end) {
+				entry->addr_end = rec->addr_start;
+			} else {
 				VMEntry *tail = malloc (sizeof (VMEntry));
-				tail->address = rec->address + rec->length;
-				tail->length = (entry->address + entry->length) - tail->address;
+
+				tail->addr_start = rec->addr_end;
+				tail->addr_end = entry->addr_end;
 				tail->prot = entry->prot;
 				tail->tag = entry->tag;
 				tail->next = entry->next;
 				entry->next = tail;
 
-				//now trim entry
-				entry->length = rec->address - entry->address;
-			} else {
-				//no splitting needed
-				entry->length = entry->length - rec->length;
-				if (rec->address == entry->address)
-					entry->address = rec->address + rec->length; //freed the beginning
+				entry->addr_end = rec->addr_start;
 			}
 		}
 	} else if (rec->flags & RECORD_MPROTECT) {
-		//FIXME
+		VMEntry **prev;
+
+		for (prev = &vm_entries; *prev; prev = &(*prev)->next) {
+			VMEntry *entry = *prev;
+			if (!entry_overlaps (entry, rec->addr_start, rec->addr_end))
+				continue;
+
+			entry = split_vm_entry (entry, rec->addr_start, rec->addr_end);
+			entry->prot = rec->flags & PROT_MASK;
+		}
 	}
 
+}
+
+static int
+compare_vm_entries (const void *_a, const void *_b)
+{
+	const VMEntry *a = *(VMEntry **)_a;
+	const VMEntry *b = *(VMEntry **)_b;
+
+	//can't return a-b as that can overflow on 64bits when casting down nor it provides a size_t abs
+	if (a->addr_start < b->addr_start)
+		return -1;
+	if (a->addr_start == b->addr_start)
+		return 0;
+	return 1;
 }
 
 static void
 dump_actual_map (void)
 {
 	VMEntry *entry;
+
+	if (vm_entries) {
+		int count, i;
+		for (entry = vm_entries, count = 0; entry; entry = entry->next) ++count;
+
+		VMEntry **array = malloc (sizeof (void*) * count);
+		for (entry = vm_entries, i = 0; entry; entry = entry->next)
+			array [i++] = entry;
+
+		qsort (array, count, sizeof (void*), compare_vm_entries);
+		for (int i = 1; i < count; ++i)
+			array [i - 1]->next = array [i];
+
+		array [count - 1]->next = NULL;
+		vm_entries = array [0];
+
+		free (array);
+	}
+
 	fprintf (outfile, "VM Map:\n");
 	for (entry = vm_entries; entry; entry = entry->next) {
-		fprintf (outfile, "[%p %p] ( %s) [%s]\n", entry->address, entry->address + entry->length, op_flags (entry->prot), entry->tag);
+		fprintf (outfile, "[%p %p] ( %s) [%s]\n", entry->addr_start, entry->addr_end, op_flags (entry->prot), entry->tag);
 	}
 }
 
@@ -725,9 +825,10 @@ dump_vmmap (void)
 		for (i = 0; i < VALLOC_ENTRIES; ++i) {
 			VAllocRecord *rec = &bucket->entries [i];
 			if (rec->flags) {
-				fprintf (outfile, "\t%s [%p - %p] (%zd bytes) { %s} (%s)\n",
-					op_name (rec->flags),
-					rec->address, (char*)rec->address + rec->length, rec->length, op_flags (rec->flags), rec->tag ? rec->tag : "-"); 
+				if (PRINT_VM_OPS)
+					fprintf (outfile, "\t%s [%p - %p] (%zd bytes) { %s} (%s)\n",
+						op_name (rec->flags),
+						rec->addr_start, rec->addr_end, rec->addr_end - rec->addr_start, op_flags (rec->flags), rec->tag ? rec->tag : "-"); 
 
 				record_op (rec);
 			}
