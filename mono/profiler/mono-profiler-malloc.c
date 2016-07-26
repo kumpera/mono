@@ -606,6 +606,24 @@ op_flags (int flags)
 	return buffer;
 }
 
+static const char*
+num_to_str (size_t s)
+{
+	//super evil, callers will hate me for that :D
+	static char buffer [1024];
+
+	buffer [0] = 0;
+
+	if (s > 1024 * 1024)
+		snprintf (buffer, 1023, "%zu Mb", s / (1024 * 1024));
+	else if (s >  1024)
+		snprintf (buffer, 1023, "%zu Kb", s / 1024);
+	else
+		snprintf (buffer, 1023, "%zu b", s);
+
+	return buffer;
+}
+
 typedef struct _VMEntry VMEntry;
 struct _VMEntry {
 	char *addr_start;
@@ -803,17 +821,39 @@ dump_actual_map (void)
 		free (array);
 	}
 
-	fprintf (outfile, "VM Map:\n");
-	for (entry = vm_entries; entry; entry = entry->next) {
-		fprintf (outfile, "[%p %p] ( %s) [%s]\n", entry->addr_start, entry->addr_end, op_flags (entry->prot), entry->tag);
+#define TAG_BASED_DEDUP TRUE
+
+	if (TAG_BASED_DEDUP) {
+		for (entry = vm_entries; entry; entry = entry->next) {
+			while (true) {
+				VMEntry *next = entry->next;
+				if (next && entry->addr_end == next->addr_start && entry->tag == next->tag && entry->prot == next->prot) {
+					entry->addr_end = next->addr_end;
+					entry->next = next->next;
+					free (next);
+				} else {
+					break;
+				}
+			}
+		}
 	}
+
+	fprintf (outfile, ",\n");
+	fprintf (outfile, "\t\t\"vm-map\": [\n");
+
+	size_t total = 0;
+	for (entry = vm_entries; entry; entry = entry->next) {
+		total += entry->addr_end - entry->addr_start;
+		fprintf (outfile, "\t\t\t[ \"%s\", %zu, %zu, %d],\n", entry->tag, (size_t)entry->addr_start, (size_t)entry->addr_end, entry->prot);
+		// fprintf (outfile, "[%p %p] [%s] ( %s) [%s]\n", entry->addr_start, entry->addr_end, num_to_str (entry->addr_end - entry->addr_start), op_flags (entry->prot), entry->tag);
+	}
+	fprintf (outfile, "\t\t\t[ \"total\", %zu]\n", total);
+	fprintf (outfile, "\t\t]");
 }
 
 static void
 dump_vmmap (void)
 {
-	fprintf (outfile, "do we have records to dump? %p\n", current_bucket);
-
 	VAllocRecordBucket *bucket;
 	lock_exclusive ();
 	bucket = current_bucket;
@@ -1193,6 +1233,7 @@ mono_profiler_startup (const char *desc)
 {
 	char filename[1024];
 	MonoProfiler *prof;
+	bool use_stdout = FALSE;
 
 	prof = g_new0 (MonoProfiler, 1);
 
@@ -1205,7 +1246,7 @@ mono_profiler_startup (const char *desc)
 	if (*p == ':')
 		p++;
 	for (; *p; p = opt) {
-		// char *val;
+		char *val;
 		if (*p == ',') {
 			opt = p + 1;
 			continue;
@@ -1219,12 +1260,19 @@ mono_profiler_startup (const char *desc)
 			log_valloc = TRUE;
 		}  else if ((opt = match_option (p, "log-memdom", NULL)) != p) {
 			log_memdom = TRUE;
+		} else  if ((opt = match_option (p, "outfile", &val)) != p) {
+			if (!strcmp (val, "stdout"))
+				use_stdout = TRUE;
+			else
+				strcpy (filename, val);
+			free (val);
 		}
 	}
 	
-
-	// outfile = fopen (filename, "w+");
-	outfile = stdout;
+	if (use_stdout)
+		outfile = stdout;
+	else
+		outfile = fopen (filename, "w+");
 	if (!outfile) {
 		printf ("failed to open! due to %s\n", strerror (errno));
 		exit (-2);

@@ -139,7 +139,7 @@ alloc_sb (Descriptor *desc)
 
 	sb_header = desc->block_size == pagesize ?
 		mono_valloc (NULL, desc->block_size, prot_flags_for_activate (TRUE), "lock-free-alloc:sb-header") :
-		mono_valloc_aligned (desc->block_size, desc->block_size, prot_flags_for_activate (TRUE), "lock-free-alloc:sb-header-aligned");
+		mono_valloc_aligned (desc->block_size, desc->block_size, prot_flags_for_activate (TRUE), "lock-free-alloc:sb-header");
 
 	g_assert (sb_header == sb_header_for_addr (sb_header, desc->block_size));
 
