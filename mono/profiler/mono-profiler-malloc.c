@@ -206,6 +206,7 @@ typedef struct {
 	size_t waste;
 	const char *tag;
 	const char *alloc_func;
+	char *ips[4];
 } AllocInfo;
 
 /* malloc tracking */
@@ -229,7 +230,7 @@ typedef struct {
 	TagBag tags;
 } MemDomInfo;
 
-static TagBag malloc_tags;
+static TagBag malloc_tags, malloc_tags_by_fun;
 static HashTable alloc_table;
 static size_t alloc_bytes, alloc_count, alloc_waste;
 
@@ -258,9 +259,6 @@ update_tag (TagBag *tag_bag, const char *tag, ssize_t size, ssize_t waste)
 
 	if (size == 0)
 		break_on_zero_size ();
-	// if (!strcmp ("class:fields", tag)) {
-	// 	printf ("update %s root %d size %zd\n", tag, tag_bag == &malloc_tags, size);
-	// }
 
 	if (!info) {
 		info = malloc (sizeof (TagInfo));
@@ -394,6 +392,13 @@ runtime_malloc_event (MonoProfiler *prof, void *address, size_t size, const char
 
 	info->tag = tag;
 	update_tag (&malloc_tags, tag, info->size, info->waste);
+
+
+	if (info->alloc_func) {
+		//we got it reported, take away from the stray list
+		update_tag (&malloc_tags_by_fun, info->alloc_func, -info->size, -info->waste);
+		info->alloc_func = NULL;
+	}
 
 done:
 	alloc_unlock ();
@@ -927,6 +932,8 @@ del_alloc (void *address)
 		if (info->tag)
 			update_tag (&malloc_tags, info->tag, -info->size, -info->waste);
 
+		if (info->alloc_func)
+			update_tag (&malloc_tags_by_fun, info->alloc_func, -info->size, -info->waste);
 		free (info);
 	}
 
@@ -938,8 +945,18 @@ add_alloc (void *address, size_t size, const char *tag)
 {
 	AllocInfo *info = malloc (sizeof (AllocInfo));
 	info->size = size;
-	info->tag = NULL;
 	info->waste = malloc_size (address) - size;
+	info->tag = NULL;
+	info->alloc_func = NULL;
+	info->ips [0] = info->ips [1] = info->ips [2] = info->ips [3] = NULL;
+	{
+		int i, c;
+		void *bt_ptrs [10];
+		c = backtrace (bt_ptrs, 10);
+		for (i = 0; i < c - 2 && i < 4; ++i) {
+			info->ips [i] = bt_ptrs [i + 2];
+		}
+	}
 
 	alloc_lock ();
 	hashtable_add (&alloc_table, &info->node, address);
@@ -1069,6 +1086,31 @@ dump_stats (void)
 		fprintf (outfile, "\t\t\"alloc-waste\": %zu", alloc_waste);
 
 		dump_tag_bag (&malloc_tags, "malloc", 0);
+
+		// Decode function names of allocations that did not get tagged by the runtime and are still alive
+		HT_FOREACH (&alloc_table, AllocInfo, info, {
+			if (!info->tag && !info->alloc_func) {
+				const char *it = NULL;
+				int i;
+				for (i = 0; i < 4; ++i) {
+					Dl_info dl_info;
+					if (!dladdr (info->ips [i], &dl_info))
+						continue;
+					if (strstr (dl_info.dli_sname, "monoeg_") || strstr (dl_info.dli_sname, "eg_")
+						|| strstr (dl_info.dli_sname, "g_calloc")
+						|| strstr (dl_info.dli_sname, "do_rehash")
+						|| strstr (dl_info.dli_sname, "g_vasprintf"))
+						continue;
+					it = dl_info.dli_sname;
+					break;
+				}
+				if (it)
+					update_tag (&malloc_tags_by_fun, it, info->size, info->waste);
+				info->alloc_func = it;
+			}
+		});
+
+		dump_tag_bag (&malloc_tags_by_fun, "malloc-by-fun", 0);
 
 		if (STRAY_ALLOCS) {
 			HT_FOREACH (&alloc_table, AllocInfo, info, {
@@ -1284,6 +1326,7 @@ mono_profiler_startup (const char *desc)
 	fprintf (outfile, "[\n");
 
 	tagbag_init (&malloc_tags);
+	tagbag_init (&malloc_tags_by_fun);
 	hashtable_init (&alloc_table, hash_ptr, equals_ptr);
 	hashtable_init (&memdom_table, hash_ptr, equals_ptr);
 
