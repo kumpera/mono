@@ -110,7 +110,7 @@ hashtable_cleanup (HashTable *table)
 		HashNode *node = NULL;
 		for (node = table->table [i]; node;) {
 			HashNode *next = node->next;
-			g_free (node);
+			free (node);
 			node = next;
 		}
 		table->table [i] = NULL;
@@ -325,7 +325,7 @@ memdom_destroy (MonoProfiler *prof, void* memdom)
 	if (info) {
 		--memdom_count [info->kind];
 		tagbag_cleanup (&info->tags);
-		g_free (info);
+		free (info);
 	}
 
 	if (PRINT_MEMDOM)
@@ -343,8 +343,6 @@ memdom_alloc (MonoProfiler *prof, void* memdom, size_t size, const char *tag)
 	alloc_unlock ();
 	if (PRINT_RT_ALLOC)
 		printf ("memdom %p alloc %zu %s\n", memdom, size, tag);
-
-	// dump_alloc_stats ();
 }
 
 static const char*
@@ -397,16 +395,8 @@ runtime_malloc_event (MonoProfiler *prof, void *address, size_t size, const char
 	info->tag = tag;
 	update_tag (&malloc_tags, tag, info->size, info->waste);
 
-	// if (!strcmp (tag, "ghashtable")) {
-	// 	const char *f = filter_bt (3, "g_hash_table");
-	// 	// printf ("hashtable %p allocated from %s\n", address, f);
-	// 	info->alloc_func = f;
-	// }
-
 done:
 	alloc_unlock ();
-
-	dump_alloc_stats ();
 }
 
 enum {
@@ -734,13 +724,13 @@ record_op (VAllocRecord *rec)
 		VMEntry **prev = NULL;
 		VMEntry * entry = find_overlap (rec->addr_start, rec->addr_end, &prev);
 		if (!entry) {
-			fprintf (outfile, "bad vfree [%p %p] to unmmaped region\n", rec->addr_start, rec->addr_end);
+			printf ("bad vfree [%p %p] to unmmaped region\n", rec->addr_start, rec->addr_end);
 			FAIL ("BAD VFREE FOUND\n");
 		}
 
 		//the vfree must be fully covered by the region
 		if (rec->addr_start < entry->addr_start || rec->addr_end > entry->addr_end) {
-			fprintf (outfile, "bad vfree [%p %p] escapes corresponding regions [%p %p]\n",
+			printf ("bad vfree [%p %p] escapes corresponding regions [%p %p]\n",
 				rec->addr_start, rec->addr_end,
 				entry->addr_start, entry->addr_end);
 			FAIL ("BAD VFREE FOUND\n");
@@ -854,21 +844,33 @@ dump_actual_map (void)
 static void
 dump_vmmap (void)
 {
-	VAllocRecordBucket *bucket;
+	VAllocRecordBucket *bucket, *prev;
 	lock_exclusive ();
 	bucket = current_bucket;
 	current_bucket = NULL;
 	unlock_exclusive ();
+
+	//first we need to reverse the bucket list as they are last to first
+	prev = NULL;
+	while (bucket) {
+		VAllocRecordBucket *next = bucket->next_bucket;
+		bucket->next_bucket = prev;
+		prev = bucket;
+		bucket = next;
+	}
+	bucket = prev;
 
 	while (bucket) {
 		int i;
 		for (i = 0; i < VALLOC_ENTRIES; ++i) {
 			VAllocRecord *rec = &bucket->entries [i];
 			if (rec->flags) {
-				if (PRINT_VM_OPS)
+				if (PRINT_VM_OPS) {
 					fprintf (outfile, "\t%s [%p - %p] (%zd bytes) { %s} (%s)\n",
 						op_name (rec->flags),
 						rec->addr_start, rec->addr_end, rec->addr_end - rec->addr_start, op_flags (rec->flags), rec->tag ? rec->tag : "-"); 
+					fflush (outfile);
+				}
 
 				record_op (rec);
 			}
@@ -925,7 +927,7 @@ del_alloc (void *address)
 		if (info->tag)
 			update_tag (&malloc_tags, info->tag, -info->size, -info->waste);
 
-		g_free (info);
+		free (info);
 	}
 
 	alloc_unlock ();
@@ -1113,18 +1115,17 @@ dump_alloc_stats (void)
 	if (!PRINT_ALLOCATION)
 		return;
 	++last_time;
-	if (last_time % 10000)
-		return;
+	// if (last_time % 4)
+	// 	return;
 	dump_stats ();
 }
 
 static void *
 platform_malloc (size_t size)
-{	
+{
 	void * res = malloc (size);
 	add_alloc (res, size, NULL);
 
-	// dump_alloc_stats ();
 	return res;
 }
 
@@ -1138,7 +1139,6 @@ platform_realloc (void *mem, size_t count)
 	void * res = realloc (mem, count);
 	add_alloc (res, count, tag);
 
-	// dump_alloc_stats ();
 	return res;
  }
 
@@ -1147,8 +1147,6 @@ platform_free (void *mem)
 {
 	del_alloc (mem);
 	free (mem);
-
-	// dump_alloc_stats ();
 }
 
 static void*
@@ -1157,7 +1155,6 @@ platform_calloc (size_t count, size_t size)
 	void * res = calloc (count, size);
 	add_alloc (res, count * size, NULL);
 
-	// dump_alloc_stats ();
 	return res;
 }
 
@@ -1176,6 +1173,13 @@ prof_shutdown (MonoProfiler *prof)
 	fclose (outfile);
 	outfile = NULL;
 	alloc_unlock ();
+}
+
+static void
+gc_event (MonoProfiler *prof, MonoGCEvent event, int generation)
+{
+	if (event == MONO_GC_EVENT_POST_START_WORLD)
+		dump_alloc_stats ();
 }
 
 static void
@@ -1268,7 +1272,7 @@ mono_profiler_startup (const char *desc)
 			free (val);
 		}
 	}
-	
+
 	if (use_stdout)
 		outfile = stdout;
 	else
@@ -1284,10 +1288,14 @@ mono_profiler_startup (const char *desc)
 	hashtable_init (&memdom_table, hash_ptr, equals_ptr);
 
 	mono_profiler_install (prof, prof_shutdown);
-	mono_profiler_install_memdom (memdom_new, memdom_destroy, memdom_alloc);
 	mono_profiler_install_malloc (runtime_malloc_event);
-	mono_profiler_install_valloc (runtime_valloc_event, runtime_vfree_event, runtime_mprotect_event);
+	if (log_memdom)
+		mono_profiler_install_memdom (memdom_new, memdom_destroy, memdom_alloc);
+	if (log_valloc)
+		mono_profiler_install_valloc (runtime_valloc_event, runtime_vfree_event, runtime_mprotect_event);
 	mono_profiler_install_runtime_initialized (runtime_inited);
+	mono_profiler_install_gc (gc_event, NULL);
+	mono_profiler_set_events ((MonoProfileFlags)MONO_PROFILE_GC);
 
 	MonoAllocatorVTable alloc_vt = {
 		.version = MONO_ALLOCATOR_VTABLE_VERSION,
