@@ -1096,10 +1096,12 @@ dump_stats (void)
 					Dl_info dl_info;
 					if (!dladdr (info->ips [i], &dl_info))
 						continue;
-					if (strstr (dl_info.dli_sname, "monoeg_") || strstr (dl_info.dli_sname, "eg_")
+					if (strstr (dl_info.dli_sname, "monoeg_")
+						|| strstr (dl_info.dli_sname, "eg_")
 						|| strstr (dl_info.dli_sname, "g_calloc")
-						|| strstr (dl_info.dli_sname, "do_rehash")
-						|| strstr (dl_info.dli_sname, "g_vasprintf"))
+						|| strstr (dl_info.dli_sname, "rehash")
+						|| strstr (dl_info.dli_sname, "g_vasprintf")
+						|| strstr (dl_info.dli_sname, "image_g_malloc0"))
 						continue;
 					it = dl_info.dli_sname;
 					break;
