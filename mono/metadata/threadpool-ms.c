@@ -75,6 +75,32 @@
 #define HILL_CLIMBING_ERROR_SMOOTHING_FACTOR 0.01
 #define HILL_CLIMBING_MAX_SAMPLE_ERROR_PERCENT 0.15
 
+typedef struct{
+	int refcount;
+} MonoRC;
+
+static inline void
+mono_rc_inc (MonoRC *rc)
+{
+	InterlockedAdd (&rc->refcount, 1);
+}
+
+static inline void
+mono_rc_init (MonoRC *rc)
+{
+	rc->refcount = 1;
+}
+
+static inline void
+mono_rc_dec (MonoRC *rc, void (*rc_free)(void *))
+{
+	if (InterlockedAdd (&rc->refcount, -1) == 0) {
+		if (rc_free)
+			rc_free (rc);
+		g_free (rc);
+	}
+}
+
 typedef union {
 	struct {
 		gint16 max_working; /* determined by heuristic */
@@ -86,6 +112,7 @@ typedef union {
 } ThreadPoolCounter;
 
 typedef struct {
+	MonoRC rc;
 	MonoDomain *domain;
 	gint32 outstanding_request;
 } ThreadPoolDomain;
@@ -447,6 +474,7 @@ domain_get (MonoDomain *domain, gboolean create)
 		domain->cleanup_semaphore = cleanup_semaphore;
 
 		tpdomain = g_new0 (ThreadPoolDomain, 1);
+		mono_rc_init (&tpdomain->rc);
 		tpdomain->domain = domain;
 		domain_add (tpdomain);
 
@@ -459,7 +487,7 @@ domain_get (MonoDomain *domain, gboolean create)
 static void
 domain_free (ThreadPoolDomain *tpdomain)
 {
-	g_free (tpdomain);
+	mono_rc_dec (&tpdomain->rc, NULL);
 }
 
 /* LOCKING: threadpool->domains_lock must be held */
@@ -1498,6 +1526,9 @@ mono_threadpool_ms_remove_domain_jobs (MonoDomain *domain, int timeout)
 		return TRUE;
 	}
 
+	/* tpdomain is protected by the domains_lock, which is dropped down there when we wait on the cond var */
+	mono_rc_inc (&tpdomain->rc);
+
 	g_assert (domain->cleanup_semaphore);
 	cleanup_semaphore = (ThreadPoolDomainCleanupSemaphore*) domain->cleanup_semaphore;
 
@@ -1530,6 +1561,8 @@ mono_threadpool_ms_remove_domain_jobs (MonoDomain *domain, int timeout)
 		domain->cleanup_semaphore = NULL;
 	}
 
+	//FIXME remove the semaphore cleanup from above and do it as part of tpdomain cleanup
+	mono_rc_dec (&tpdomain->rc, NULL);
 	mono_coop_mutex_unlock(&threadpool->domains_lock);
 
 	return ret;
