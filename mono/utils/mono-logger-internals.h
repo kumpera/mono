@@ -2,6 +2,7 @@
 #define __MONO_LOGGER_INTERNAL_H__
 
 #include <glib.h>
+#include <mono/utils/mono-compiler.h>
 #include "mono-logger.h"
 
 G_BEGIN_DECLS
@@ -74,8 +75,8 @@ mono_tracev (GLogLevelFlags level, MonoTraceMask mask, const char *format, va_li
  * Traces a new message, depending on the current logging level
  * and trace mask.
  */
-G_GNUC_UNUSED static void
-mono_trace (GLogLevelFlags level, MonoTraceMask mask, const char *format, ...) 
+G_GNUC_UNUSED MONO_ATTR_FORMAT_PRINTF(3,4) static void
+mono_trace (GLogLevelFlags level, MonoTraceMask mask, const char *format, ...)
 {
 	if(G_UNLIKELY (level <= mono_internal_current_level && mask & mono_internal_current_mask)) {
 		va_list args;
@@ -149,6 +150,44 @@ mono_trace_message(MonoTraceMask mask, const char *format, ...)
 
 #endif
 
+/* Internal logging API */
+typedef void (*MonoLoggerOpen) (const char *, void *);
+typedef void (*MonoLoggerWrite) (const char *, GLogLevelFlags, mono_bool, const char *);
+typedef void (*MonoLoggerClose) (void);
+
+typedef struct _MonoLogCallParm_ {
+	MonoLoggerOpen 	opener;		/* Routine to open logging */
+	MonoLoggerWrite	writer;		/* Routine to write log data */
+	MonoLoggerClose closer; 	/* Routine to close logging */
+	char		*dest;		/* Log destination */
+	void		*user_data;	/* User data from legacy handler */
+	mono_bool       header;		/* Whether we want pid/time/date in log message */
+} MonoLogCallParm;
+
+void mono_trace_set_log_handler_internal (MonoLogCallParm *callback, void *user_data);
+void mono_trace_set_logdest_string (const char *value);
+void mono_trace_set_logheader_string (const char *value);
+
+void mono_log_open_syslog (const char *, void *);
+void mono_log_write_syslog (const char *, GLogLevelFlags, mono_bool, const char *);
+void mono_log_close_syslog (void);
+
+void mono_log_open_logfile (const char *, void *);
+void mono_log_write_logfile (const char *, GLogLevelFlags, mono_bool, const char *);
+void mono_log_close_logfile (void);
+
+#if PLATFORM_ANDROID
+void mono_log_open_logcat (const char *path, void *userData);
+void mono_log_write_logcat (const char *log_domain, GLogLevelFlags level, mono_bool hdr, const char *message);
+void mono_log_close_logcat (void);
+#endif
+
+#if defined(HOST_IOS)
+void mono_log_open_asl (const char *path, void *userData);
+void mono_log_write_asl (const char *log_domain, GLogLevelFlags level, mono_bool hdr, const char *message);
+void mono_log_close_asl (void);
+
+#endif
 
 G_END_DECLS
 

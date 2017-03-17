@@ -18,24 +18,17 @@
 #include <mono/metadata/profiler-private.h>
 #include <mono/metadata/debug-helpers.h>
 #include <mono/utils/mono-mmap.h>
-#include <mono/utils/mono-hwcap-arm.h>
+#include <mono/utils/mono-hwcap.h>
 #include <mono/utils/mono-memory-model.h>
 #include <mono/utils/mono-threads-coop.h>
 
 #include "mini-arm.h"
-#include "mini-arm-tls.h"
 #include "cpu-arm.h"
 #include "trace.h"
 #include "ir-emit.h"
 #include "debugger-agent.h"
 #include "mini-gc.h"
 #include "mono/arch/arm/arm-vfp-codegen.h"
-
-#if (defined(HAVE_KW_THREAD) && defined(__linux__) && defined(__ARM_EABI__)) \
-	|| defined(TARGET_ANDROID) \
-	|| (defined(TARGET_IOS) && !defined(TARGET_WATCHOS))
-#define HAVE_FAST_TLS
-#endif
 
 /* Sanity check: This makes no sense */
 #if defined(ARM_FPU_NONE) && (defined(ARM_FPU_VFP) || defined(ARM_FPU_VFP_HARD))
@@ -127,6 +120,7 @@ static int vfp_scratch2 = ARM_VFP_D1;
 static int i8_align;
 
 static gpointer single_step_tramp, breakpoint_tramp;
+static gpointer get_tls_tramp;
 
 /*
  * The code generated for sequence points reads from this location, which is
@@ -166,6 +160,9 @@ int mono_exc_esp_offset = 0;
 #ifndef DISABLE_JIT
 static void mono_arch_compute_omit_fp (MonoCompile *cfg);
 #endif
+
+static guint8*
+emit_aotconst (MonoCompile *cfg, guint8 *code, int dreg, int patch_type, gpointer data);
 
 const char*
 mono_arch_regname (int reg)
@@ -325,83 +322,53 @@ mono_arm_patchable_bl (guint8 *code, int cond)
 	return code;
 }
 
-static guint8*
-mono_arm_emit_tls_get (MonoCompile *cfg, guint8* code, int dreg, int tls_offset)
-{
-#ifdef HAVE_FAST_TLS
-	code = mono_arm_emit_load_imm (code, ARMREG_R0, tls_offset);
-	mono_add_patch_info (cfg, code - cfg->native_code, MONO_PATCH_INFO_INTERNAL_METHOD,
-			"mono_get_tls_key");
-	code = emit_call_seq (cfg, code);
-	if (dreg != ARMREG_R0)
-		ARM_MOV_REG_REG (code, dreg, ARMREG_R0);
-#else
-	g_assert_not_reached ();
+#if defined(__ARM_EABI__) && defined(__linux__) && !defined(PLATFORM_ANDROID) && !defined(__native_client__)
+#define HAVE_AEABI_READ_TP 1
 #endif
+
+#ifdef HAVE_AEABI_READ_TP
+gpointer __aeabi_read_tp (void);
+#endif
+
+gboolean
+mono_arch_have_fast_tls (void)
+{
+#ifdef HAVE_AEABI_READ_TP
+	static gboolean have_fast_tls = FALSE;
+        static gboolean inited = FALSE;
+	gpointer tp1, tp2;
+
+	if (mini_get_debug_options ()->use_fallback_tls)
+		return FALSE;
+
+	if (inited)
+		return have_fast_tls;
+
+	tp1 = __aeabi_read_tp ();
+	asm volatile("mrc p15, 0, %0, c13, c0, 3" : "=r" (tp2));
+
+	have_fast_tls = tp1 && tp1 == tp2;
+	inited = TRUE;
+	return have_fast_tls;
+#else
+	return FALSE;
+#endif
+}
+
+static guint8*
+emit_tls_get (guint8 *code, int dreg, int tls_offset)
+{
+	ARM_MRC (code, 15, 0, dreg, 13, 0, 3);
+	ARM_LDR_IMM (code, dreg, dreg, tls_offset);
 	return code;
 }
 
 static guint8*
-mono_arm_emit_tls_get_reg (MonoCompile *cfg, guint8* code, int dreg, int tls_offset_reg)
+emit_tls_set (guint8 *code, int sreg, int tls_offset)
 {
-#ifdef HAVE_FAST_TLS
-	if (tls_offset_reg != ARMREG_R0)
-		ARM_MOV_REG_REG (code, ARMREG_R0, tls_offset_reg);
-	mono_add_patch_info (cfg, code - cfg->native_code, MONO_PATCH_INFO_INTERNAL_METHOD,
-			"mono_get_tls_key");
-	code = emit_call_seq (cfg, code);
-	if (dreg != ARMREG_R0)
-		ARM_MOV_REG_REG (code, dreg, ARMREG_R0);
-#else
-	g_assert_not_reached ();
-#endif
-	return code;
-}
-
-static guint8*
-mono_arm_emit_tls_set (MonoCompile *cfg, guint8* code, int sreg, int tls_offset)
-{
-#ifdef HAVE_FAST_TLS
-	if (sreg != ARMREG_R1)
-		ARM_MOV_REG_REG (code, ARMREG_R1, sreg);
-	code = mono_arm_emit_load_imm (code, ARMREG_R0, tls_offset);
-	mono_add_patch_info (cfg, code - cfg->native_code, MONO_PATCH_INFO_INTERNAL_METHOD,
-			"mono_set_tls_key");
-	code = emit_call_seq (cfg, code);
-#else
-	g_assert_not_reached ();
-#endif
-	return code;
-}
-
-static guint8*
-mono_arm_emit_tls_set_reg (MonoCompile *cfg, guint8* code, int sreg, int tls_offset_reg)
-{
-#ifdef HAVE_FAST_TLS
-	/* Get sreg in R1 and tls_offset_reg in R0 */
-	if (tls_offset_reg == ARMREG_R1) {
-		if (sreg == ARMREG_R0) {
-			/* swap sreg and tls_offset_reg */
-			ARM_EOR_REG_REG (code, sreg, sreg, tls_offset_reg);
-			ARM_EOR_REG_REG (code, tls_offset_reg, sreg, tls_offset_reg);
-			ARM_EOR_REG_REG (code, sreg, sreg, tls_offset_reg);
-		} else {
-			ARM_MOV_REG_REG (code, ARMREG_R0, tls_offset_reg);
-			if (sreg != ARMREG_R1)
-				ARM_MOV_REG_REG (code, ARMREG_R1, sreg);
-		}
-	} else {
-		if (sreg != ARMREG_R1)
-			ARM_MOV_REG_REG (code, ARMREG_R1, sreg);
-		if (tls_offset_reg != ARMREG_R0)
-			ARM_MOV_REG_REG (code, ARMREG_R0, tls_offset_reg);
-	}
-	mono_add_patch_info (cfg, code - cfg->native_code, MONO_PATCH_INFO_INTERNAL_METHOD,
-			"mono_set_tls_key");
-	code = emit_call_seq (cfg, code);
-#else
-	g_assert_not_reached ();
-#endif
+	int tp_reg = (sreg != ARMREG_R0) ? ARMREG_R0 : ARMREG_R1;
+	ARM_MRC (code, 15, 0, tp_reg, 13, 0, 3);
+	ARM_STR_IMM (code, sreg, tp_reg, tls_offset);
 	return code;
 }
 
@@ -414,31 +381,13 @@ mono_arm_emit_tls_set_reg (MonoCompile *cfg, guint8* code, int sreg, int tls_off
 static guint8*
 emit_save_lmf (MonoCompile *cfg, guint8 *code, gint32 lmf_offset)
 {
-	gboolean get_lmf_fast = FALSE;
 	int i;
 
-	if (mono_arm_have_tls_get ()) {
-		get_lmf_fast = TRUE;
-		if (cfg->compile_aot) {
-			/* OP_AOTCONST */
-			mono_add_patch_info (cfg, code - cfg->native_code, MONO_PATCH_INFO_TLS_OFFSET, (gpointer)TLS_KEY_LMF_ADDR);
-			ARM_LDR_IMM (code, ARMREG_R1, ARMREG_PC, 0);
-			ARM_B (code, 0);
-			*(gpointer*)code = NULL;
-			code += 4;
-			/* Load the value from the GOT */
-			ARM_LDR_REG_REG (code, ARMREG_R1, ARMREG_PC, ARMREG_R1);
-			code = mono_arm_emit_tls_get_reg (cfg, code, ARMREG_R0, ARMREG_R1);
-		} else {
-			gint32 lmf_addr_tls_offset = mono_get_lmf_addr_tls_offset ();
-			g_assert (lmf_addr_tls_offset != -1);
-			code = mono_arm_emit_tls_get (cfg, code, ARMREG_R0, lmf_addr_tls_offset);
-		}
-	}
-
-	if (!get_lmf_fast) {
-		mono_add_patch_info (cfg, code - cfg->native_code, MONO_PATCH_INFO_INTERNAL_METHOD, 
-							 (gpointer)"mono_get_lmf_addr");
+	if (mono_arch_have_fast_tls () && mono_tls_get_tls_offset (TLS_KEY_LMF_ADDR) != -1) {
+		code = emit_tls_get (code, ARMREG_R0, mono_tls_get_tls_offset (TLS_KEY_LMF_ADDR));
+	} else {
+		mono_add_patch_info (cfg, code - cfg->native_code, MONO_PATCH_INFO_INTERNAL_METHOD,
+							 (gpointer)"mono_tls_get_lmf_addr");
 		code = emit_call_seq (cfg, code);
 	}
 	/* we build the MonoLMF structure on the stack - see mini-arm.h */
@@ -580,22 +529,6 @@ emit_restore_lmf (MonoCompile *cfg, guint8 *code, gint32 lmf_offset)
 }
 
 #endif /* #ifndef DISABLE_JIT */
-
-/*
- * mono_arm_have_tls_get:
- *
- * Returns whether we have tls access implemented on the current
- * platform
- */
-gboolean
-mono_arm_have_tls_get (void)
-{
-#ifdef HAVE_FAST_TLS
-	return TRUE;
-#else
-	return FALSE;
-#endif
-}
 
 /*
  * mono_arch_get_argument_info:
@@ -827,12 +760,17 @@ mono_arch_init (void)
 {
 	const char *cpu_arch;
 
+#ifdef TARGET_WATCHOS
+	mini_get_debug_options ()->soft_breakpoints = TRUE;
+#endif
+
 	mono_os_mutex_init_recursive (&mini_arch_mutex);
 	if (mini_get_debug_options ()->soft_breakpoints) {
-		breakpoint_tramp = mini_get_breakpoint_trampoline ();
+		if (!mono_aot_only)
+			breakpoint_tramp = mini_get_breakpoint_trampoline ();
 	} else {
-		ss_trigger_page = mono_valloc (NULL, mono_pagesize (), MONO_MMAP_READ|MONO_MMAP_32BIT, "ss-trigger-page");
-		bp_trigger_page = mono_valloc (NULL, mono_pagesize (), MONO_MMAP_READ|MONO_MMAP_32BIT, "bp-trigger-page");
+		ss_trigger_page = mono_valloc (NULL, mono_pagesize (), MONO_MMAP_READ|MONO_MMAP_32BIT, "ss-trigger-page", MONO_MEM_ACCOUNT_OTHER);
+		bp_trigger_page = mono_valloc (NULL, mono_pagesize (), MONO_MMAP_READ|MONO_MMAP_32BIT, "bp-trigger-page", MONO_MEM_ACCOUNT_OTHER);
 		mono_mprotect (bp_trigger_page, mono_pagesize (), 0);
 	}
 
@@ -843,7 +781,7 @@ mono_arch_init (void)
 	mono_aot_register_jit_icall ("mono_arm_start_gsharedvt_call", mono_arm_start_gsharedvt_call);
 #endif
 	mono_aot_register_jit_icall ("mono_arm_unaligned_stack", mono_arm_unaligned_stack);
-
+	mono_aot_register_jit_icall ("mono_arm_handler_block_trampoline_helper", mono_arm_handler_block_trampoline_helper);
 #if defined(__ARM_EABI__)
 	eabi_supported = TRUE;
 #endif
@@ -853,7 +791,7 @@ mono_arch_init (void)
 #else
 	arm_fpu = MONO_ARM_FPU_VFP;
 
-#if defined(ARM_FPU_NONE) && !defined(__APPLE__)
+#if defined(ARM_FPU_NONE) && !defined(TARGET_IOS)
 	/*
 	 * If we're compiling with a soft float fallback and it
 	 * turns out that no VFP unit is available, we need to
@@ -895,7 +833,7 @@ mono_arch_init (void)
 	v7_supported = TRUE;
 #endif
 
-#if defined(__APPLE__)
+#if defined(TARGET_IOS)
 	/* iOS is special-cased here because we don't yet
 	   have a way to properly detect CPU features on it. */
 	thumb_supported = TRUE;
@@ -1577,6 +1515,7 @@ get_call_info (MonoMemPool *mp, MonoMethodSignature *sig)
 			nwords = (align_size + sizeof (gpointer) -1 ) / sizeof (gpointer);
 			ainfo->storage = RegTypeStructByVal;
 			ainfo->struct_size = size;
+			ainfo->align = align;
 			/* FIXME: align stack_size if needed */
 			if (eabi_supported) {
 				if (align >= 8 && (gr & 1))
@@ -1898,6 +1837,9 @@ mono_arch_allocate_vars (MonoCompile *cfg)
 		ins->inst_basereg = cfg->frame_reg;
 		ins->inst_offset = offset;
 		offset += size;
+	}
+	if (cfg->arch.ss_trigger_page_var) {
+		MonoInst *ins;
 
 		ins = cfg->arch.ss_trigger_page_var;
 		size = 4;
@@ -1922,6 +1864,9 @@ mono_arch_allocate_vars (MonoCompile *cfg)
 		ins->inst_basereg = cfg->frame_reg;
 		ins->inst_offset = offset;
 		offset += size;
+	}
+	if (cfg->arch.seq_point_bp_method_var) {
+		MonoInst *ins;
 
 		ins = cfg->arch.seq_point_bp_method_var;
 		size = 4;
@@ -2102,6 +2047,18 @@ mono_arch_create_vars (MonoCompile *cfg)
 	}
 
 	if (cfg->gen_sdb_seq_points) {
+		if (cfg->compile_aot) {
+			MonoInst *ins = mono_compile_create_var (cfg, &mono_defaults.int_class->byval_arg, OP_LOCAL);
+			ins->flags |= MONO_INST_VOLATILE;
+			cfg->arch.seq_point_info_var = ins;
+
+			if (!cfg->soft_breakpoints) {
+				/* Allocate a separate variable for this to save 1 load per seq point */
+				ins = mono_compile_create_var (cfg, &mono_defaults.int_class->byval_arg, OP_LOCAL);
+				ins->flags |= MONO_INST_VOLATILE;
+				cfg->arch.ss_trigger_page_var = ins;
+			}
+		}
 		if (cfg->soft_breakpoints) {
 			MonoInst *ins;
 
@@ -2112,17 +2069,6 @@ mono_arch_create_vars (MonoCompile *cfg)
 			ins = mono_compile_create_var (cfg, &mono_defaults.int_class->byval_arg, OP_LOCAL);
 			ins->flags |= MONO_INST_VOLATILE;
 			cfg->arch.seq_point_bp_method_var = ins;
-
-			g_assert (!cfg->compile_aot);
-		} else if (cfg->compile_aot) {
-			MonoInst *ins = mono_compile_create_var (cfg, &mono_defaults.int_class->byval_arg, OP_LOCAL);
-			ins->flags |= MONO_INST_VOLATILE;
-			cfg->arch.seq_point_info_var = ins;
-
-			/* Allocate a separate variable for this to save 1 load per seq point */
-			ins = mono_compile_create_var (cfg, &mono_defaults.int_class->byval_arg, OP_LOCAL);
-			ins->flags |= MONO_INST_VOLATILE;
-			cfg->arch.ss_trigger_page_var = ins;
 		}
 	}
 }
@@ -2194,6 +2140,11 @@ mono_arch_get_llvm_call_info (MonoCompile *cfg, MonoMethodSignature *sig)
 		linfo->ret.nslots = cinfo->ret.nregs;
 		break;
 #endif
+	case RegTypeHFA:
+		linfo->ret.storage = LLVMArgFpStruct;
+		linfo->ret.nslots = cinfo->ret.nregs;
+		linfo->ret.esize = cinfo->ret.esize;
+		break;
 	default:
 		cfg->exception_message = g_strdup_printf ("unknown ret conv (%d)", cinfo->ret.storage);
 		cfg->disable_llvm = TRUE;
@@ -2216,12 +2167,31 @@ mono_arch_get_llvm_call_info (MonoCompile *cfg, MonoMethodSignature *sig)
 			break;
 		case RegTypeStructByVal:
 			lainfo->storage = LLVMArgAsIArgs;
-			lainfo->nslots = ainfo->struct_size / sizeof (gpointer);
+			if (eabi_supported && ainfo->align == 8) {
+				/* LLVM models this by passing an int64 array */
+				lainfo->nslots = ALIGN_TO (ainfo->struct_size, 8) / 8;
+				lainfo->esize = 8;
+			} else {
+				lainfo->nslots = ainfo->struct_size / sizeof (gpointer);
+				lainfo->esize = 4;
+			}
+
+			printf ("D: %d\n", ainfo->align);
 			break;
 		case RegTypeStructByAddr:
 		case RegTypeStructByAddrOnStack:
 			lainfo->storage = LLVMArgVtypeByRef;
 			break;
+		case RegTypeHFA: {
+			int j;
+
+			lainfo->storage = LLVMArgAsFpArgs;
+			lainfo->nslots = ainfo->nregs;
+			lainfo->esize = ainfo->esize;
+			for (j = 0; j < ainfo->nregs; ++j)
+				lainfo->pair_storage [j] = LLVMArgInFPReg;
+			break;
+		}
 		default:
 			cfg->exception_message = g_strdup_printf ("ainfo->storage (%d)", ainfo->storage);
 			cfg->disable_llvm = TRUE;
@@ -4253,16 +4223,10 @@ mono_arch_output_basic_block (MonoCompile *cfg, MonoBasicBlock *bb)
 			}
 			break;
 		case OP_TLS_GET:
-			code = mono_arm_emit_tls_get (cfg, code, ins->dreg, ins->inst_offset);
-			break;
-		case OP_TLS_GET_REG:
-			code = mono_arm_emit_tls_get_reg (cfg, code, ins->dreg, ins->sreg1);
+			code = emit_tls_get (code, ins->dreg, ins->inst_offset);
 			break;
 		case OP_TLS_SET:
-			code = mono_arm_emit_tls_set (cfg, code, ins->sreg1, ins->inst_offset);
-			break;
-		case OP_TLS_SET_REG:
-			code = mono_arm_emit_tls_set_reg (cfg, code, ins->sreg1, ins->sreg2);
+			code = emit_tls_set (code, ins->sreg1, ins->inst_offset);
 			break;
 		case OP_ATOMIC_EXCHANGE_I4:
 		case OP_ATOMIC_CAS_I4:
@@ -4430,14 +4394,12 @@ mono_arch_output_basic_block (MonoCompile *cfg, MonoBasicBlock *bb)
 				ARM_DMB (code, ARM_DMB_SY);
 			break;
 		}
-		/*case OP_BIGMUL:
-			ppc_mullw (code, ppc_r4, ins->sreg1, ins->sreg2);
-			ppc_mulhw (code, ppc_r3, ins->sreg1, ins->sreg2);
+		case OP_BIGMUL:
+			ARM_SMULL_REG_REG (code, ins->backend.reg3, ins->dreg, ins->sreg1, ins->sreg2);
 			break;
 		case OP_BIGMUL_UN:
-			ppc_mullw (code, ppc_r4, ins->sreg1, ins->sreg2);
-			ppc_mulhwu (code, ppc_r3, ins->sreg1, ins->sreg2);
-			break;*/
+			ARM_UMULL_REG_REG (code, ins->backend.reg3, ins->dreg, ins->sreg1, ins->sreg2);
+			break;
 		case OP_STOREI1_MEMBASE_IMM:
 			code = mono_arm_emit_load_imm (code, ARMREG_LR, ins->inst_imm & 0xFF);
 			g_assert (arm_is_imm12 (ins->inst_offset));
@@ -4590,9 +4552,11 @@ mono_arch_output_basic_block (MonoCompile *cfg, MonoBasicBlock *bb)
 			MonoInst *var;
 			int dreg = ARMREG_LR;
 
+#if 0
 			if (cfg->soft_breakpoints) {
 				g_assert (!cfg->compile_aot);
 			}
+#endif
 
 			/*
 			 * For AOT, we use one got slot per method, which will point to a
@@ -4615,6 +4579,7 @@ mono_arch_output_basic_block (MonoCompile *cfg, MonoBasicBlock *bb)
 				g_assert (((guint64)(gsize)ss_trigger_page >> 32) == 0);
 			}
 
+			/* Single step check */
 			if (ins->flags & MONO_INST_SINGLE_STEP_LOC) {
 				if (cfg->soft_breakpoints) {
 					/* Load the address of the sequence point method variable. */
@@ -4649,20 +4614,8 @@ mono_arch_output_basic_block (MonoCompile *cfg, MonoBasicBlock *bb)
 
 			mono_add_seq_point (cfg, bb, ins, code - cfg->native_code);
 
-			if (cfg->soft_breakpoints) {
-				/* Load the address of the breakpoint method into ip. */
-				var = bp_method_var;
-				g_assert (var);
-				g_assert (var->opcode == OP_REGOFFSET);
-				g_assert (arm_is_imm12 (var->inst_offset));
-				ARM_LDR_IMM (code, dreg, var->inst_basereg, var->inst_offset);
-
-				/*
-				 * A placeholder for a possible breakpoint inserted by
-				 * mono_arch_set_breakpoint ().
-				 */
-				ARM_NOP (code);
-			} else if (cfg->compile_aot) {
+			/* Breakpoint check */
+			if (cfg->compile_aot) {
 				guint32 offset = code - cfg->native_code;
 				guint32 val;
 
@@ -4685,7 +4638,23 @@ mono_arch_output_basic_block (MonoCompile *cfg, MonoBasicBlock *bb)
 				/* What is faster, a branch or a load ? */
 				ARM_CMP_REG_IMM (code, dreg, 0, 0);
 				/* The breakpoint instruction */
-				ARM_LDR_IMM_COND (code, dreg, dreg, 0, ARMCOND_NE);
+				if (cfg->soft_breakpoints)
+					ARM_BLX_REG_COND (code, ARMCOND_NE, dreg);
+				else
+					ARM_LDR_IMM_COND (code, dreg, dreg, 0, ARMCOND_NE);
+			} else if (cfg->soft_breakpoints) {
+				/* Load the address of the breakpoint method into ip. */
+				var = bp_method_var;
+				g_assert (var);
+				g_assert (var->opcode == OP_REGOFFSET);
+				g_assert (arm_is_imm12 (var->inst_offset));
+				ARM_LDR_IMM (code, dreg, var->inst_basereg, var->inst_offset);
+
+				/*
+				 * A placeholder for a possible breakpoint inserted by
+				 * mono_arch_set_breakpoint ().
+				 */
+				ARM_NOP (code);
 			} else {
 				/* 
 				 * A placeholder for a possible breakpoint inserted by
@@ -5115,19 +5084,13 @@ mono_arch_output_basic_block (MonoCompile *cfg, MonoBasicBlock *bb)
 			break;
 		}
 		case OP_GENERIC_CLASS_INIT: {
-			static int byte_offset = -1;
-			static guint8 bitmask;
-			guint32 imm8;
+			int byte_offset;
 			guint8 *jump;
 
-			if (byte_offset < 0)
-				mono_marshal_find_bitfield_offset (MonoVTable, initialized, &byte_offset, &bitmask);
+			byte_offset = MONO_STRUCT_OFFSET (MonoVTable, initialized);
 
 			g_assert (arm_is_imm8 (byte_offset));
 			ARM_LDRSB_IMM (code, ARMREG_IP, ins->sreg1, byte_offset);
-			imm8 = mono_arm_is_rotated_imm8 (bitmask, &rot_amount);
-			g_assert (imm8 >= 0);
-			ARM_AND_REG_IMM (code, ARMREG_IP, ARMREG_IP, imm8, rot_amount);
 			ARM_CMP_REG_IMM (code, ARMREG_IP, 0, 0);
 			jump = code;
 			ARM_B_COND (code, ARMCOND_NE, 0);
@@ -5964,38 +5927,6 @@ mono_arch_register_lowlevel_calls (void)
 	mono_register_jit_icall (mono_arm_throw_exception, "mono_arm_throw_exception", mono_create_icall_signature ("void"), TRUE);
 	mono_register_jit_icall (mono_arm_throw_exception_by_token, "mono_arm_throw_exception_by_token", mono_create_icall_signature ("void"), TRUE);
 	mono_register_jit_icall (mono_arm_unaligned_stack, "mono_arm_unaligned_stack", mono_create_icall_signature ("void"), TRUE);
-
-#ifndef MONO_CROSS_COMPILE
-	if (mono_arm_have_tls_get ()) {
-		MonoTlsImplementation tls_imp = mono_arm_get_tls_implementation ();
-
-		mono_register_jit_icall (tls_imp.get_tls_thunk, "mono_get_tls_key", mono_create_icall_signature ("ptr ptr"), TRUE);
-		mono_register_jit_icall (tls_imp.set_tls_thunk, "mono_set_tls_key", mono_create_icall_signature ("void ptr ptr"), TRUE);
-
-		if (tls_imp.get_tls_thunk_end) {
-			mono_tramp_info_register (
-				mono_tramp_info_create (
-					"mono_get_tls_key",
-					(guint8*)tls_imp.get_tls_thunk,
-					(guint8*)tls_imp.get_tls_thunk_end - (guint8*)tls_imp.get_tls_thunk,
-					NULL,
-					mono_arch_get_cie_program ()
-					),
-				NULL
-				);
-			mono_tramp_info_register (
-				mono_tramp_info_create (
-					"mono_set_tls_key",
-					(guint8*)tls_imp.set_tls_thunk,
-					(guint8*)tls_imp.set_tls_thunk_end - (guint8*)tls_imp.set_tls_thunk,
-					NULL,
-					mono_arch_get_cie_program ()
-					),
-				NULL
-				);
-		}
-	}
-#endif
 }
 
 #define patch_lis_ori(ip,val) do {\
@@ -6526,22 +6457,36 @@ mono_arch_emit_prolog (MonoCompile *cfg)
 	if (cfg->arch.seq_point_ss_method_var) {
 		MonoInst *ss_method_ins = cfg->arch.seq_point_ss_method_var;
 		MonoInst *bp_method_ins = cfg->arch.seq_point_bp_method_var;
+
 		g_assert (ss_method_ins->opcode == OP_REGOFFSET);
 		g_assert (arm_is_imm12 (ss_method_ins->inst_offset));
-		g_assert (bp_method_ins->opcode == OP_REGOFFSET);
-		g_assert (arm_is_imm12 (bp_method_ins->inst_offset));
 
-		ARM_MOV_REG_REG (code, ARMREG_LR, ARMREG_PC);
-		ARM_B (code, 1);
-		*(gpointer*)code = &single_step_tramp;
-		code += 4;
-		*(gpointer*)code = breakpoint_tramp;
-		code += 4;
+		if (cfg->compile_aot) {
+			MonoInst *info_var = cfg->arch.seq_point_info_var;
+			int dreg = ARMREG_LR;
 
-		ARM_LDR_IMM (code, ARMREG_IP, ARMREG_LR, 0);
-		ARM_STR_IMM (code, ARMREG_IP, ss_method_ins->inst_basereg, ss_method_ins->inst_offset);
-		ARM_LDR_IMM (code, ARMREG_IP, ARMREG_LR, 4);
-		ARM_STR_IMM (code, ARMREG_IP, bp_method_ins->inst_basereg, bp_method_ins->inst_offset);
+			g_assert (info_var->opcode == OP_REGOFFSET);
+			g_assert (arm_is_imm12 (info_var->inst_offset));
+
+			ARM_LDR_IMM (code, dreg, info_var->inst_basereg, info_var->inst_offset);
+			ARM_LDR_IMM (code, dreg, dreg, MONO_STRUCT_OFFSET (SeqPointInfo, ss_tramp_addr));
+			ARM_STR_IMM (code, dreg, ss_method_ins->inst_basereg, ss_method_ins->inst_offset);
+		} else {
+			g_assert (bp_method_ins->opcode == OP_REGOFFSET);
+			g_assert (arm_is_imm12 (bp_method_ins->inst_offset));
+
+			ARM_MOV_REG_REG (code, ARMREG_LR, ARMREG_PC);
+			ARM_B (code, 1);
+			*(gpointer*)code = &single_step_tramp;
+			code += 4;
+			*(gpointer*)code = breakpoint_tramp;
+			code += 4;
+
+			ARM_LDR_IMM (code, ARMREG_IP, ARMREG_LR, 0);
+			ARM_STR_IMM (code, ARMREG_IP, ss_method_ins->inst_basereg, ss_method_ins->inst_offset);
+			ARM_LDR_IMM (code, ARMREG_IP, ARMREG_LR, 4);
+			ARM_STR_IMM (code, ARMREG_IP, bp_method_ins->inst_basereg, bp_method_ins->inst_offset);
+		}
 	}
 
 	cfg->code_len = code - cfg->native_code;
@@ -6891,7 +6836,7 @@ mini_dump_bad_imt (int input_imt, int compared_imt, int pc)
 #endif
 
 gpointer
-mono_arch_build_imt_thunk (MonoVTable *vtable, MonoDomain *domain, MonoIMTCheckItem **imt_entries, int count,
+mono_arch_build_imt_trampoline (MonoVTable *vtable, MonoDomain *domain, MonoIMTCheckItem **imt_entries, int count,
 	gpointer fail_tramp)
 {
 	int size, i;
@@ -6943,7 +6888,7 @@ mono_arch_build_imt_thunk (MonoVTable *vtable, MonoDomain *domain, MonoIMTCheckI
 		size += 4 * count; /* The ARM_ADD_REG_IMM to pop the stack */
 
 	if (fail_tramp)
-		code = mono_method_alloc_generic_virtual_thunk (domain, size);
+		code = mono_method_alloc_generic_virtual_trampoline (domain, size);
 	else
 		code = mono_domain_code_reserve (domain, size);
 	start = code;
@@ -6951,7 +6896,7 @@ mono_arch_build_imt_thunk (MonoVTable *vtable, MonoDomain *domain, MonoIMTCheckI
 	unwind_ops = mono_arch_get_cie_program ();
 
 #ifdef DEBUG_IMT
-	g_print ("Building IMT thunk for class %s %s entries %d code size %d code at %p end %p vtable %p fail_tramp %p\n", vtable->klass->name_space, vtable->klass->name, count, size, start, ((guint8*)start) + size, vtable, fail_tramp);
+	g_print ("Building IMT trampoline for class %s %s entries %d code size %d code at %p end %p vtable %p fail_tramp %p\n", vtable->klass->name_space, vtable->klass->name, count, size, start, ((guint8*)start) + size, vtable, fail_tramp);
 	for (i = 0; i < count; ++i) {
 		MonoIMTCheckItem *item = imt_entries [i];
 		g_print ("method %d (%p) %s vtable slot %p is_equals %d chunk size %d\n", i, item->key, ((MonoMethod*)item->key)->name, &vtable->vtable [item->value.vtable_slot], item->is_equals, item->chunk_size);
@@ -7117,7 +7062,7 @@ mono_arch_build_imt_thunk (MonoVTable *vtable, MonoDomain *domain, MonoIMTCheckI
 
 	mono_arch_flush_icache ((guint8*)start, size);
 	mono_profiler_code_buffer_new (start, code - start, MONO_PROFILER_CODE_BUFFER_IMT_TRAMPOLINE, NULL);
-	mono_stats.imt_thunks_size += code - start;
+	mono_stats.imt_trampolines_size += code - start;
 
 	g_assert (DISTANCE (start, code) <= size);
 
@@ -7184,17 +7129,19 @@ mono_arch_set_breakpoint (MonoJitInfo *ji, guint8 *ip)
 	guint32 native_offset = ip - (guint8*)ji->code_start;
 	MonoDebugOptions *opt = mini_get_debug_options ();
 
-	if (opt->soft_breakpoints) {
-		g_assert (!ji->from_aot);
-		code += 4;
-		ARM_BLX_REG (code, ARMREG_LR);
-		mono_arch_flush_icache (code - 4, 4);
-	} else if (ji->from_aot) {
+	if (ji->from_aot) {
 		SeqPointInfo *info = mono_arch_get_seq_point_info (mono_domain_get (), ji->code_start);
+
+		if (!breakpoint_tramp)
+			breakpoint_tramp = mini_get_breakpoint_trampoline ();
 
 		g_assert (native_offset % 4 == 0);
 		g_assert (info->bp_addrs [native_offset / 4] == 0);
-		info->bp_addrs [native_offset / 4] = bp_trigger_page;
+		info->bp_addrs [native_offset / 4] = opt->soft_breakpoints ? breakpoint_tramp : bp_trigger_page;
+	} else if (opt->soft_breakpoints) {
+		code += 4;
+		ARM_BLX_REG (code, ARMREG_LR);
+		mono_arch_flush_icache (code - 4, 4);
 	} else {
 		int dreg = ARMREG_LR;
 
@@ -7230,18 +7177,20 @@ mono_arch_clear_breakpoint (MonoJitInfo *ji, guint8 *ip)
 	guint8 *code = ip;
 	int i;
 
-	if (opt->soft_breakpoints) {
-		g_assert (!ji->from_aot);
-		code += 4;
-		ARM_NOP (code);
-		mono_arch_flush_icache (code - 4, 4);
-	} else if (ji->from_aot) {
+	if (ji->from_aot) {
 		guint32 native_offset = ip - (guint8*)ji->code_start;
 		SeqPointInfo *info = mono_arch_get_seq_point_info (mono_domain_get (), ji->code_start);
 
+		if (!breakpoint_tramp)
+			breakpoint_tramp = mini_get_breakpoint_trampoline ();
+
 		g_assert (native_offset % 4 == 0);
-		g_assert (info->bp_addrs [native_offset / 4] == bp_trigger_page);
+		g_assert (info->bp_addrs [native_offset / 4] == (opt->soft_breakpoints ? breakpoint_tramp : bp_trigger_page));
 		info->bp_addrs [native_offset / 4] = 0;
+	} else if (opt->soft_breakpoints) {
+		code += 4;
+		ARM_NOP (code);
+		mono_arch_flush_icache (code - 4, 4);
 	} else {
 		for (i = 0; i < 4; ++i)
 			ARM_NOP (code);
@@ -7379,6 +7328,7 @@ mono_arch_get_seq_point_info (MonoDomain *domain, guint8 *code)
 
 		info->ss_trigger_page = ss_trigger_page;
 		info->bp_trigger_page = bp_trigger_page;
+		info->ss_tramp_addr = &single_step_tramp;
 
 		mono_domain_lock (domain);
 		g_hash_table_insert (domain_jit_info (domain)->arch_seq_points,
@@ -7475,4 +7425,38 @@ CallInfo*
 mono_arch_get_call_info (MonoMemPool *mp, MonoMethodSignature *sig)
 {
 	return get_call_info (mp, sig);
+}
+
+gpointer
+mono_arch_get_get_tls_tramp (void)
+{
+	return NULL;
+}
+
+static guint8*
+emit_aotconst (MonoCompile *cfg, guint8 *code, int dreg, int patch_type, gpointer data)
+{
+	/* OP_AOTCONST */
+	mono_add_patch_info (cfg, code - cfg->native_code, patch_type, data);
+	ARM_LDR_IMM (code, dreg, ARMREG_PC, 0);
+	ARM_B (code, 0);
+	*(gpointer*)code = NULL;
+	code += 4;
+	/* Load the value from the GOT */
+	ARM_LDR_REG_REG (code, dreg, ARMREG_PC, dreg);
+	return code;
+}
+
+guint8*
+mono_arm_emit_aotconst (gpointer ji_list, guint8 *code, guint8 *buf, int dreg, int patch_type, gconstpointer data)
+{
+	MonoJumpInfo **ji = (MonoJumpInfo**)ji_list;
+
+	*ji = mono_patch_info_list_prepend (*ji, code - buf, patch_type, data);
+	ARM_LDR_IMM (code, dreg, ARMREG_PC, 0);
+	ARM_B (code, 0);
+	*(gpointer*)code = NULL;
+	code += 4;
+	ARM_LDR_REG_REG (code, dreg, ARMREG_PC, dreg);
+	return code;
 }

@@ -26,8 +26,6 @@
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 //
 
-#if NETSTANDARD
-
 namespace System.Runtime.Loader
 {
 	//
@@ -100,9 +98,9 @@ namespace System.Runtime.Loader
 		{        	
 		}
 
+#pragma warning disable 67
 		public event Func<AssemblyLoadContext, System.Reflection.AssemblyName, System.Reflection.Assembly> Resolving;
 		public event Action<AssemblyLoadContext> Unloading;
+#pragma warning restore
 	}
 }
-
-#endif

@@ -2,6 +2,7 @@ man_MANS = \
 	al.1                  \
 	cert2spc.1            \
 	certmgr.1             \
+	cert-sync.1           \
 	chktrust.1            \
 	cilc.1                \
 	crlupdate.1           \
@@ -18,6 +19,7 @@ man_MANS = \
 	mconfig.1             \
 	mcs.1                 \
 	mdassembler.1         \
+	mdb2ppdb.1	      \
 	mdoc.1                \
 	mdoc.5                \
 	mdoc-assemble.1       \
@@ -42,7 +44,6 @@ man_MANS = \
 	mozroots.1            \
 	pdb2mdb.1	      \
 	permview.1            \
-	prj2make.1            \
 	resgen.1              \
 	secutil.1             \
 	setreg.1              \

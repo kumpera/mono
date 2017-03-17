@@ -25,6 +25,7 @@
 #include <pthread.h>
 #include <sys/mman.h>
 #include <glib.h>
+#include <unistd.h>
 
 //XXX for now all configuration is here
 #define TAG_BASED_DEDUP TRUE

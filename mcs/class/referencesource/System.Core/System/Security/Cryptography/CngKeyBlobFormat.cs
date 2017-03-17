@@ -119,6 +119,18 @@ namespace System.Security.Cryptography {
             }
         }
 
+        public static CngKeyBlobFormat EccFullPrivateBlob {
+            get {
+                throw new NotImplementedException ();
+            }
+        }
+
+        public static CngKeyBlobFormat EccFullPublicBlob {
+            get {
+                throw new NotImplementedException ();
+            }
+        }
+
         public static CngKeyBlobFormat GenericPrivateBlob {
             get {
                 Contract.Ensures(Contract.Result<CngKeyBlobFormat>() != null);

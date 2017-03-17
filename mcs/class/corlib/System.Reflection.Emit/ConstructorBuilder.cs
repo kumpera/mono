@@ -145,7 +145,11 @@ namespace System.Reflection.Emit {
 		internal override Type GetParameterType (int pos) {
 			return parameters [pos];
 		}
-		
+
+		internal MethodBase RuntimeResolve () {
+			return type.RuntimeResolve ().GetConstructor (this);
+		}
+
 		public override Object Invoke (Object obj, BindingFlags invokeAttr, Binder binder, Object[] parameters, CultureInfo culture)
 		{
 			throw not_supported ();
@@ -201,7 +205,7 @@ namespace System.Reflection.Emit {
 
 		public void AddDeclarativeSecurity (SecurityAction action, PermissionSet pset)
 		{
-#if !NET_2_1
+#if !MOBILE
 			if (pset == null)
 				throw new ArgumentNullException ("pset");
 			if ((action == SecurityAction.RequestMinimum) ||
@@ -359,6 +363,23 @@ namespace System.Reflection.Emit {
 			}
 			if (ilgen != null)
 				ilgen.label_fixup (this);
+		}
+
+		internal void ResolveUserTypes () {
+			TypeBuilder.ResolveUserTypes (parameters);
+			if (paramModReq != null) {
+				foreach (var types in paramModReq)
+					TypeBuilder.ResolveUserTypes (types);
+			}
+			if (paramModOpt != null) {
+				foreach (var types in paramModOpt)
+					TypeBuilder.ResolveUserTypes (types);
+			}
+		}
+
+		internal void FixupTokens (Dictionary<int, int> token_map, Dictionary<int, MemberInfo> member_map) {
+			if (ilgen != null)
+				ilgen.FixupTokens (token_map, member_map);
 		}
 		
 		internal void GenerateDebugInfo (ISymbolWriter symbolWriter)

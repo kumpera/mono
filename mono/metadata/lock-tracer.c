@@ -20,10 +20,9 @@
 #include <execinfo.h>
 #endif
 
-#include <mono/io-layer/io-layer.h>
+#include <mono/utils/mono-compiler.h>
 
 #include "lock-tracer.h"
-
 
 /*
  * This is a very simple lock trace implementation. It can be used to verify that the runtime is
@@ -141,5 +140,7 @@ mono_locks_lock_released (RuntimeLocks kind, gpointer lock)
 {
 	add_record (RECORD_LOCK_RELEASED, kind, lock);
 }
+#else
 
-#endif
+MONO_EMPTY_SOURCE_FILE (lock_tracer);
+#endif /* LOCK_TRACER */

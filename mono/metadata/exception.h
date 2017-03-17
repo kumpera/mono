@@ -105,6 +105,7 @@ mono_get_exception_io                    (const char *msg);
 MONO_API MonoException *
 mono_get_exception_file_not_found        (MonoString *fname);
 
+MONO_RT_EXTERNAL_ONLY
 MONO_API MonoException *
 mono_get_exception_file_not_found2       (const char *msg, MonoString *fname);
 
@@ -124,6 +125,7 @@ mono_get_exception_appdomain_unloaded (void);
 MONO_API MonoException *
 mono_get_exception_bad_image_format (const char *msg);
 
+MONO_RT_EXTERNAL_ONLY
 MONO_API MonoException *
 mono_get_exception_bad_image_format2 (const char *msg, MonoString *fname);
 
@@ -146,6 +148,14 @@ mono_get_exception_reflection_type_load (MonoArray *types, MonoArray *exceptions
 MONO_RT_EXTERNAL_ONLY
 MONO_API MonoException *
 mono_get_exception_runtime_wrapped (MonoObject *wrapped_exception);
+
+/* Installs a function which is called when the runtime encounters an unhandled exception.
+ * This hook isn't expected to return.
+ * If no hook has been installed, the runtime will print a message before aborting.
+ */
+typedef void  (*MonoUnhandledExceptionFunc)         (MonoObject *exc, void *user_data);
+MONO_API void mono_install_unhandled_exception_hook (MonoUnhandledExceptionFunc func, void *user_data);
+void          mono_invoke_unhandled_exception_hook  (MonoObject *exc);
 
 MONO_END_DECLS
 

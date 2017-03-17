@@ -182,7 +182,6 @@
 #include "mono/sgen/sgen-protocol.h"
 #include "mono/sgen/sgen-memory-governor.h"
 #include "mono/sgen/sgen-hash-table.h"
-#include "mono/sgen/sgen-cardtable.h"
 #include "mono/sgen/sgen-pinning.h"
 #include "mono/sgen/sgen-workers.h"
 #include "mono/sgen/sgen-client.h"
@@ -290,6 +289,8 @@ static SGEN_TV_DECLARE (time_major_conc_collection_end);
 
 int gc_debug_level = 0;
 FILE* gc_debug_file;
+static char* gc_params_options;
+static char* gc_debug_options;
 
 /*
 void
@@ -422,12 +423,11 @@ sgen_workers_get_job_gray_queue (WorkerData *worker_data, SgenGrayQueue *default
 }
 
 static void
-gray_queue_enable_redirect (SgenGrayQueue *queue)
+gray_queue_redirect (SgenGrayQueue *queue)
 {
 	SGEN_ASSERT (0, concurrent_collection_in_progress, "Where are we redirecting the gray queue to, without a concurrent collection?");
 
-	sgen_gray_queue_set_alloc_prepare (queue, sgen_workers_take_from_queue_and_awake);
-	sgen_workers_take_from_queue_and_awake (queue);
+	sgen_workers_take_from_queue (queue);
 }
 
 void
@@ -509,22 +509,9 @@ sgen_add_to_global_remset (gpointer ptr, GCObject *obj)
 gboolean
 sgen_drain_gray_stack (ScanCopyContext ctx)
 {
-	ScanObjectFunc scan_func = ctx.ops->scan_object;
-	SgenGrayQueue *queue = ctx.queue;
+	SGEN_ASSERT (0, ctx.ops->drain_gray_stack, "Why do we have a scan/copy context with a missing drain gray stack function?");
 
-	if (ctx.ops->drain_gray_stack)
-		return ctx.ops->drain_gray_stack (queue);
-
-	for (;;) {
-		GCObject *obj;
-		SgenDescriptor desc;
-		GRAY_OBJECT_DEQUEUE (queue, &obj, &desc);
-		if (!obj)
-			return TRUE;
-		SGEN_LOG (9, "Precise gray object scan %p (%s)", obj, sgen_client_vtable_get_name (SGEN_LOAD_VTABLE (obj)));
-		scan_func (obj, desc, queue);
-	}
-	return FALSE;
+	return ctx.ops->drain_gray_stack (ctx.queue);
 }
 
 /*
@@ -673,7 +660,7 @@ pin_objects_from_nursery_pin_queue (gboolean do_scan_objects, ScanCopyContext ct
 					safe_object_get_size (obj_to_pin));
 
 			pin_object (obj_to_pin);
-			GRAY_OBJECT_ENQUEUE (queue, obj_to_pin, desc);
+			GRAY_OBJECT_ENQUEUE_SERIAL (queue, obj_to_pin, desc);
 			sgen_pin_stats_register_object (obj_to_pin, GENERATION_NURSERY);
 			definitely_pinned [count] = obj_to_pin;
 			count++;
@@ -723,7 +710,7 @@ sgen_pin_object (GCObject *object, SgenGrayQueue *queue)
 	++objects_pinned;
 	sgen_pin_stats_register_object (object, GENERATION_NURSERY);
 
-	GRAY_OBJECT_ENQUEUE (queue, object, sgen_obj_get_descriptor_safe (object));
+	GRAY_OBJECT_ENQUEUE_SERIAL (queue, object, sgen_obj_get_descriptor_safe (object));
 }
 
 /* Sort the addresses in array in increasing order.
@@ -871,6 +858,7 @@ static void
 precisely_scan_objects_from (void** start_root, void** end_root, char* n_start, char *n_end, SgenDescriptor desc, ScanCopyContext ctx)
 {
 	CopyOrMarkObjectFunc copy_func = ctx.ops->copy_or_mark_object;
+	ScanPtrFieldFunc scan_field_func = ctx.ops->scan_ptr_field;
 	SgenGrayQueue *queue = ctx.queue;
 
 	switch (desc & ROOT_DESC_TYPE_MASK) {
@@ -902,6 +890,15 @@ precisely_scan_objects_from (void** start_root, void** end_root, char* n_start, 
 				++objptr;
 			}
 			start_run += GC_BITS_PER_WORD;
+		}
+		break;
+	}
+	case ROOT_DESC_VECTOR: {
+		void **p;
+
+		for (p = start_root; p < end_root; p++) {
+			if (*p)
+				scan_field_func (NULL, (GCObject**)p, queue);
 		}
 		break;
 	}
@@ -988,6 +985,24 @@ FILE *
 mono_gc_get_logfile (void)
 {
 	return gc_debug_file;
+}
+
+void
+mono_gc_params_set (const char* options)
+{
+	if (gc_params_options)
+		g_free (gc_params_options);
+
+	gc_params_options = g_strdup (options);
+}
+
+void
+mono_gc_debug_set (const char* options)
+{
+	if (gc_debug_options)
+		g_free (gc_debug_options);
+
+	gc_debug_options = g_strdup (options);
 }
 
 static void
@@ -1169,7 +1184,6 @@ finish_gray_stack (int generation, ScanCopyContext ctx)
 
 	g_assert (sgen_gray_object_queue_is_empty (queue));
 
-	sgen_gray_object_queue_trim_free_list (queue);
 	binary_protocol_finish_gray_stack_end (sgen_timestamp (), generation);
 }
 
@@ -1305,6 +1319,11 @@ typedef struct {
 	SgenGrayQueue *gc_thread_gray_queue;
 } ScanJob;
 
+typedef struct {
+	ScanJob scan_job;
+	int job_index;
+} ParallelScanJob;
+
 static ScanCopyContext
 scan_copy_context_for_scan_job (void *worker_data_untyped, ScanJob *job)
 {
@@ -1367,35 +1386,84 @@ job_scan_finalizer_entries (void *worker_data_untyped, SgenThreadPoolJob *job)
 static void
 job_scan_major_mod_union_card_table (void *worker_data_untyped, SgenThreadPoolJob *job)
 {
-	ScanJob *job_data = (ScanJob*)job;
-	ScanCopyContext ctx = scan_copy_context_for_scan_job (worker_data_untyped, job_data);
+	ParallelScanJob *job_data = (ParallelScanJob*)job;
+	ScanCopyContext ctx = scan_copy_context_for_scan_job (worker_data_untyped, (ScanJob*)job_data);
 
 	g_assert (concurrent_collection_in_progress);
-	major_collector.scan_card_table (CARDTABLE_SCAN_MOD_UNION, ctx);
+	major_collector.scan_card_table (CARDTABLE_SCAN_MOD_UNION, ctx, job_data->job_index, sgen_workers_get_job_split_count ());
 }
 
 static void
 job_scan_los_mod_union_card_table (void *worker_data_untyped, SgenThreadPoolJob *job)
 {
-	ScanJob *job_data = (ScanJob*)job;
-	ScanCopyContext ctx = scan_copy_context_for_scan_job (worker_data_untyped, job_data);
+	ParallelScanJob *job_data = (ParallelScanJob*)job;
+	ScanCopyContext ctx = scan_copy_context_for_scan_job (worker_data_untyped, (ScanJob*)job_data);
 
 	g_assert (concurrent_collection_in_progress);
-	sgen_los_scan_card_table (CARDTABLE_SCAN_MOD_UNION, ctx);
+	sgen_los_scan_card_table (CARDTABLE_SCAN_MOD_UNION, ctx, job_data->job_index, sgen_workers_get_job_split_count ());
 }
 
 static void
-job_mod_union_preclean (void *worker_data_untyped, SgenThreadPoolJob *job)
+job_major_mod_union_preclean (void *worker_data_untyped, SgenThreadPoolJob *job)
+{
+	ParallelScanJob *job_data = (ParallelScanJob*)job;
+	ScanCopyContext ctx = scan_copy_context_for_scan_job (worker_data_untyped, (ScanJob*)job_data);
+
+	g_assert (concurrent_collection_in_progress);
+
+	major_collector.scan_card_table (CARDTABLE_SCAN_MOD_UNION_PRECLEAN, ctx, job_data->job_index, sgen_workers_get_job_split_count ());
+}
+
+static void
+job_los_mod_union_preclean (void *worker_data_untyped, SgenThreadPoolJob *job)
+{
+	ParallelScanJob *job_data = (ParallelScanJob*)job;
+	ScanCopyContext ctx = scan_copy_context_for_scan_job (worker_data_untyped, (ScanJob*)job_data);
+
+	g_assert (concurrent_collection_in_progress);
+
+	sgen_los_scan_card_table (CARDTABLE_SCAN_MOD_UNION_PRECLEAN, ctx, job_data->job_index, sgen_workers_get_job_split_count ());
+}
+
+static void
+job_scan_last_pinned (void *worker_data_untyped, SgenThreadPoolJob *job)
 {
 	ScanJob *job_data = (ScanJob*)job;
 	ScanCopyContext ctx = scan_copy_context_for_scan_job (worker_data_untyped, job_data);
 
 	g_assert (concurrent_collection_in_progress);
 
-	major_collector.scan_card_table (CARDTABLE_SCAN_MOD_UNION_PRECLEAN, ctx);
-	sgen_los_scan_card_table (CARDTABLE_SCAN_MOD_UNION_PRECLEAN, ctx);
-
 	sgen_scan_pin_queue_objects (ctx);
+}
+
+static void
+workers_finish_callback (void)
+{
+	ParallelScanJob *psj;
+	ScanJob *sj;
+	int split_count = sgen_workers_get_job_split_count ();
+	int i;
+	/* Mod union preclean jobs */
+	for (i = 0; i < split_count; i++) {
+		psj = (ParallelScanJob*)sgen_thread_pool_job_alloc ("preclean major mod union cardtable", job_major_mod_union_preclean, sizeof (ParallelScanJob));
+		psj->scan_job.ops = sgen_workers_get_idle_func_object_ops ();
+		psj->scan_job.gc_thread_gray_queue = NULL;
+		psj->job_index = i;
+		sgen_workers_enqueue_job (&psj->scan_job.job, TRUE);
+	}
+
+	for (i = 0; i < split_count; i++) {
+		psj = (ParallelScanJob*)sgen_thread_pool_job_alloc ("preclean los mod union cardtable", job_los_mod_union_preclean, sizeof (ParallelScanJob));
+		psj->scan_job.ops = sgen_workers_get_idle_func_object_ops ();
+		psj->scan_job.gc_thread_gray_queue = NULL;
+		psj->job_index = i;
+		sgen_workers_enqueue_job (&psj->scan_job.job, TRUE);
+	}
+
+	sj = (ScanJob*)sgen_thread_pool_job_alloc ("scan last pinned", job_scan_last_pinned, sizeof (ScanJob));
+	sj->ops = sgen_workers_get_idle_func_object_ops ();
+	sj->gc_thread_gray_queue = NULL;
+	sgen_workers_enqueue_job (&sj->job, TRUE);
 }
 
 static void
@@ -1423,13 +1491,16 @@ enqueue_scan_from_roots_jobs (SgenGrayQueue *gc_thread_gray_queue, char *heap_st
 	scrrj->root_type = ROOT_TYPE_NORMAL;
 	sgen_workers_enqueue_job (&scrrj->scan_job.job, enqueue);
 
-	scrrj = (ScanFromRegisteredRootsJob*)sgen_thread_pool_job_alloc ("scan from registered roots wbarrier", job_scan_from_registered_roots, sizeof (ScanFromRegisteredRootsJob));
-	scrrj->scan_job.ops = ops;
-	scrrj->scan_job.gc_thread_gray_queue = gc_thread_gray_queue;
-	scrrj->heap_start = heap_start;
-	scrrj->heap_end = heap_end;
-	scrrj->root_type = ROOT_TYPE_WBARRIER;
-	sgen_workers_enqueue_job (&scrrj->scan_job.job, enqueue);
+	if (current_collection_generation == GENERATION_OLD) {
+		/* During minors we scan the cardtable for these roots instead */
+		scrrj = (ScanFromRegisteredRootsJob*)sgen_thread_pool_job_alloc ("scan from registered roots wbarrier", job_scan_from_registered_roots, sizeof (ScanFromRegisteredRootsJob));
+		scrrj->scan_job.ops = ops;
+		scrrj->scan_job.gc_thread_gray_queue = gc_thread_gray_queue;
+		scrrj->heap_start = heap_start;
+		scrrj->heap_end = heap_end;
+		scrrj->root_type = ROOT_TYPE_WBARRIER;
+		sgen_workers_enqueue_job (&scrrj->scan_job.job, enqueue);
+	}
 
 	/* Threads */
 
@@ -1461,7 +1532,7 @@ enqueue_scan_from_roots_jobs (SgenGrayQueue *gc_thread_gray_queue, char *heap_st
  * Return whether any objects were late-pinned due to being out of memory.
  */
 static gboolean
-collect_nursery (const char *reason, gboolean is_overflow, SgenGrayQueue *unpin_queue, gboolean finish_up_concurrent_mark)
+collect_nursery (const char *reason, gboolean is_overflow, SgenGrayQueue *unpin_queue)
 {
 	gboolean needs_major;
 	size_t max_garbage_amount;
@@ -1529,11 +1600,6 @@ collect_nursery (const char *reason, gboolean is_overflow, SgenGrayQueue *unpin_
 
 	gc_stats.minor_gc_count ++;
 
-	if (whole_heap_check_before_collection) {
-		sgen_clear_nursery_fragments ();
-		sgen_check_whole_heap (finish_up_concurrent_mark);
-	}
-
 	sgen_process_fin_stage_entries ();
 
 	/* pin from pinned handles */
@@ -1551,6 +1617,11 @@ collect_nursery (const char *reason, gboolean is_overflow, SgenGrayQueue *unpin_
 
 	if (remset_consistency_checks)
 		sgen_check_remset_consistency ();
+
+	if (whole_heap_check_before_collection) {
+		sgen_clear_nursery_fragments ();
+		sgen_check_whole_heap (FALSE);
+	}
 
 	TV_GETTIME (atv);
 	time_minor_pinning += TV_ELAPSED (btv, atv);
@@ -1665,7 +1736,7 @@ typedef enum {
 } CopyOrMarkFromRootsMode;
 
 static void
-major_copy_or_mark_from_roots (SgenGrayQueue *gc_thread_gray_queue, size_t *old_next_pin_slot, CopyOrMarkFromRootsMode mode, SgenObjectOperations *object_ops)
+major_copy_or_mark_from_roots (SgenGrayQueue *gc_thread_gray_queue, size_t *old_next_pin_slot, CopyOrMarkFromRootsMode mode, SgenObjectOperations *object_ops_nopar, SgenObjectOperations *object_ops_par)
 {
 	LOSObject *bigobj;
 	TV_DECLARE (atv);
@@ -1675,7 +1746,7 @@ major_copy_or_mark_from_roots (SgenGrayQueue *gc_thread_gray_queue, size_t *old_
 	 */
 	char *heap_start = NULL;
 	char *heap_end = (char*)-1;
-	ScanCopyContext ctx = CONTEXT_FROM_OBJECT_OPERATIONS (object_ops, gc_thread_gray_queue);
+	ScanCopyContext ctx = CONTEXT_FROM_OBJECT_OPERATIONS (object_ops_nopar, gc_thread_gray_queue);
 	gboolean concurrent = mode != COPY_OR_MARK_FROM_ROOTS_SERIAL;
 
 	SGEN_ASSERT (0, !!concurrent == !!concurrent_collection_in_progress, "We've been called with the wrong mode.");
@@ -1697,7 +1768,7 @@ major_copy_or_mark_from_roots (SgenGrayQueue *gc_thread_gray_queue, size_t *old_
 	sgen_clear_nursery_fragments ();
 
 	if (whole_heap_check_before_collection)
-		sgen_check_whole_heap (mode == COPY_OR_MARK_FROM_ROOTS_FINISH_CONCURRENT);
+		sgen_check_whole_heap (TRUE);
 
 	TV_GETTIME (btv);
 	time_major_pre_collection_fragment_clear += TV_ELAPSED (atv, btv);
@@ -1768,7 +1839,7 @@ major_copy_or_mark_from_roots (SgenGrayQueue *gc_thread_gray_queue, size_t *old_
 			}
 			sgen_los_pin_object (bigobj->data);
 			if (SGEN_OBJECT_HAS_REFERENCES (bigobj->data))
-				GRAY_OBJECT_ENQUEUE (gc_thread_gray_queue, bigobj->data, sgen_obj_get_descriptor ((GCObject*)bigobj->data));
+				GRAY_OBJECT_ENQUEUE_SERIAL (gc_thread_gray_queue, bigobj->data, sgen_obj_get_descriptor ((GCObject*)bigobj->data));
 			sgen_pin_stats_register_object (bigobj->data, GENERATION_OLD);
 			SGEN_LOG (6, "Marked large object %p (%s) size: %lu from roots", bigobj->data,
 					sgen_client_vtable_get_name (SGEN_LOAD_VTABLE (bigobj->data)),
@@ -1786,13 +1857,6 @@ major_copy_or_mark_from_roots (SgenGrayQueue *gc_thread_gray_queue, size_t *old_
 	if (old_next_pin_slot)
 		*old_next_pin_slot = sgen_get_pinned_count ();
 
-	/*
-	 * We don't actually pin when starting a concurrent collection, so the remset
-	 * consistency check won't work.
-	 */
-	if (remset_consistency_checks && mode != COPY_OR_MARK_FROM_ROOTS_START_CONCURRENT)
-		sgen_check_remset_consistency ();
-
 	TV_GETTIME (btv);
 	time_major_pinning += TV_ELAPSED (atv, btv);
 	SGEN_LOG (2, "Finding pinned pointers: %zd in %lld usecs", sgen_get_pinned_count (), (long long)TV_ELAPSED (atv, btv));
@@ -1802,12 +1866,14 @@ major_copy_or_mark_from_roots (SgenGrayQueue *gc_thread_gray_queue, size_t *old_
 
 	SGEN_ASSERT (0, sgen_workers_all_done (), "Why are the workers not done when we start or finish a major collection?");
 	if (mode == COPY_OR_MARK_FROM_ROOTS_FINISH_CONCURRENT) {
+		sgen_workers_set_num_active_workers (0);
 		if (sgen_workers_have_idle_work ()) {
 			/*
 			 * We force the finish of the worker with the new object ops context
 			 * which can also do copying. We need to have finished pinning.
 			 */
-			sgen_workers_start_all_workers (object_ops, NULL);
+			sgen_workers_start_all_workers (object_ops_nopar, object_ops_par, NULL);
+
 			sgen_workers_join ();
 		}
 	}
@@ -1823,7 +1889,7 @@ major_copy_or_mark_from_roots (SgenGrayQueue *gc_thread_gray_queue, size_t *old_
 
 	sgen_client_collecting_major_3 (&fin_ready_queue, &critical_fin_queue);
 
-	enqueue_scan_from_roots_jobs (gc_thread_gray_queue, heap_start, heap_end, object_ops, FALSE);
+	enqueue_scan_from_roots_jobs (gc_thread_gray_queue, heap_start, heap_end, object_ops_nopar, FALSE);
 
 	TV_GETTIME (btv);
 	time_major_scan_roots += TV_ELAPSED (atv, btv);
@@ -1834,35 +1900,47 @@ major_copy_or_mark_from_roots (SgenGrayQueue *gc_thread_gray_queue, size_t *old_
 	 * the roots.
 	 */
 	if (mode == COPY_OR_MARK_FROM_ROOTS_START_CONCURRENT) {
+		sgen_workers_set_num_active_workers (1);
+		gray_queue_redirect (gc_thread_gray_queue);
 		if (precleaning_enabled) {
-			ScanJob *sj;
-			/* Mod union preclean job */
-			sj = (ScanJob*)sgen_thread_pool_job_alloc ("preclean mod union cardtable", job_mod_union_preclean, sizeof (ScanJob));
-			sj->ops = object_ops;
-			sj->gc_thread_gray_queue = NULL;
-			sgen_workers_start_all_workers (object_ops, &sj->job);
+			sgen_workers_start_all_workers (object_ops_nopar, object_ops_par, workers_finish_callback);
 		} else {
-			sgen_workers_start_all_workers (object_ops, NULL);
+			sgen_workers_start_all_workers (object_ops_nopar, object_ops_par, NULL);
 		}
-		gray_queue_enable_redirect (gc_thread_gray_queue);
 	}
 
 	if (mode == COPY_OR_MARK_FROM_ROOTS_FINISH_CONCURRENT) {
-		ScanJob *sj;
+		int i, split_count = sgen_workers_get_job_split_count ();
+
+		gray_queue_redirect (gc_thread_gray_queue);
 
 		/* Mod union card table */
-		sj = (ScanJob*)sgen_thread_pool_job_alloc ("scan mod union cardtable", job_scan_major_mod_union_card_table, sizeof (ScanJob));
-		sj->ops = object_ops;
-		sj->gc_thread_gray_queue = gc_thread_gray_queue;
-		sgen_workers_enqueue_job (&sj->job, FALSE);
+		for (i = 0; i < split_count; i++) {
+			ParallelScanJob *psj;
 
-		sj = (ScanJob*)sgen_thread_pool_job_alloc ("scan LOS mod union cardtable", job_scan_los_mod_union_card_table, sizeof (ScanJob));
-		sj->ops = object_ops;
-		sj->gc_thread_gray_queue = gc_thread_gray_queue;
-		sgen_workers_enqueue_job (&sj->job, FALSE);
+			psj = (ParallelScanJob*)sgen_thread_pool_job_alloc ("scan mod union cardtable", job_scan_major_mod_union_card_table, sizeof (ParallelScanJob));
+			psj->scan_job.ops = object_ops_par ? object_ops_par : object_ops_nopar;
+			psj->scan_job.gc_thread_gray_queue = NULL;
+			psj->job_index = i;
+			sgen_workers_enqueue_job (&psj->scan_job.job, TRUE);
 
-		TV_GETTIME (atv);
-		time_major_scan_mod_union += TV_ELAPSED (btv, atv);
+			psj = (ParallelScanJob*)sgen_thread_pool_job_alloc ("scan LOS mod union cardtable", job_scan_los_mod_union_card_table, sizeof (ParallelScanJob));
+			psj->scan_job.ops = object_ops_par ? object_ops_par : object_ops_nopar;
+			psj->scan_job.gc_thread_gray_queue = NULL;
+			psj->job_index = i;
+			sgen_workers_enqueue_job (&psj->scan_job.job, TRUE);
+		}
+
+		/*
+		 * If we enqueue a job while workers are running we need to sgen_workers_ensure_awake
+		 * in order to make sure that we are running the idle func and draining all worker
+		 * gray queues. The operation of starting workers implies this, so we start them after
+		 * in order to avoid doing this operation twice. The workers will drain the main gray
+		 * stack that contained roots and pinned objects and also scan the mod union card
+		 * table.
+		 */
+		sgen_workers_start_all_workers (object_ops_nopar, object_ops_par, NULL);
+		sgen_workers_join ();
 	}
 
 	sgen_pin_stats_report ();
@@ -1880,7 +1958,7 @@ major_copy_or_mark_from_roots (SgenGrayQueue *gc_thread_gray_queue, size_t *old_
 static void
 major_start_collection (SgenGrayQueue *gc_thread_gray_queue, const char *reason, gboolean concurrent, size_t *old_next_pin_slot)
 {
-	SgenObjectOperations *object_ops;
+	SgenObjectOperations *object_ops_nopar, *object_ops_par = NULL;
 
 	binary_protocol_collection_begin (gc_stats.major_gc_count, GENERATION_OLD);
 
@@ -1895,9 +1973,12 @@ major_start_collection (SgenGrayQueue *gc_thread_gray_queue, const char *reason,
 		g_assert (major_collector.is_concurrent);
 		concurrent_collection_in_progress = TRUE;
 
-		object_ops = &major_collector.major_ops_concurrent_start;
+		object_ops_nopar = &major_collector.major_ops_concurrent_start;
+		if (major_collector.is_parallel)
+			object_ops_par = &major_collector.major_ops_conc_par_start;
+
 	} else {
-		object_ops = &major_collector.major_ops_serial;
+		object_ops_nopar = &major_collector.major_ops_serial;
 	}
 
 	reset_pinned_from_failed_allocation ();
@@ -1916,14 +1997,14 @@ major_start_collection (SgenGrayQueue *gc_thread_gray_queue, const char *reason,
 	if (major_collector.start_major_collection)
 		major_collector.start_major_collection ();
 
-	major_copy_or_mark_from_roots (gc_thread_gray_queue, old_next_pin_slot, concurrent ? COPY_OR_MARK_FROM_ROOTS_START_CONCURRENT : COPY_OR_MARK_FROM_ROOTS_SERIAL, object_ops);
+	major_copy_or_mark_from_roots (gc_thread_gray_queue, old_next_pin_slot, concurrent ? COPY_OR_MARK_FROM_ROOTS_START_CONCURRENT : COPY_OR_MARK_FROM_ROOTS_SERIAL, object_ops_nopar, object_ops_par);
 }
 
 static void
 major_finish_collection (SgenGrayQueue *gc_thread_gray_queue, const char *reason, gboolean is_overflow, size_t old_next_pin_slot, gboolean forced)
 {
 	ScannedObjectCounts counts;
-	SgenObjectOperations *object_ops;
+	SgenObjectOperations *object_ops_nopar;
 	mword fragment_total;
 	TV_DECLARE (atv);
 	TV_DECLARE (btv);
@@ -1931,20 +2012,24 @@ major_finish_collection (SgenGrayQueue *gc_thread_gray_queue, const char *reason
 	TV_GETTIME (btv);
 
 	if (concurrent_collection_in_progress) {
-		object_ops = &major_collector.major_ops_concurrent_finish;
+		SgenObjectOperations *object_ops_par = NULL;
 
-		major_copy_or_mark_from_roots (gc_thread_gray_queue, NULL, COPY_OR_MARK_FROM_ROOTS_FINISH_CONCURRENT, object_ops);
+		object_ops_nopar = &major_collector.major_ops_concurrent_finish;
+		if (major_collector.is_parallel)
+			object_ops_par = &major_collector.major_ops_conc_par_finish;
+
+		major_copy_or_mark_from_roots (gc_thread_gray_queue, NULL, COPY_OR_MARK_FROM_ROOTS_FINISH_CONCURRENT, object_ops_nopar, object_ops_par);
 
 #ifdef SGEN_DEBUG_INTERNAL_ALLOC
 		main_gc_thread = NULL;
 #endif
 	} else {
-		object_ops = &major_collector.major_ops_serial;
+		object_ops_nopar = &major_collector.major_ops_serial;
 	}
 
 	sgen_workers_assert_gray_queue_is_empty ();
 
-	finish_gray_stack (GENERATION_OLD, CONTEXT_FROM_OBJECT_OPERATIONS (object_ops, gc_thread_gray_queue));
+	finish_gray_stack (GENERATION_OLD, CONTEXT_FROM_OBJECT_OPERATIONS (object_ops_nopar, gc_thread_gray_queue));
 	TV_GETTIME (atv);
 	time_major_finish_gray_stack += TV_ELAPSED (btv, atv);
 
@@ -1974,9 +2059,6 @@ major_finish_collection (SgenGrayQueue *gc_thread_gray_queue, const char *reason
 
 	reset_heap_boundaries ();
 	sgen_update_heap_boundaries ((mword)sgen_get_nursery_start (), (mword)sgen_get_nursery_end ());
-
-	if (whole_heap_check_before_collection)
-		sgen_check_whole_heap (FALSE);
 
 	/* walk the pin_queue, build up the fragment list of free memory, unmark
 	 * pinned objects as we go, memzero() the empty fragments so they are ready for the
@@ -2257,7 +2339,7 @@ sgen_perform_collection (size_t requested_size, int generation_to_collect, const
 		if (concurrent_collection_in_progress)
 			major_update_concurrent_collection ();
 
-		if (collect_nursery (reason, FALSE, NULL, FALSE) && !concurrent_collection_in_progress) {
+		if (collect_nursery (reason, FALSE, NULL) && !concurrent_collection_in_progress) {
 			overflow_generation_to_collect = GENERATION_OLD;
 			overflow_reason = "Minor overflow";
 		}
@@ -2267,7 +2349,7 @@ sgen_perform_collection (size_t requested_size, int generation_to_collect, const
 	} else {
 		SGEN_ASSERT (0, generation_to_collect == GENERATION_OLD, "We should have handled nursery collections above");
 		if (major_collector.is_concurrent && !wait_to_finish) {
-			collect_nursery ("Concurrent start", FALSE, NULL, FALSE);
+			collect_nursery ("Concurrent start", FALSE, NULL);
 			major_start_concurrent_collection (reason);
 			oldest_generation_collected = GENERATION_NURSERY;
 		} else if (major_do_collection (reason, FALSE, wait_to_finish)) {
@@ -2285,7 +2367,7 @@ sgen_perform_collection (size_t requested_size, int generation_to_collect, const
 		 */
 
 		if (overflow_generation_to_collect == GENERATION_NURSERY)
-			collect_nursery (overflow_reason, TRUE, NULL, FALSE);
+			collect_nursery (overflow_reason, TRUE, NULL);
 		else
 			major_do_collection (overflow_reason, TRUE, wait_to_finish);
 
@@ -2530,6 +2612,94 @@ sgen_deregister_root (char* addr)
 	UNLOCK_GC;
 }
 
+void
+sgen_wbroots_iterate_live_block_ranges (sgen_cardtable_block_callback cb)
+{
+	void **start_root;
+	RootRecord *root;
+	SGEN_HASH_TABLE_FOREACH (&roots_hash [ROOT_TYPE_WBARRIER], void **, start_root, RootRecord *, root) {
+		cb ((mword)start_root, (mword)root->end_root - (mword)start_root);
+	} SGEN_HASH_TABLE_FOREACH_END;
+}
+
+/* Root equivalent of sgen_client_cardtable_scan_object */
+static void
+sgen_wbroot_scan_card_table (void** start_root, mword size,  ScanCopyContext ctx)
+{
+	ScanPtrFieldFunc scan_field_func = ctx.ops->scan_ptr_field;
+	guint8 *card_data = sgen_card_table_get_card_scan_address ((mword)start_root);
+	guint8 *card_base = card_data;
+	mword card_count = sgen_card_table_number_of_cards_in_range ((mword)start_root, size);
+	guint8 *card_data_end = card_data + card_count;
+	mword extra_idx = 0;
+	char *obj_start = sgen_card_table_align_pointer (start_root);
+	char *obj_end = (char*)start_root + size;
+#ifdef SGEN_HAVE_OVERLAPPING_CARDS
+	guint8 *overflow_scan_end = NULL;
+#endif
+
+#ifdef SGEN_HAVE_OVERLAPPING_CARDS
+	/*Check for overflow and if so, setup to scan in two steps*/
+	if (card_data_end >= SGEN_SHADOW_CARDTABLE_END) {
+		overflow_scan_end = sgen_shadow_cardtable + (card_data_end - SGEN_SHADOW_CARDTABLE_END);
+		card_data_end = SGEN_SHADOW_CARDTABLE_END;
+	}
+
+LOOP_HEAD:
+#endif
+
+	card_data = sgen_find_next_card (card_data, card_data_end);
+
+	for (; card_data < card_data_end; card_data = sgen_find_next_card (card_data + 1, card_data_end)) {
+		size_t idx = (card_data - card_base) + extra_idx;
+		char *start = (char*)(obj_start + idx * CARD_SIZE_IN_BYTES);
+		char *card_end = start + CARD_SIZE_IN_BYTES;
+		char *elem = start, *first_elem = start;
+
+		/*
+		 * Don't clean first and last card on 32bit systems since they
+		 * may also be part from other roots.
+		 */
+		if (card_data != card_base && card_data != (card_data_end - 1))
+			sgen_card_table_prepare_card_for_scanning (card_data);
+
+		card_end = MIN (card_end, obj_end);
+
+		if (elem < (char*)start_root)
+			first_elem = elem = (char*)start_root;
+
+		for (; elem < card_end; elem += SIZEOF_VOID_P) {
+			if (*(GCObject**)elem)
+				scan_field_func (NULL, (GCObject**)elem, ctx.queue);
+		}
+
+		binary_protocol_card_scan (first_elem, elem - first_elem);
+	}
+
+#ifdef SGEN_HAVE_OVERLAPPING_CARDS
+	if (overflow_scan_end) {
+		extra_idx = card_data - card_base;
+		card_base = card_data = sgen_shadow_cardtable;
+		card_data_end = overflow_scan_end;
+		overflow_scan_end = NULL;
+		goto LOOP_HEAD;
+	}
+#endif
+}
+
+void
+sgen_wbroots_scan_card_table (ScanCopyContext ctx)
+{
+	void **start_root;
+	RootRecord *root;
+
+	SGEN_HASH_TABLE_FOREACH (&roots_hash [ROOT_TYPE_WBARRIER], void **, start_root, RootRecord *, root) {
+		SGEN_ASSERT (0, (root->root_desc & ROOT_DESC_TYPE_MASK) == ROOT_DESC_VECTOR, "Unsupported root type");
+
+		sgen_wbroot_scan_card_table (start_root, (mword)root->end_root - (mword)start_root, ctx);
+	} SGEN_HASH_TABLE_FOREACH_END;
+}
+
 /*
  * ######################################################################
  * ########  Thread handling (stop/start code)
@@ -2545,11 +2715,7 @@ sgen_get_current_collection_generation (void)
 void*
 sgen_thread_register (SgenThreadInfo* info, void *stack_bottom_fallback)
 {
-#ifndef HAVE_KW_THREAD
 	info->tlab_start = info->tlab_next = info->tlab_temp_end = info->tlab_real_end = NULL;
-#endif
-
-	sgen_init_tlab_info (info);
 
 	sgen_client_thread_register (info, stack_bottom_fallback);
 
@@ -2750,6 +2916,8 @@ sgen_gc_init (void)
 	char **opts, **ptr;
 	char *major_collector_opt = NULL;
 	char *minor_collector_opt = NULL;
+	char *params_opts = NULL;
+	char *debug_opts = NULL;
 	size_t max_heap = 0;
 	size_t soft_limit = 0;
 	int result;
@@ -2787,8 +2955,12 @@ sgen_gc_init (void)
 
 	mono_coop_mutex_init (&sgen_interruption_mutex);
 
-	if ((env = g_getenv (MONO_GC_PARAMS_NAME))) {
-		opts = g_strsplit (env, ",", -1);
+	if ((env = g_getenv (MONO_GC_PARAMS_NAME)) || gc_params_options) {
+		params_opts = g_strdup_printf ("%s,%s", gc_params_options ? gc_params_options : "", env ? env : "");
+	}
+
+	if (params_opts) {
+		opts = g_strsplit (params_opts, ",", -1);
 		for (ptr = opts; *ptr; ++ptr) {
 			char *opt = *ptr;
 			if (g_str_has_prefix (opt, "major=")) {
@@ -2839,6 +3011,8 @@ sgen_gc_init (void)
 		sgen_marksweep_init (&major_collector);
 	} else if (!strcmp (major_collector_opt, "marksweep-conc")) {
 		sgen_marksweep_conc_init (&major_collector);
+	} else if (!strcmp (major_collector_opt, "marksweep-conc-par")) {
+		sgen_marksweep_conc_par_init (&major_collector);
 	} else {
 		sgen_env_var_error (MONO_GC_PARAMS_NAME, "Using `" DEFAULT_MAJOR_NAME "` instead.", "Unknown major collector `%s'.", major_collector_opt);
 		goto use_default_major;
@@ -2990,15 +3164,22 @@ sgen_gc_init (void)
 	if (minor_collector_opt)
 		g_free (minor_collector_opt);
 
+	if (params_opts)
+		g_free (params_opts);
+
 	alloc_nursery ();
 
 	sgen_pinning_init ();
 	sgen_cement_init (cement_enabled);
 
-	if ((env = g_getenv (MONO_GC_DEBUG_NAME))) {
+	if ((env = g_getenv (MONO_GC_DEBUG_NAME)) || gc_debug_options) {
+		debug_opts = g_strdup_printf ("%s,%s", gc_debug_options ? gc_debug_options  : "", env ? env : "");
+	}
+
+	if (debug_opts) {
 		gboolean usage_printed = FALSE;
 
-		opts = g_strsplit (env, ",", -1);
+		opts = g_strsplit (debug_opts, ",", -1);
 		for (ptr = opts; ptr && *ptr; ptr ++) {
 			char *opt = *ptr;
 			if (!strcmp (opt, ""))
@@ -3129,14 +3310,25 @@ sgen_gc_init (void)
 		g_strfreev (opts);
 	}
 
+	if (debug_opts)
+		g_free (debug_opts);
+
 	if (check_mark_bits_after_major_collection)
 		nursery_clear_policy = CLEAR_AT_GC;
 
 	if (major_collector.post_param_init)
 		major_collector.post_param_init (&major_collector);
 
-	if (major_collector.needs_thread_pool)
-		sgen_workers_init (1);
+	if (major_collector.needs_thread_pool) {
+		int num_workers = 1;
+		if (major_collector.is_parallel) {
+			/* FIXME Detect the number of physical cores, instead of logical */
+			num_workers = mono_cpu_count () / 2;
+			if (num_workers < 1)
+				num_workers = 1;
+		}
+		sgen_workers_init (num_workers, (SgenWorkerCallback) major_collector.worker_init_cb);
+	}
 
 	sgen_memgov_init (max_heap, soft_limit, debug_print_allowance, allowance_ratio, save_target);
 
@@ -3263,7 +3455,7 @@ sgen_check_whole_heap_stw (void)
 {
 	sgen_stop_world (0);
 	sgen_clear_nursery_fragments ();
-	sgen_check_whole_heap (FALSE);
+	sgen_check_whole_heap (TRUE);
 	sgen_restart_world (0);
 }
 

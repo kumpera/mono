@@ -93,6 +93,9 @@ MonoGCDescriptor mono_gc_make_descr_for_array (int vector, gsize *elem_bitmap, i
 /* simple interface for data structures needed in the runtime */
 MonoGCDescriptor mono_gc_make_descr_from_bitmap (gsize *bitmap, int numbits);
 
+/* Return a root descriptor for a vector with repeating refs bitmap */
+MonoGCDescriptor mono_gc_make_vector_descr (void);
+
 /* Return a root descriptor for a root with all refs */
 MonoGCDescriptor mono_gc_make_root_descr_all_refs (int numbits);
 
@@ -109,5 +112,10 @@ void mono_gc_memmove_atomic (void *dest, const void *src, size_t size);
 void mono_gc_memmove_aligned (void *dest, const void *src, size_t size);
 
 FILE *mono_gc_get_logfile (void);
+
+/* equivalent to options set via MONO_GC_PARAMS */
+void mono_gc_params_set (const char* options);
+/* equivalent to options set via MONO_GC_DEBUG */
+void mono_gc_debug_set (const char* options);
 
 #endif

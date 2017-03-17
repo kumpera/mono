@@ -200,7 +200,7 @@ namespace CorCompare
 				if (File.Exists (assembly))
 					return TypeHelper.Resolver.ResolveFile (assembly);
 
-				return TypeHelper.Resolver.Resolve (assembly);
+				return TypeHelper.Resolver.Resolve (AssemblyNameReference.Parse (assembly), new ReaderParameters ());
 			} catch (Exception e) {
 				Console.WriteLine (e);
 				return null;
@@ -761,8 +761,8 @@ namespace CorCompare
 						method.Name = "~" + name;
 					}
 
-					// TODO: Better check
-					if (t != type && list.Any (l => l.DeclaringType != method.DeclaringType && l.Name == method.Name && l.Parameters.Count == method.Parameters.Count))
+					if (t != type && list.Any (l => l.DeclaringType != method.DeclaringType && l.Name == method.Name && l.Parameters.Count == method.Parameters.Count &&
+					                           l.Parameters.SequenceEqual (method.Parameters, new ParameterComparer ())))
 						continue;
 
 					list.Add (method);
@@ -771,7 +771,7 @@ namespace CorCompare
 				if (!fullAPI)
 					break;
 
-				if (!t.IsInterface || t.IsEnum)
+				if (t.IsInterface || t.IsEnum)
 					break;
 
 				if (t.BaseType == null || t.BaseType.FullName == "System.Object")
@@ -782,6 +782,19 @@ namespace CorCompare
 			} while (t != null);
 
 			return list.ToArray ();
+		}
+
+		sealed class ParameterComparer : IEqualityComparer<ParameterDefinition>
+		{
+			public bool Equals (ParameterDefinition x, ParameterDefinition y)
+			{
+				return x.ParameterType.Name == y.ParameterType.Name;
+			}
+
+			public int GetHashCode (ParameterDefinition obj)
+			{
+				return obj.ParameterType.Name.GetHashCode ();
+			}
 		}
 
 		static bool IsFinalizer (MethodDefinition method)
@@ -1076,9 +1089,12 @@ namespace CorCompare
 			if (!(memberDefenition is MethodDefinition))
 				return;
 
-			MethodDefinition mbase = (MethodDefinition) memberDefenition;
+			MethodDefinition mbase = (MethodDefinition)memberDefenition;
 
-			ParameterData parms = new ParameterData (writer, mbase.Parameters);
+			ParameterData parms = new ParameterData (writer, mbase.Parameters) {
+				HasExtensionParameter = mbase.CustomAttributes.Any (l => l.AttributeType.FullName == "System.Runtime.CompilerServices.ExtensionAttribute")
+			};
+
 			parms.DoOutput ();
 
 			MemberData.OutputGenericParameters (writer, mbase);
@@ -1124,8 +1140,11 @@ namespace CorCompare
 			this.parameters = parameters;
 		}
 
+		public bool HasExtensionParameter { get; set; }
+
 		public override void DoOutput ()
 		{
+			bool first = true;
 			writer.WriteStartElement ("parameters");
 			foreach (ParameterDefinition parameter in parameters) {
 				writer.WriteStartElement ("parameter");
@@ -1133,13 +1152,17 @@ namespace CorCompare
 				AddAttribute ("position", parameter.Method.Parameters.IndexOf(parameter).ToString(CultureInfo.InvariantCulture));
 				AddAttribute ("attrib", ((int) parameter.Attributes).ToString());
 
-				string direction = "in";
+				string direction = first && HasExtensionParameter ? "this" : "in";
+				first = false;
 
-				if (parameter.ParameterType is ByReferenceType)
+				var pt = parameter.ParameterType;
+				var brt = pt as ByReferenceType;
+				if (brt != null) {
 					direction = parameter.IsOut ? "out" : "ref";
+					pt = brt.ElementType;
+				}
 
-				TypeReference t = parameter.ParameterType;
-				AddAttribute ("type", Utils.CleanupTypeName (t));
+				AddAttribute ("type", Utils.CleanupTypeName (pt));
 
 				if (parameter.IsOptional) {
 					AddAttribute ("optional", "true");
@@ -1518,13 +1541,13 @@ namespace CorCompare
 
 				ParameterDefinition info = infos [i];
 
-				string modifier;
-				if ((info.Attributes & ParameterAttributes.In) != 0)
-					modifier = "in";
-				else if ((info.Attributes & ParameterAttributes.Out) != 0)
-					modifier = "out";
-				else
-					modifier = string.Empty;
+				string modifier = string.Empty;
+				if (info.ParameterType.IsByReference) {
+					if ((info.Attributes & ParameterAttributes.In) != 0)
+						modifier = "in";
+					else if ((info.Attributes & ParameterAttributes.Out) != 0)
+						modifier = "out";
+				}
 
 				if (modifier.Length > 0) {
 					signature.Append (modifier);

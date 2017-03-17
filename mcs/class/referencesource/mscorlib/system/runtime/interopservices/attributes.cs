@@ -522,6 +522,9 @@ namespace System.Runtime.InteropServices{
         
         [System.Runtime.InteropServices.ComVisible(false)]
         HString          = 0x2f,        // Windows Runtime HSTRING
+
+	[System.Runtime.InteropServices.ComVisible(false)]
+        LPUTF8Str        = 0x30,        // UTF8 string
     }
 
 #if !MONO
@@ -645,10 +648,7 @@ namespace System.Runtime.InteropServices{
 #endif
     [AttributeUsage(AttributeTargets.Class | AttributeTargets.Interface, Inherited = false)]
     [System.Runtime.InteropServices.ComVisible(true)]
-#if !MONOTOUCH
-    public
-#endif
-    sealed class ComImportAttribute : Attribute
+    public sealed class ComImportAttribute : Attribute
     {
         internal static Attribute GetCustomAttribute(RuntimeType type)
         {

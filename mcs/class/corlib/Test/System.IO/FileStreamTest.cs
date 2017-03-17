@@ -25,10 +25,6 @@ namespace MonoTests.System.IO
 	{
 		string TempFolder = Path.Combine (Path.GetTempPath (), "MonoTests.System.IO.Tests");
 		static readonly char DSC = Path.DirectorySeparatorChar;
-		static bool MacOSX = false;
-
-		[DllImport ("libc")]
-		static extern int uname (IntPtr buf);
 
 		[TearDown]
 		public void TearDown ()
@@ -44,13 +40,6 @@ namespace MonoTests.System.IO
 				Directory.Delete (TempFolder, true);
 
 			Directory.CreateDirectory (TempFolder);
-#if !MOBILE			
-			// from XplatUI.cs
-			IntPtr buf = Marshal.AllocHGlobal (8192);
-			if (uname (buf) == 0)
-				MacOSX = Marshal.PtrToStringAnsi (buf) == "Darwin";
-			Marshal.FreeHGlobal (buf);
-#endif
 		}
 
 		public void TestCtr ()
@@ -1751,6 +1740,16 @@ namespace MonoTests.System.IO
 				}
 			} finally {
 				DeleteFile (path);
+			}
+		}
+
+		[Test]
+		public void NamePropertyNormalization ()
+		{
+			string fname = TempFolder + DSC + ".." + DSC + "MonoTests.System.IO.Tests" + DSC + "tfile.txt";
+
+			using (var s = new FileStream (fname, FileMode.OpenOrCreate, FileAccess.Write, FileShare.Delete)) {
+				Assert.AreEqual (TempFolder + DSC + "tfile.txt", s.Name);
 			}
 		}
 	}

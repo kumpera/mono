@@ -94,6 +94,9 @@ arm*-darwin*|aarch64*-*)
 i*86-*-darwin*)
     ORDER=G_LITTLE_ENDIAN
     ;;
+*-*-haiku*)
+    LDFLAGS="$LDFLAGS -ltextencoding"
+    ;;
 *-*-openbsd*)
     CFLAGS="$CFLAGS -pthread"
     LDFLAGS="$LDFLAGS -pthread"
@@ -130,6 +133,10 @@ AM_CONDITIONAL(TARGET_WIN32, test x$OS = xWIN32)
 AM_CONDITIONAL(PLATFORM_DARWIN, test x$platform_darwin = xyes)
 AM_CONDITIONAL(PLATFORM_ANDROID, test x$platform_android = xyes)
 
+# Defined for all targets/platforms using classic Windows API support.
+AC_DEFINE(HAVE_CLASSIC_WINAPI_SUPPORT, 1, [Use classic Windows API support])
+AC_DEFINE(HAVE_UWP_WINAPI_SUPPORT, 0, [Don't use UWP Windows API support])
+
 AC_CHECK_SIZEOF(int)
 AC_CHECK_SIZEOF(void *)
 AC_CHECK_SIZEOF(long)
@@ -140,11 +147,11 @@ AC_CHECK_FUNCS(fork execv execve)
 
 AC_ARG_WITH([overridable-allocators], [  --with-overridable-allocators	allow g_*alloc/g_free to call custom allocators set via g_mem_set_vtable])
 
-if test x$with_overridable_allocators == xno; then
-  AC_MSG_NOTICE([Overridable allocator support disabled])
-else
+if test x$with_overridable_allocators = xyes; then
   AC_DEFINE(ENABLE_OVERRIDABLE_ALLOCATORS,1,[Overridable allocator support enabled])
   AC_MSG_NOTICE([Overridable allocator support enabled])
+else
+  AC_MSG_NOTICE([Overridable allocator support disabled])
 fi
 
 #
@@ -160,7 +167,7 @@ elif test x$target_ios = xno; then
 AC_CHECK_FUNCS(strndup getpwuid_r)
 fi
 
-AM_CONDITIONAL(NEED_VASPRINTF, test x$ac_cv_func_vasprintf = xno || test x$with_overridable_allocators == xyes)
+AM_CONDITIONAL(NEED_VASPRINTF, test x$ac_cv_func_vasprintf = xno || test x$with_overridable_allocators = xyes)
 AM_ICONV()
 AC_SEARCH_LIBS(sqrtf, m)
 

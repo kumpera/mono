@@ -14,6 +14,7 @@
 
 #include <glib.h>
 #include <config.h>
+#include <mono/metadata/environment.h>
 #include <mono/metadata/exception.h>
 #include <mono/metadata/exception-internals.h>
 
@@ -22,11 +23,15 @@
 #include <mono/metadata/appdomain.h>
 #include <mono/metadata/mono-debug.h>
 #include <mono/utils/mono-error-internals.h>
+#include <mono/utils/mono-logger-internals.h>
 #include <string.h>
 
 #ifdef HAVE_EXECINFO_H
 #include <execinfo.h>
 #endif
+
+static MonoUnhandledExceptionFunc unhandled_exception_hook = NULL;
+static gpointer unhandled_exception_hook_data = NULL;
 
 /**
  * mono_exception_from_name:
@@ -203,7 +208,7 @@ mono_exception_from_name_two_strings_checked (MonoImage *image, const char *name
 {
 	MonoClass *klass;
 
-	mono_error_init (error);
+	error_init (error);
 	klass = mono_class_load_from_name (image, name_space, name);
 
 	return create_exception_two_strings (klass, a1, a2, error);
@@ -264,7 +269,7 @@ mono_exception_from_token_two_strings_checked (MonoImage *image, guint32 token,
 {
 	MonoClass *klass;
 
-	mono_error_init (error);
+	error_init (error);
 
 	klass = mono_class_get_checked (image, token, error);
 	mono_error_assert_ok (error); /* FIXME handle the error. */
@@ -837,26 +842,32 @@ mono_get_exception_method_access_msg (const char *msg)
  * Returns: a new instance of the `System.Reflection.ReflectionTypeLoadException`
  */
 MonoException *
-mono_get_exception_reflection_type_load (MonoArray *types, MonoArray *exceptions)
+mono_get_exception_reflection_type_load (MonoArray *types_raw, MonoArray *exceptions_raw)
 {
+	HANDLE_FUNCTION_ENTER ();
 	MonoError error;
-	MonoException *ret = mono_get_exception_reflection_type_load_checked (types, exceptions, &error);
+	MONO_HANDLE_DCL (MonoArray, types);
+	MONO_HANDLE_DCL (MonoArray, exceptions);
+	MonoExceptionHandle ret = mono_get_exception_reflection_type_load_checked (types, exceptions, &error);
 	if (is_ok (&error)) {
 		mono_error_cleanup (&error);
-		return NULL;
+		ret = MONO_HANDLE_CAST (MonoException, NULL_HANDLE);
+		goto leave;
 	}
 
-	return ret;
+leave:
+	HANDLE_FUNCTION_RETURN_OBJ (ret);
+
 }
 
-MonoException *
-mono_get_exception_reflection_type_load_checked (MonoArray *types, MonoArray *exceptions, MonoError *error)
+MonoExceptionHandle
+mono_get_exception_reflection_type_load_checked (MonoArrayHandle types, MonoArrayHandle exceptions, MonoError *error)
 {
 	MonoClass *klass;
-	gpointer args [2];
-	MonoObject *exc;
 	MonoMethod *method;
 	gpointer iter;
+
+	error_init (error);
 
 	klass = mono_class_load_from_name (mono_get_corlib (), "System.Reflection", "ReflectionTypeLoadException");
 
@@ -875,16 +886,17 @@ mono_get_exception_reflection_type_load_checked (MonoArray *types, MonoArray *ex
 	}
 	g_assert (method);
 
-	args [0] = types;
-	args [1] = exceptions;
-
-	exc = mono_object_new_checked (mono_domain_get (), klass, error);
+	MonoExceptionHandle exc = MONO_HANDLE_NEW (MonoException, mono_object_new_checked (mono_domain_get (), klass, error));
 	mono_error_assert_ok (error);
 
-	mono_runtime_invoke_checked (method, exc, args, error);
-	return_val_if_nok (error, NULL);
+	gpointer args [2];
+	args [0] = MONO_HANDLE_RAW (types);
+	args [1] = MONO_HANDLE_RAW (exceptions);
 
-	return (MonoException *) exc;
+	mono_runtime_invoke_checked (method, MONO_HANDLE_RAW (exc), args, error);
+	return_val_if_nok (error, MONO_HANDLE_CAST (MonoException, NULL_HANDLE));
+
+	return exc;
 }
 
 MonoException *
@@ -957,25 +969,32 @@ mono_exception_get_managed_backtrace (MonoException *exc)
 }
 
 char *
-mono_exception_get_native_backtrace (MonoException *exc)
+mono_exception_handle_get_native_backtrace (MonoExceptionHandle exc)
 {
 #ifdef HAVE_BACKTRACE_SYMBOLS
 	MonoDomain *domain;
-	MonoArray *arr = exc->native_trace_ips;
+	MonoArrayHandle arr = MONO_HANDLE_NEW(MonoArray, NULL);
 	int i, len;
 	GString *text;
 	char **messages;
 
-	if (!arr)
+	MONO_HANDLE_GET (arr, exc, native_trace_ips);
+
+	if (MONO_HANDLE_IS_NULL(arr))
 		return g_strdup ("");
 	domain = mono_domain_get ();
-	len = mono_array_length (arr);
+	len = mono_array_handle_length (arr);
 	text = g_string_new_len (NULL, len * 20);
-	messages = backtrace_symbols (mono_array_addr (arr, gpointer, 0), len);
-
+	uint32_t gchandle;
+	void *addr = MONO_ARRAY_HANDLE_PIN (arr, gpointer, 0, &gchandle);
+	MONO_ENTER_GC_SAFE;
+	messages = backtrace_symbols (addr, len);
+	MONO_EXIT_GC_SAFE;
+	mono_gchandle_free (gchandle);
 
 	for (i = 0; i < len; ++i) {
-		gpointer ip = mono_array_get (arr, gpointer, i);
+		gpointer ip;
+		MONO_HANDLE_ARRAY_GETVAL (ip, arr, gpointer, i);
 		MonoJitInfo *ji = mono_jit_info_table_find (mono_domain_get (), (char *)ip);
 		if (ji) {
 			char *msg = mono_debug_print_stack_frame (mono_jit_info_get_method (ji), (char*)ip - (char*)ji->code_start, domain);
@@ -986,25 +1005,27 @@ mono_exception_get_native_backtrace (MonoException *exc)
 		}
 	}
 
-	free (messages);
+	g_free (messages);
 	return g_string_free (text, FALSE);
 #else
 	return g_strdup ("");
 #endif
 }
 
-MonoString *
-ves_icall_Mono_Runtime_GetNativeStackTrace (MonoException *exc)
+MonoStringHandle
+ves_icall_Mono_Runtime_GetNativeStackTrace (MonoExceptionHandle exc, MonoError *error)
 {
 	char *trace;
-	MonoString *res;
+	MonoStringHandle res;
+	error_init (error);
+
 	if (!exc) {
-		mono_set_pending_exception (mono_get_exception_argument_null ("exception"));
-		return NULL;
+		mono_error_set_argument_null (error, "exception", "");
+		return NULL_HANDLE_STRING;
 	}
 
-	trace = mono_exception_get_native_backtrace (exc);
-	res = mono_string_new (mono_domain_get (), trace);
+	trace = mono_exception_handle_get_native_backtrace (exc);
+	res = mono_string_new_handle (mono_domain_get (), trace, error);
 	g_free (trace);
 	return res;
 }
@@ -1051,3 +1072,50 @@ mono_error_set_pending_exception (MonoError *error)
 	}
 }
 
+void
+mono_install_unhandled_exception_hook (MonoUnhandledExceptionFunc func, void *user_data)
+{
+	unhandled_exception_hook = func;
+	unhandled_exception_hook_data = user_data;
+}
+
+void
+mono_invoke_unhandled_exception_hook (MonoObject *exc)
+{
+	if (unhandled_exception_hook) {
+		unhandled_exception_hook (exc, unhandled_exception_hook_data);
+	} else {
+		MonoError inner_error;
+		MonoObject *other = NULL;
+		MonoString *str = mono_object_try_to_string (exc, &other, &inner_error);
+		char *msg = NULL;
+		
+		if (str && is_ok (&inner_error)) {
+			msg = mono_string_to_utf8_checked (str, &inner_error);
+			if (!is_ok (&inner_error)) {
+				msg = g_strdup_printf ("Nested exception while formatting original exception");
+				mono_error_cleanup (&inner_error);
+			}
+		} else if (other) {
+			char *original_backtrace = mono_exception_get_managed_backtrace ((MonoException*)exc);
+			char *nested_backtrace = mono_exception_get_managed_backtrace ((MonoException*)other);
+
+			msg = g_strdup_printf ("Nested exception detected.\nOriginal Exception: %s\nNested exception:%s\n",
+				original_backtrace, nested_backtrace);
+
+			g_free (original_backtrace);
+			g_free (nested_backtrace);
+		} else {
+			msg = g_strdup ("Nested exception trying to figure out what went wrong");
+		}
+		mono_runtime_printf_err ("[ERROR] FATAL UNHANDLED EXCEPTION: %s", msg);
+		g_free (msg);
+#if defined(HOST_IOS)
+		g_assertion_message ("Terminating runtime due to unhandled exception");
+#else
+		exit (mono_environment_exitcode_get ());
+#endif
+	}
+
+	g_assert_not_reached ();
+}

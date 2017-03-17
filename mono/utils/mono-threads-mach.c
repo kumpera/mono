@@ -23,9 +23,10 @@
 #include <mono/utils/mono-compiler.h>
 #include <mono/utils/mono-threads.h>
 #include <mono/utils/hazard-pointer.h>
+#include <mono/utils/mono-threads-debug.h>
 
 void
-mono_threads_init_platform (void)
+mono_threads_suspend_init (void)
 {
 	mono_threads_init_dead_letter ();
 }
@@ -33,27 +34,32 @@ mono_threads_init_platform (void)
 #if defined(HOST_WATCHOS) || defined(HOST_TVOS)
 
 gboolean
-mono_threads_core_begin_async_suspend (MonoThreadInfo *info, gboolean interrupt_kernel)
+mono_threads_suspend_begin_async_suspend (MonoThreadInfo *info, gboolean interrupt_kernel)
 {
 	g_assert_not_reached ();
 }
 
 gboolean
-mono_threads_core_check_suspend_result (MonoThreadInfo *info)
+mono_threads_suspend_check_suspend_result (MonoThreadInfo *info)
 {
 	g_assert_not_reached ();
 }
 
 gboolean
-mono_threads_core_begin_async_resume (MonoThreadInfo *info)
+mono_threads_suspend_begin_async_resume (MonoThreadInfo *info)
 {
 	g_assert_not_reached ();
+}
+
+void
+mono_threads_suspend_abort_syscall (MonoThreadInfo *info)
+{
 }
 
 #else /* defined(HOST_WATCHOS) || defined(HOST_TVOS) */
 
 gboolean
-mono_threads_core_begin_async_suspend (MonoThreadInfo *info, gboolean interrupt_kernel)
+mono_threads_suspend_begin_async_suspend (MonoThreadInfo *info, gboolean interrupt_kernel)
 {
 	kern_return_t ret;
 
@@ -81,31 +87,31 @@ mono_threads_core_begin_async_suspend (MonoThreadInfo *info, gboolean interrupt_
 	}
 	info->suspend_can_continue = mono_threads_get_runtime_callbacks ()->
 		thread_state_init_from_handle (&info->thread_saved_state [ASYNC_SUSPEND_STATE_INDEX], info);
-	THREADS_SUSPEND_DEBUG ("thread state %p -> %d\n", (gpointer)(gsize)info->native_handle, res);
+	THREADS_SUSPEND_DEBUG ("thread state %p -> %d\n", (gpointer)(gsize)info->native_handle, ret);
 	if (info->suspend_can_continue) {
 		if (interrupt_kernel)
 			thread_abort (info->native_handle);
 	} else {
 		THREADS_SUSPEND_DEBUG ("FAILSAFE RESUME/2 %p -> %d\n", (gpointer)(gsize)info->native_handle, 0);
 	}
-	return info->suspend_can_continue;
+	return TRUE;
 }
 
 gboolean
-mono_threads_core_check_suspend_result (MonoThreadInfo *info)
+mono_threads_suspend_check_suspend_result (MonoThreadInfo *info)
 {
 	return info->suspend_can_continue;
 }
 
 gboolean
-mono_threads_core_begin_async_resume (MonoThreadInfo *info)
+mono_threads_suspend_begin_async_resume (MonoThreadInfo *info)
 {
 	kern_return_t ret;
 
 	if (info->async_target) {
 		MonoContext tmp = info->thread_saved_state [ASYNC_SUSPEND_STATE_INDEX].ctx;
-		mach_msg_type_number_t num_state;
-		thread_state_t state;
+		mach_msg_type_number_t num_state, num_fpstate;
+		thread_state_t state, fpstate;
 		ucontext_t uctx;
 		mcontext_t mctx;
 
@@ -114,23 +120,24 @@ mono_threads_core_begin_async_resume (MonoThreadInfo *info)
 		info->async_target = (void (*)(void *)) info->user_data;
 
 		state = (thread_state_t) alloca (mono_mach_arch_get_thread_state_size ());
+		fpstate = (thread_state_t) alloca (mono_mach_arch_get_thread_fpstate_size ());
 		mctx = (mcontext_t) alloca (mono_mach_arch_get_mcontext_size ());
 
 		do {
-			ret = mono_mach_arch_get_thread_state (info->native_handle, state, &num_state);
+			ret = mono_mach_arch_get_thread_states (info->native_handle, state, &num_state, fpstate, &num_fpstate);
 		} while (ret == KERN_ABORTED);
 
 		if (ret != KERN_SUCCESS)
 			return FALSE;
 
-		mono_mach_arch_thread_state_to_mcontext (state, mctx);
+		mono_mach_arch_thread_states_to_mcontext (state, fpstate, mctx);
 		uctx.uc_mcontext = mctx;
 		mono_monoctx_to_sigctx (&tmp, &uctx);
 
-		mono_mach_arch_mcontext_to_thread_state (mctx, state);
+		mono_mach_arch_mcontext_to_thread_states (mctx, state, fpstate);
 
 		do {
-			ret = mono_mach_arch_set_thread_state (info->native_handle, state, num_state);
+			ret = mono_mach_arch_set_thread_states (info->native_handle, state, num_state, fpstate, num_fpstate);
 		} while (ret == KERN_ABORTED);
 
 		if (ret != KERN_SUCCESS)
@@ -145,10 +152,44 @@ mono_threads_core_begin_async_resume (MonoThreadInfo *info)
 	return ret == KERN_SUCCESS;
 }
 
+void
+mono_threads_suspend_abort_syscall (MonoThreadInfo *info)
+{
+	kern_return_t ret;
+
+	do {
+		ret = thread_suspend (info->native_handle);
+	} while (ret == KERN_ABORTED);
+
+	if (ret != KERN_SUCCESS)
+		return;
+
+	do {
+		ret = thread_abort_safely (info->native_handle);
+	} while (ret == KERN_ABORTED);
+
+	/*
+	 * We are doing thread_abort when thread_abort_safely returns KERN_SUCCESS because
+	 * for some reason accept is not interrupted by thread_abort_safely.
+	 * The risk of aborting non-atomic operations while calling thread_abort should not
+	 * exist because by the time thread_abort_safely returns KERN_SUCCESS the target
+	 * thread should have return from the kernel and should be waiting for thread_resume
+	 * to resume the user code.
+	 */
+	if (ret == KERN_SUCCESS)
+		ret = thread_abort (info->native_handle);
+
+	do {
+		ret = thread_resume (info->native_handle);
+	} while (ret == KERN_ABORTED);
+
+	g_assert (ret == KERN_SUCCESS);
+}
+
 #endif /* defined(HOST_WATCHOS) || defined(HOST_TVOS) */
 
 void
-mono_threads_platform_register (MonoThreadInfo *info)
+mono_threads_suspend_register (MonoThreadInfo *info)
 {
 	char thread_name [64];
 
@@ -161,16 +202,45 @@ mono_threads_platform_register (MonoThreadInfo *info)
 }
 
 void
-mono_threads_platform_free (MonoThreadInfo *info)
+mono_threads_suspend_free (MonoThreadInfo *info)
 {
 	mach_port_deallocate (current_task (), info->native_handle);
+}
+
+void
+mono_threads_suspend_init_signals (void)
+{
+}
+
+gint
+mono_threads_suspend_search_alternative_signal (void)
+{
+	g_assert_not_reached ();
+}
+
+gint
+mono_threads_suspend_get_suspend_signal (void)
+{
+	return -1;
+}
+
+gint
+mono_threads_suspend_get_restart_signal (void)
+{
+	return -1;
+}
+
+gint
+mono_threads_suspend_get_abort_signal (void)
+{
+	return -1;
 }
 
 #endif /* USE_MACH_BACKEND */
 
 #ifdef __MACH__
 void
-mono_threads_core_get_stack_bounds (guint8 **staddr, size_t *stsize)
+mono_threads_platform_get_stack_bounds (guint8 **staddr, size_t *stsize)
 {
 	*staddr = (guint8*)pthread_get_stackaddr_np (pthread_self());
 	*stsize = pthread_get_stacksize_np (pthread_self());

@@ -41,7 +41,7 @@ namespace System
 {
 	public static partial class Console
 	{
-#if !NET_2_1
+#if MONO_FEATURE_CONSOLE
 		private class WindowsConsole
 		{
 			public static bool ctrlHandlerAdded = false;
@@ -96,14 +96,11 @@ namespace System
 
 		static Console ()
 		{
+#if MONO_FEATURE_CONSOLE
 			if (Environment.IsRunningOnWindows) {
 				//
 				// On Windows, follow the Windows tradition
 				//
-#if NET_2_1
-				// should never happen since Moonlight does not run on windows
-				inputEncoding = outputEncoding = Encoding.Default;
-#else			
 				try {
 					inputEncoding = Encoding.GetEncoding (WindowsConsole.GetInputCodePage ());
 					outputEncoding = Encoding.GetEncoding (WindowsConsole.GetOutputCodePage ());
@@ -113,8 +110,9 @@ namespace System
 					// Use Latin 1 as it is fast and UTF-8 is never used as console code page
 					inputEncoding = outputEncoding = Encoding.Default;
 				}
+			} else 
 #endif
-			} else {
+			{
 				//
 				// On Unix systems (128), do not output the
 				// UTF-8 ZWNBSP (zero-width non-breaking space).
@@ -134,13 +132,13 @@ namespace System
 
 		static void SetupStreams (Encoding inputEncoding, Encoding outputEncoding)
 		{
-#if !NET_2_1
+#if MONO_FEATURE_CONSOLE
 			if (!Environment.IsRunningOnWindows && ConsoleDriver.IsConsole) {
 				stdin = new CStreamReader (OpenStandardInput (0), inputEncoding);
 				stdout = TextWriter.Synchronized (new CStreamWriter (OpenStandardOutput (0), outputEncoding, true) { AutoFlush = true });
 				stderr = TextWriter.Synchronized (new CStreamWriter (OpenStandardError (0), outputEncoding, true) { AutoFlush = true });
 			} else
-#endif
+#endif 
 			{
 				stdin = TextReader.Synchronized (new UnexceptionalStreamReader (OpenStandardInput (0), inputEncoding));
 
@@ -487,8 +485,7 @@ namespace System
 
 			stdout.WriteLine (String.Format (format, args));
 		}
-
-#if !NET_2_1
+#if MONO_FEATURE_CONSOLE
 		public static int Read ()
 		{
 			if ((stdin is CStreamReader) && ConsoleDriver.IsConsole) {
@@ -516,7 +513,6 @@ namespace System
 		{
 			return stdin.ReadLine ();
 		}
-
 #endif
 
 		// FIXME: Console should use these encodings when changed
@@ -539,7 +535,7 @@ namespace System
 			}
 		}
 
-#if !NET_2_1
+#if MONO_FEATURE_CONSOLE
 		public static ConsoleColor BackgroundColor {
 			get { return ConsoleDriver.BackgroundColor; }
 			set { ConsoleDriver.BackgroundColor = value; }
@@ -781,6 +777,183 @@ namespace System
 
 			if (exit)
 				Environment.Exit (58);
+		}
+#else
+		// largely inspired by https://github.com/dotnet/corefx/blob/be8d2ce3964968cec9322a64211e37682085db70/src/System.Console/src/System/ConsolePal.WinRT.cs, because it's a similar platform where a console might not be available
+
+		// provide simply color tracking that allows round-tripping
+		internal const ConsoleColor UnknownColor = (ConsoleColor)(-1);
+		private static ConsoleColor s_trackedForegroundColor = UnknownColor;
+		private static ConsoleColor s_trackedBackgroundColor = UnknownColor;
+
+		public static ConsoleColor ForegroundColor
+		{
+			get
+			{
+				return s_trackedForegroundColor;
+			}
+			set
+			{
+				lock (Console.Out) // synchronize with other writers
+				{
+					s_trackedForegroundColor = value;
+				}
+			}
+		}
+
+		public static ConsoleColor BackgroundColor
+		{
+			get
+			{
+				return s_trackedBackgroundColor;
+			}
+			set
+			{
+				lock (Console.Out) // synchronize with other writers
+				{
+					s_trackedBackgroundColor = value;
+				}
+			}
+		}
+
+		public static int BufferWidth
+		{
+			get { throw new PlatformNotSupportedException (); }
+			set { throw new PlatformNotSupportedException (); }
+		}
+
+		public static int BufferHeight
+		{
+			get { throw new PlatformNotSupportedException (); }
+			set { throw new PlatformNotSupportedException (); }
+		}
+
+		public static bool CapsLock { get { throw new PlatformNotSupportedException (); } }
+
+		public static int CursorLeft
+		{
+			get { throw new PlatformNotSupportedException (); }
+			set { throw new PlatformNotSupportedException (); }
+		}
+
+		public static int CursorTop
+		{
+			get { throw new PlatformNotSupportedException (); }
+			set { throw new PlatformNotSupportedException (); }
+		}
+
+		public static int CursorSize
+		{
+			get { return 100; }
+			set { throw new PlatformNotSupportedException(); }
+		}
+
+		public static bool CursorVisible
+		{
+			get { throw new PlatformNotSupportedException (); }
+			set { throw new PlatformNotSupportedException (); }
+		}
+
+		public static bool KeyAvailable { get { throw new PlatformNotSupportedException (); } }
+
+		public static int LargestWindowWidth
+		{
+			get { throw new PlatformNotSupportedException (); }
+			set { throw new PlatformNotSupportedException (); }
+		}
+
+		public static int LargestWindowHeight
+		{
+			get { throw new PlatformNotSupportedException (); }
+			set { throw new PlatformNotSupportedException (); }
+		}
+
+		public static bool NumberLock { get { throw new PlatformNotSupportedException (); } }
+
+		public static string Title
+		{
+			get { throw new PlatformNotSupportedException (); }
+			set { throw new PlatformNotSupportedException (); }
+		}
+
+		public static bool TreatControlCAsInput
+		{
+			get { throw new PlatformNotSupportedException (); }
+			set { throw new PlatformNotSupportedException (); }
+		}
+
+		public static int WindowHeight
+		{
+			get { throw new PlatformNotSupportedException (); }
+			set { throw new PlatformNotSupportedException (); }
+		}
+
+		public static int WindowLeft
+		{
+			get { return 0; }
+			set { throw new PlatformNotSupportedException (); }
+		}
+
+		public static int WindowTop
+		{
+			get { return 0; }
+			set { throw new PlatformNotSupportedException (); }
+		}
+
+		public static int WindowWidth
+		{
+			get { throw new PlatformNotSupportedException (); }
+			set { throw new PlatformNotSupportedException (); }
+		}
+
+		public static bool IsErrorRedirected { get { throw new PlatformNotSupportedException (); } }
+
+		public static bool IsInputRedirected { get { throw new PlatformNotSupportedException (); } }
+
+		public static bool IsOutputRedirected { get { throw new PlatformNotSupportedException (); } }
+
+		public static void Beep () { throw new PlatformNotSupportedException (); }
+
+		public static void Beep (int frequency, int duration) { throw new PlatformNotSupportedException (); }
+
+		public static void Clear () { throw new PlatformNotSupportedException (); }
+
+		public static void MoveBufferArea (int sourceLeft, int sourceTop, int sourceWidth, int sourceHeight, int targetLeft, int targetTop) { throw new PlatformNotSupportedException(); }
+
+		public static void MoveBufferArea (int sourceLeft, int sourceTop, int sourceWidth, int sourceHeight, int targetLeft, int targetTop, char sourceChar, ConsoleColor sourceForeColor, ConsoleColor sourceBackColor) { throw new PlatformNotSupportedException(); }
+
+
+		public static ConsoleKeyInfo ReadKey ()
+		{
+			return ReadKey (false);
+		}
+
+		public static ConsoleKeyInfo ReadKey (bool intercept) { throw new PlatformNotSupportedException (); }
+
+		public static void ResetColor ()
+		{
+			lock (Console.Out) // synchronize with other writers
+			{
+				s_trackedForegroundColor = UnknownColor;
+				s_trackedBackgroundColor = UnknownColor;
+			}
+		}
+
+		public static void SetBufferSize (int width, int height) { throw new PlatformNotSupportedException (); }
+
+		public static void SetCursorPosition (int left, int top) { throw new PlatformNotSupportedException (); }
+
+		public static void SetWindowPosition (int left, int top) { throw new PlatformNotSupportedException (); }
+
+		public static void SetWindowSize (int width, int height) { throw new PlatformNotSupportedException (); }
+
+		public static event ConsoleCancelEventHandler CancelKeyPress {
+			add {
+				throw new PlatformNotSupportedException ();
+			}
+			remove {
+				throw new PlatformNotSupportedException ();
+			}
 		}
 #endif
 	}

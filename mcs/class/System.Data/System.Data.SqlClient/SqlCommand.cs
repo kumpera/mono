@@ -47,6 +47,8 @@ using System.Data.Common;
 using System.Data.Sql;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Xml;
 
 namespace System.Data.SqlClient {
@@ -508,6 +510,106 @@ namespace System.Data.SqlClient {
 			}
 		}
 
+		public new Task<SqlDataReader> ExecuteReaderAsync ()
+		{
+			return ExecuteReaderAsync (CommandBehavior.Default, CancellationToken.None);
+		}
+
+		public new Task<SqlDataReader> ExecuteReaderAsync (CancellationToken cancellationToken)
+		{
+			return ExecuteReaderAsync (behavior, CancellationToken.None);
+		}
+
+		public new Task<SqlDataReader> ExecuteReaderAsync (CommandBehavior behavior)
+		{
+			return ExecuteReaderAsync (CommandBehavior.Default, CancellationToken.None);
+		}
+
+		public new Task<SqlDataReader> ExecuteReaderAsync (CommandBehavior behavior, CancellationToken cancellationToken)
+		{
+			TaskCompletionSource<SqlDataReader> source = new TaskCompletionSource<SqlDataReader>();
+
+			CancellationTokenRegistration registration = new CancellationTokenRegistration();
+			if (cancellationToken.CanBeCanceled) {
+				if (cancellationToken.IsCancellationRequested) {
+					source.SetCanceled();
+					return source.Task;
+				}
+				registration = cancellationToken.Register(CancelIgnoreFailure);
+			}
+
+			Task<SqlDataReader> returnedTask = source.Task;
+			try {
+				// TODO: RegisterForConnectionCloseNotification(ref returnedTask);
+
+				Task<SqlDataReader>.Factory.FromAsync(BeginExecuteReaderAsync, EndExecuteReader, behavior, null).ContinueWith((t) => {
+					registration.Dispose();
+					if (t.IsFaulted) {
+						Exception e = t.Exception.InnerException;
+						source.SetException(e);
+					}
+					else {
+						if (t.IsCanceled) {
+							source.SetCanceled();
+						}
+						else {
+							source.SetResult(t.Result);
+						}
+					}
+				}, TaskScheduler.Default);
+			}
+			catch (Exception e) {
+				source.SetException(e);
+			}
+
+			return returnedTask;
+		}
+
+		public Task<XmlReader> ExecuteXmlReaderAsync ()
+		{
+			return ExecuteXmlReaderAsync (CancellationToken.None);
+		}
+ 
+		public Task<XmlReader> ExecuteXmlReaderAsync (CancellationToken cancellationToken)
+		{
+			TaskCompletionSource<XmlReader> source = new TaskCompletionSource<XmlReader>();
+
+			CancellationTokenRegistration registration = new CancellationTokenRegistration();
+			if (cancellationToken.CanBeCanceled) {
+				if (cancellationToken.IsCancellationRequested) {
+					source.SetCanceled();
+					return source.Task;
+				}
+				registration = cancellationToken.Register(CancelIgnoreFailure);
+			}
+
+			Task<XmlReader> returnedTask = source.Task;
+			try {
+				// TODO: RegisterForConnectionCloseNotification(ref returnedTask);
+
+				Task<XmlReader>.Factory.FromAsync(BeginExecuteXmlReader, EndExecuteXmlReader, null).ContinueWith((t) => {
+					registration.Dispose();
+					if (t.IsFaulted) {
+						Exception e = t.Exception.InnerException;
+						source.SetException(e);
+					}
+					else {
+						if (t.IsCanceled) {
+							source.SetCanceled();
+						}
+						else {
+							source.SetResult(t.Result);
+						}
+					}
+				}, TaskScheduler.Default);
+			}
+			catch (Exception e) {
+				source.SetException(e);
+			}
+
+			return returnedTask;
+		}
+
 		public
 		override
 		object ExecuteScalar ()
@@ -808,6 +910,11 @@ namespace System.Data.SqlClient {
 			return BeginExecuteReader (callback, stateObject, CommandBehavior.Default);
 		}
 
+		IAsyncResult BeginExecuteReaderAsync(CommandBehavior behavior, AsyncCallback callback, object stateObject)
+		{
+			return BeginExecuteReader (callback, stateObject, behavior);
+		}
+
 		public IAsyncResult BeginExecuteReader (AsyncCallback callback, object stateObject, CommandBehavior behavior)
 		{
 			ValidateCommand ("BeginExecuteReader", true);
@@ -887,6 +994,9 @@ namespace System.Data.SqlClient {
 
 		#endregion // Asynchronous Methods
 
+#pragma warning disable 0067
+		// TODO: Not implemented
 		public event StatementCompletedEventHandler StatementCompleted;
+#pragma warning restore
 	}
 }

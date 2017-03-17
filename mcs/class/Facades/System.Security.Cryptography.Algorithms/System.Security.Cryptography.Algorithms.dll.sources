@@ -1,6 +1,4 @@
 TypeForwarders.cs
 AssemblyInfo.cs
-ECCurve.cs
-ECPoint.cs
-ECParameters.cs
-IncrementalHash.cs
+SR.cs
+../../../../external/corefx/src/System.Security.Cryptography.Algorithms/src/System/Security/Cryptography/IncrementalHash.net46.cs

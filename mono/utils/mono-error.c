@@ -38,6 +38,12 @@ is_managed_exception (MonoErrorInternal *error)
 	return (error->error_code == MONO_ERROR_EXCEPTION_INSTANCE);
 }
 
+static gboolean
+is_boxed (MonoErrorInternal *error)
+{
+	return ((error->flags & MONO_ERROR_MEMPOOL_BOXED) != 0);
+}
+
 static void
 mono_error_prepare (MonoErrorInternal *error)
 {
@@ -116,6 +122,8 @@ mono_error_cleanup (MonoError *oerror)
 
 	/* Two cleanups in a row without an intervening init. */
 	g_assert (orig_error_code != MONO_ERROR_CLEANUP_CALLED_SENTINEL);
+	/* Mempool stored error shouldn't be cleaned up */
+	g_assert (!is_boxed (error));
 
 	/* Mark it as cleaned up. */
 	error->error_code = MONO_ERROR_CLEANUP_CALLED_SENTINEL;
@@ -289,18 +297,27 @@ mono_error_set_assembly_load_simple (MonoError *oerror, const char *assembly_nam
 	if (refection_only)
 		mono_error_set_assembly_load (oerror, assembly_name, "Cannot resolve dependency to assembly because it has not been preloaded. When using the ReflectionOnly APIs, dependent assemblies must be pre-loaded or loaded on demand through the ReflectionOnlyAssemblyResolve event.");
 	else
-		mono_error_set_assembly_load (oerror, assembly_name, "Could not load file or assembly or one of its dependencies.");
+		mono_error_set_assembly_load (oerror, assembly_name, "Could not load file or assembly '%s' or one of its dependencies.", assembly_name);
 }
 
 void
 mono_error_set_type_load_class (MonoError *oerror, MonoClass *klass, const char *msg_format, ...)
+{
+	va_list args;
+	va_start (args, msg_format);
+	mono_error_vset_type_load_class (oerror, klass, msg_format, args);
+	va_end (args);
+}
+
+void
+mono_error_vset_type_load_class (MonoError *oerror, MonoClass *klass, const char *msg_format, va_list args)
 {
 	MonoErrorInternal *error = (MonoErrorInternal*)oerror;
 	mono_error_prepare (error);
 
 	error->error_code = MONO_ERROR_TYPE_LOAD;
 	mono_error_set_class (oerror, klass);
-	set_error_message ();
+	set_error_messagev ();
 }
 
 /*
@@ -464,6 +481,16 @@ mono_error_set_exception_instance (MonoError *oerror, MonoException *exc)
 }
 
 void
+mono_error_set_exception_handle (MonoError *oerror, MonoExceptionHandle exc)
+{
+	MonoErrorInternal *error = (MonoErrorInternal*)oerror;
+
+	mono_error_prepare (error);
+	error->error_code = MONO_ERROR_EXCEPTION_INSTANCE;
+	error->exn.instance_handle = mono_gchandle_from_handle (MONO_HANDLE_CAST(MonoObject, exc), FALSE);
+}
+
+void
 mono_error_set_out_of_memory (MonoError *oerror, const char *msg_format, ...)
 {
 	MonoErrorInternal *error = (MonoErrorInternal*)oerror;
@@ -557,7 +584,7 @@ mono_error_prepare_exception (MonoError *oerror, MonoError *error_out)
 	MonoString *assembly_name = NULL, *type_name = NULL, *method_name = NULL, *field_name = NULL, *msg = NULL;
 	MonoDomain *domain = mono_domain_get ();
 
-	mono_error_init (error_out);
+	error_init (error_out);
 
 	switch (error->error_code) {
 	case MONO_ERROR_NONE:
@@ -618,7 +645,7 @@ mono_error_prepare_exception (MonoError *oerror, MonoError *error_out)
 			}
 
 			exception = mono_exception_from_name_two_strings_checked (mono_get_corlib (), "System", "TypeLoadException", type_name, assembly_name, error_out);
-			if (exception)
+			if (exception && error->full_message != NULL && strcmp (error->full_message, ""))
 				set_message_on_exception (exception, error, error_out);
 		} else {
 			exception = mono_exception_from_name_msg (mono_defaults.corlib, "System", "TypeLoadException", error->full_message);
@@ -730,6 +757,9 @@ mono_error_convert_to_exception (MonoError *target_error)
 	MonoError error;
 	MonoException *ex;
 
+	/* Mempool stored error shouldn't be cleaned up */
+	g_assert (!is_boxed ((MonoErrorInternal*)target_error));
+
 	if (mono_error_ok (target_error))
 		return NULL;
 
@@ -750,5 +780,99 @@ void
 mono_error_move (MonoError *dest, MonoError *src)
 {
 	memcpy (dest, src, sizeof (MonoErrorInternal));
-	mono_error_init (src);
+	error_init (src);
+}
+
+/**
+ * mono_error_box:
+ * @ierror: The input error that will be boxed.
+ * @image: The mempool of this image will hold the boxed error.
+ *
+ * Creates a new boxed error in the given mempool from MonoError.
+ * It does not alter ierror, so you still have to clean it up with
+ * mono_error_cleanup or mono_error_convert_to_exception or another such function.
+ *
+ * Returns the boxed error, or NULL if the mempool could not allocate.
+ */
+MonoErrorBoxed*
+mono_error_box (const MonoError *ierror, MonoImage *image)
+{
+	MonoErrorInternal *from = (MonoErrorInternal*)ierror;
+	/* Don't know how to box a gchandle */
+	g_assert (!is_managed_exception (from));
+	MonoErrorBoxed* box = mono_image_alloc (image, sizeof (MonoErrorBoxed), "error");
+	box->image = image;
+	mono_error_init_flags (&box->error, MONO_ERROR_MEMPOOL_BOXED);
+	MonoErrorInternal *to = (MonoErrorInternal*)&box->error;
+
+#define DUP_STR(field) do {						\
+		if (from->field) {					\
+			if (!(to->field = mono_image_strdup (image, from->field))) \
+				to->flags |= MONO_ERROR_INCOMPLETE;	\
+		} else {						\
+			to->field = NULL;				\
+		}							\
+	} while (0)
+
+	to->error_code = from->error_code;
+	DUP_STR (type_name);
+	DUP_STR (assembly_name);
+	DUP_STR (member_name);
+	DUP_STR (exception_name_space);
+	DUP_STR (exception_name);
+	DUP_STR (full_message);
+	DUP_STR (full_message_with_fields);
+	DUP_STR (first_argument);
+	to->exn.klass = from->exn.klass;
+
+#undef DUP_STR
+	
+	return box;
+}
+
+
+/**
+ * mono_error_set_from_boxed:
+ * @oerror: The error that will be set to the contents of the box.
+ * @box: A mempool-allocated error.
+ *
+ * Sets the error condition in the oerror from the contents of the
+ * given boxed error.  Does not alter the boxed error, so it can be
+ * used in a future call to mono_error_set_from_boxed as needed.  The
+ * oerror should've been previously initialized with mono_error_init,
+ * as usual.
+ *
+ * Returns TRUE on success or FALSE on failure.
+ */
+gboolean
+mono_error_set_from_boxed (MonoError *oerror, const MonoErrorBoxed *box)
+{
+	MonoErrorInternal* to = (MonoErrorInternal*)oerror;
+	MonoErrorInternal* from = (MonoErrorInternal*)&box->error;
+	g_assert (!is_managed_exception (from));
+
+	mono_error_prepare (to);
+	to->flags |= MONO_ERROR_FREE_STRINGS;
+#define DUP_STR(field)	do {						\
+		if (from->field) {					\
+			if (!(to->field = g_strdup (from->field)))	\
+				to->flags |= MONO_ERROR_INCOMPLETE;	\
+		} else {						\
+			to->field = NULL;				\
+		}							\
+	} while (0)
+
+	to->error_code = from->error_code;
+	DUP_STR (type_name);
+	DUP_STR (assembly_name);
+	DUP_STR (member_name);
+	DUP_STR (exception_name_space);
+	DUP_STR (exception_name);
+	DUP_STR (full_message);
+	DUP_STR (full_message_with_fields);
+	DUP_STR (first_argument);
+	to->exn.klass = from->exn.klass;
+		  
+#undef DUP_STR
+	return (to->flags & MONO_ERROR_INCOMPLETE) == 0 ;
 }

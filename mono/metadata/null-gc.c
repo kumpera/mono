@@ -26,6 +26,10 @@ mono_gc_base_init (void)
 
 	mono_counters_init ();
 
+#ifndef HOST_WIN32
+	mono_w32handle_init ();
+#endif
+
 	memset (&cb, 0, sizeof (cb));
 	/* TODO: This casts away an incompatible pointer type warning in the same
 	         manner that boehm-gc does it. This is probably worth investigating
@@ -107,16 +111,6 @@ mono_object_is_alive (MonoObject* o)
 	return TRUE;
 }
 
-void
-mono_gc_enable_events (void)
-{
-}
-
-void
-mono_gc_enable_alloc_events (void)
-{
-}
-
 int
 mono_gc_register_root (char *start, size_t size, void *descr, MonoGCRootSource source, const char *msg)
 {
@@ -171,6 +165,12 @@ mono_gc_make_descr_from_bitmap (gsize *bitmap, int numbits)
 }
 
 void*
+mono_gc_make_vector_descr (void)
+{
+	return NULL;
+}
+
+void*
 mono_gc_make_root_descr_all_refs (int numbits)
 {
 	return NULL;
@@ -191,7 +191,7 @@ mono_gc_free_fixed (void* addr)
 void *
 mono_gc_alloc_obj (MonoVTable *vtable, size_t size)
 {
-	MonoObject *obj = calloc (1, size);
+	MonoObject *obj = g_calloc (1, size);
 
 	obj->vtable = vtable;
 
@@ -201,7 +201,7 @@ mono_gc_alloc_obj (MonoVTable *vtable, size_t size)
 void *
 mono_gc_alloc_vector (MonoVTable *vtable, size_t size, uintptr_t max_length)
 {
-	MonoArray *obj = calloc (1, size);
+	MonoArray *obj = g_calloc (1, size);
 
 	obj->obj.vtable = vtable;
 	obj->max_length = max_length;
@@ -212,7 +212,7 @@ mono_gc_alloc_vector (MonoVTable *vtable, size_t size, uintptr_t max_length)
 void *
 mono_gc_alloc_array (MonoVTable *vtable, size_t size, uintptr_t max_length, uintptr_t bounds_size)
 {
-	MonoArray *obj = calloc (1, size);
+	MonoArray *obj = g_calloc (1, size);
 
 	obj->obj.vtable = vtable;
 	obj->max_length = max_length;
@@ -226,7 +226,7 @@ mono_gc_alloc_array (MonoVTable *vtable, size_t size, uintptr_t max_length, uint
 void *
 mono_gc_alloc_string (MonoVTable *vtable, size_t size, gint32 len)
 {
-	MonoString *obj = calloc (1, size);
+	MonoString *obj = g_calloc (1, size);
 
 	obj->object.vtable = vtable;
 	obj->length = len;
@@ -450,11 +450,6 @@ mono_gc_get_nursery (int *shift_bits, size_t *size)
 	return NULL;
 }
 
-void
-mono_gc_set_current_thread_appdomain (MonoDomain *domain)
-{
-}
-
 gboolean
 mono_gc_precise_stack_mark_enabled (void)
 {
@@ -465,6 +460,16 @@ FILE *
 mono_gc_get_logfile (void)
 {
 	return NULL;
+}
+
+void
+mono_gc_params_set (const char* options)
+{
+}
+
+void
+mono_gc_debug_set (const char* options)
+{
 }
 
 void
@@ -551,5 +556,7 @@ mono_gc_is_null (void)
 {
 	return TRUE;
 }
+#else
 
-#endif
+MONO_EMPTY_SOURCE_FILE (null_gc);
+#endif /* HAVE_NULL_GC */

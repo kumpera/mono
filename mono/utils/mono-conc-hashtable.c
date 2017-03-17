@@ -114,7 +114,7 @@ mono_conc_hashtable_new (GHashFunc hash_func, GEqualFunc key_equal_func)
 {
 	MonoConcurrentHashTable *res = g_new0 (MonoConcurrentHashTable, 1);
 	res->hash_func = hash_func ? hash_func : g_direct_hash;
-	res->equal_func = key_equal_func ? key_equal_func : g_direct_equal;
+	res->equal_func = key_equal_func;
 	// res->equal_func = g_direct_equal;
 	res->table = conc_table_new (INITIAL_SIZE);
 	res->element_count = 0;
@@ -164,7 +164,7 @@ mono_conc_hashtable_lookup (MonoConcurrentHashTable *hash_table, gpointer key)
 	hp = mono_hazard_pointer_get ();
 
 retry:
-	table = (conc_table *)get_hazardous_pointer ((gpointer volatile*)&hash_table->table, hp, 0);
+	table = (conc_table *)mono_get_hazardous_pointer ((gpointer volatile*)&hash_table->table, hp, 0);
 	table_mask = table->table_size - 1;
 	kvs = table->kvs;
 	i = hash & table_mask;

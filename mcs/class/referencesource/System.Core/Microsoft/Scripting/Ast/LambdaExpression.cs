@@ -139,6 +139,11 @@ namespace System.Linq.Expressions {
             return LambdaCompiler.Compile(this, debugInfoGenerator);
         }
 
+        public Delegate Compile(bool preferInterpretation) {
+            // TODO: add logic for preferInterpretation
+            return Compile();
+        }
+
         /// <summary>
         /// Compiles the lambda into a method definition.
         /// </summary>
@@ -198,6 +203,11 @@ namespace System.Linq.Expressions {
         public new TDelegate Compile(DebugInfoGenerator debugInfoGenerator) {
             ContractUtils.RequiresNotNull(debugInfoGenerator, "debugInfoGenerator");
             return (TDelegate)(object)LambdaCompiler.Compile(this, debugInfoGenerator);
+        }
+
+        public new TDelegate Compile(bool preferInterpretation) {
+            // TODO: add logic for preferInterpretation
+            return Compile();
         }
 
         /// <summary>

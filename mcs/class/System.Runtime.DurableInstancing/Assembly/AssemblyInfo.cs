@@ -55,13 +55,12 @@ using System.Runtime.InteropServices;
 [assembly: NeutralResourcesLanguage ("en-US")]
 [assembly: CLSCompliant (true)]
 [assembly: AssemblyDelaySign (true)]
-#if NET_2_1
+#if MOBILE
 [assembly: AssemblyKeyFile ("../silverlight.pub")]
 #else
 [assembly: AssemblyKeyFile ("../winfx.pub")]
 [assembly: AllowPartiallyTrustedCallers]
 [assembly: ComCompatibleVersion (1, 0, 3300, 0)]
-[assembly: SecurityCritical (SecurityCriticalScope.Explicit)]
 #endif
 
 [assembly: InternalsVisibleTo ("System.Activities, PublicKey=" + AssemblyRef.FrameworkPublicKeyFull2)]

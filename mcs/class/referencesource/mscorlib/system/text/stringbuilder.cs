@@ -1338,8 +1338,10 @@ namespace System.Text {
             }
 
             while (true) {
+#if !MONO                
                 int p = pos;
                 int i = pos;
+#endif
                 while (pos < len) {
                     ch = format[pos];
 
@@ -1406,8 +1408,10 @@ namespace System.Text {
                 StringBuilder fmt = null;
                 if (ch == ':') {
                     pos++;
+#if !MONO
                     p = pos;
                     i = pos;
+#endif
                     while (true) {
                         if (pos == len) FormatError();
                         ch = format[pos];
@@ -1559,7 +1563,9 @@ namespace System.Text {
             if (newValue == null)
                 newValue = "";
 
+#if !MONO
             int deltaLength = newValue.Length - oldValue.Length;
+#endif
 
             int[] replacements = null;          // A list of replacement positions in a chunk to apply
             int replacementsCount = 0;
@@ -1597,7 +1603,9 @@ namespace System.Text {
                 {
                     // Replacing mutates the blocks, so we need to convert to logical index and back afterward. 
                     int index = indexInChunk + chunk.m_ChunkOffset;
+#if !MONO                    
                     int indexBeforeAdjustment = index;
+#endif
 
                     // See if we accumulated any replacements, if so apply them 
                     ReplaceAllInChunk(replacements, replacementsCount, chunk, oldValue.Length, newValue);
@@ -1968,7 +1976,7 @@ namespace System.Text {
 
             VerifyClassInvariant();
 
-            if ((minBlockCharCount + Length) > m_MaxCapacity)
+            if (minBlockCharCount + Length < minBlockCharCount || (minBlockCharCount + Length) > m_MaxCapacity)
                 throw new ArgumentOutOfRangeException("requiredLength", Environment.GetResourceString("ArgumentOutOfRange_SmallCapacity"));
 
             // Compute the length of the new block we need 
@@ -2028,7 +2036,8 @@ namespace System.Text {
             VerifyClassInvariant();
             Contract.Assert(count > 0, "Count must be strictly positive");
             Contract.Assert(index >= 0, "Index can't be negative");
-            if (count + Length > m_MaxCapacity)
+
+            if (count + Length < count || count + Length > m_MaxCapacity)
                 throw new ArgumentOutOfRangeException("requiredLength", Environment.GetResourceString("ArgumentOutOfRange_SmallCapacity"));
 
             chunk = this;

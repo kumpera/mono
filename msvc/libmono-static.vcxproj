@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|Win32">
@@ -19,7 +19,6 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="..\mono\metadata\remoting.c" />
     <ClCompile Include="..\mono\mini\alias-analysis.c" />
     <ClCompile Include="..\mono\mini\arch-stubs.c" />
     <ClCompile Include="..\mono\mini\exceptions-amd64.c">
@@ -61,6 +60,7 @@
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
     </ClInclude>
+    <ClInclude Include="..\mono\mini\mini-windows.h" />
     <ClInclude Include="..\mono\mini\mini-x86.h">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
@@ -97,7 +97,6 @@
     <ClCompile Include="..\mono\mini\mini-codegen.c" />
     <ClCompile Include="..\mono\mini\mini-cross-helpers.c" />
     <ClCompile Include="..\mono\mini\mini-exceptions.c" />
-    <ClCompile Include="..\mono\mini\mini-exceptions-native-unwinder.c" />
     <ClCompile Include="..\mono\mini\mini-trampolines.c  " />
     <ClCompile Include="..\mono\mini\tramp-amd64.c">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
@@ -135,6 +134,8 @@
     <ClInclude Include="..\mono\mini\mini-llvm.h" />
     <ClInclude Include="..\mono\mini\mini-llvm-cpp.h" />
     <ClCompile Include="..\mono\mini\mini-native-types.c" />
+    <ClCompile Include="..\mono\mini\type-checking.c" />
+    <ClCompile Include="..\mono\mini\lldb.c" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{CB0D9E92-293C-439C-9AC7-C5F59B6E0772}</ProjectGuid>
@@ -333,6 +334,9 @@
     <ProjectReference Include="libmonoutils.vcxproj">
       <Project>{8fc2b0c8-51ad-49df-851f-5d01a77a75e4}</Project>
     </ProjectReference>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\mono\mini\Makefile.am.in" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

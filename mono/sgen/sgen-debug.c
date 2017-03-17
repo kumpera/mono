@@ -216,7 +216,7 @@ is_major_or_los_object_marked (GCObject *obj)
 #undef HANDLE_PTR
 #define HANDLE_PTR(ptr,obj)	do {	\
 	if (*(ptr) && !sgen_ptr_in_nursery ((char*)*(ptr)) && !is_major_or_los_object_marked ((GCObject*)*(ptr))) { \
-		if (!sgen_get_remset ()->find_address_with_cards (start, cards, (char*)(ptr))) { \
+		if (!cards || !sgen_get_remset ()->find_address_with_cards (start, cards, (char*)(ptr))) { \
 			GCVTable __vt = SGEN_LOAD_VTABLE (obj);	\
 			SGEN_LOG (0, "major->major reference %p at offset %zd in object %p (%s.%s) not found in remsets.", *(ptr), (char*)(ptr) - (char*)(obj), (obj), sgen_client_vtable_get_namespace (__vt), sgen_client_vtable_get_name (__vt)); \
 			binary_protocol_missing_remset ((obj), __vt, (int) ((char*)(ptr) - (char*)(obj)), *(ptr), (gpointer)LOAD_VTABLE(*(ptr)), object_is_pinned (*(ptr))); \
@@ -243,8 +243,6 @@ check_mod_union_callback (GCObject *obj, size_t size, void *dummy)
 	else
 		cards = sgen_get_major_collector ()->get_cardtable_mod_union_for_reference (start);
 
-	SGEN_ASSERT (0, cards, "we must have mod union for marked major objects");
-
 #include "sgen-scan-object.h"
 }
 
@@ -253,7 +251,7 @@ sgen_check_mod_union_consistency (void)
 {
 	missing_remsets = FALSE;
 
-	major_collector.iterate_objects (ITERATE_OBJECTS_ALL, (IterateObjectCallbackFunc)check_mod_union_callback, (void*)FALSE);
+	major_collector.iterate_objects (ITERATE_OBJECTS_SWEEP_ALL, (IterateObjectCallbackFunc)check_mod_union_callback, (void*)FALSE);
 
 	sgen_los_iterate_objects ((IterateObjectCallbackFunc)check_mod_union_callback, (void*)TRUE);
 
@@ -326,7 +324,7 @@ static void
 setup_valid_nursery_objects (void)
 {
 	if (!valid_nursery_objects)
-		valid_nursery_objects = (GCObject **)sgen_alloc_os_memory (DEFAULT_NURSERY_SIZE, (SgenAllocFlags)(SGEN_ALLOC_INTERNAL | SGEN_ALLOC_ACTIVATE), "sgen:debugging data");
+		valid_nursery_objects = (GCObject **)sgen_alloc_os_memory (DEFAULT_NURSERY_SIZE, (SgenAllocFlags)(SGEN_ALLOC_INTERNAL | SGEN_ALLOC_ACTIVATE), "sgen:debugging data", MONO_MEM_ACCOUNT_SGEN_DEBUGGING);
 	valid_nursery_object_count = 0;
 	sgen_scan_area_with_callback (nursery_section->data, nursery_section->end_data, setup_mono_sgen_scan_area_with_callback, NULL, FALSE, FALSE);
 }
@@ -445,7 +443,7 @@ verify_object_pointers_callback (GCObject *obj, size_t size, void *data)
 {
 	char *start = (char*)obj;
 	gboolean allow_missing_pinned = (gboolean) (size_t) data;
-	SgenDescriptor desc = sgen_obj_get_descriptor (obj);
+	SgenDescriptor desc = sgen_obj_get_descriptor_safe (obj);
 
 #include "sgen-scan-object.h"
 }
@@ -806,6 +804,15 @@ scan_roots_for_specific_ref (GCObject *key, int root_type)
 			}
 			break;
 		}
+		case ROOT_DESC_VECTOR: {
+			void **p;
+
+			for (p = start_root; p < (void**)root->end_root; p++) {
+				if (*p)
+					check_root_obj_specific_ref (root, key, (GCObject *)*p);
+			}
+			break;
+		}
 		case ROOT_DESC_USER: {
 			SgenUserRootMarkFunc marker = sgen_get_user_descriptor_func (desc);
 			marker (start_root, check_root_obj_specific_ref_from_marker, NULL);
@@ -910,6 +917,15 @@ sgen_scan_for_registered_roots_in_domain (MonoDomain *domain, int root_type)
 			}
 			break;
 		}
+		case ROOT_DESC_VECTOR: {
+			void **p;
+
+			for (p = start_root; p < (void**)root->end_root; p++) {
+				if (*p)
+					check_obj_not_in_domain ((MonoObject **)*p);
+			}
+			break;
+		}
 		case ROOT_DESC_USER: {
 			SgenUserRootMarkFunc marker = sgen_get_user_descriptor_func (desc);
 			marker (start_root, check_obj_not_in_domain_callback, NULL);
@@ -942,12 +958,6 @@ is_xdomain_ref_allowed (GCObject **ptr, GCObject *obj, MonoDomain *domain)
 			offset == G_STRUCT_OFFSET (MonoRealProxy, unwrapped_server))
 		return TRUE;
 #endif
-	/* Thread.cached_culture_info */
-	if (!strcmp (ref->vtable->klass->name_space, "System.Globalization") &&
-			!strcmp (ref->vtable->klass->name, "CultureInfo") &&
-			!strcmp(o->vtable->klass->name_space, "System") &&
-			!strcmp(o->vtable->klass->name, "Object[]"))
-		return TRUE;
 	/*
 	 *  at System.IO.MemoryStream.InternalConstructor (byte[],int,int,bool,bool) [0x0004d] in /home/schani/Work/novell/trunk/mcs/class/corlib/System.IO/MemoryStream.cs:121
 	 * at System.IO.MemoryStream..ctor (byte[]) [0x00017] in /home/schani/Work/novell/trunk/mcs/class/corlib/System.IO/MemoryStream.cs:81
@@ -985,7 +995,8 @@ check_reference_for_xdomain (GCObject **ptr, GCObject *obj, MonoDomain *domain)
 	for (klass = obj->vtable->klass; klass; klass = klass->parent) {
 		int i;
 
-		for (i = 0; i < klass->field.count; ++i) {
+		int fcount = mono_class_get_field_count (klass);
+		for (i = 0; i < fcount; ++i) {
 			if (klass->fields[i].offset == offset) {
 				field = &klass->fields[i];
 				break;

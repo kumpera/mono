@@ -241,6 +241,7 @@ mono_disasm_code
 mono_disasm_code_one
 mono_dl_fallback_register
 mono_dl_fallback_unregister
+mono_dl_open
 mono_dllmap_insert
 mono_domain_add_class_static_data
 mono_domain_assembly_open
@@ -263,7 +264,6 @@ mono_domain_set_internal
 mono_domain_try_type_resolve
 mono_domain_try_unload
 mono_domain_unload
-mono_emit_native_call
 mono_environment_exitcode_get
 mono_environment_exitcode_set
 mono_error_cleanup
@@ -464,7 +464,6 @@ mono_images_init
 mono_init
 mono_init_from_assembly
 mono_init_version
-mono_inst_name
 mono_install_assembly_load_hook
 mono_install_assembly_postload_refonly_search_hook
 mono_install_assembly_postload_search_hook
@@ -495,6 +494,7 @@ mono_ldstr
 mono_ldtoken
 mono_load_remote_field
 mono_load_remote_field_new
+mono_loader_register_module
 mono_lock_free_alloc
 mono_lock_free_allocator_check_consistency
 mono_lock_free_allocator_init_allocator
@@ -752,7 +752,6 @@ mono_register_bundled_assemblies
 mono_register_config_for_assembly
 mono_register_machine_config
 mono_register_symfile_for_assembly
-mono_replace_ins
 mono_runtime_class_init
 mono_runtime_cleanup
 mono_runtime_delegate_invoke
@@ -822,6 +821,8 @@ mono_string_hash
 mono_string_intern
 mono_string_is_interned
 mono_string_length
+mono_string_empty
+mono_string_empty_wrapper
 mono_string_new
 mono_string_new_len
 mono_string_new_size

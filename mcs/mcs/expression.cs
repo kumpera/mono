@@ -2362,6 +2362,11 @@ namespace Mono.CSharp
 			eclass = ExprClass.Value;
 			TypeSpec etype = expr.Type;
 
+			if (type == null) {
+				type = InternalType.ErrorType;
+				return this;
+			}
+
 			if (!TypeSpec.IsReferenceType (type) && !type.IsNullableType) {
 				if (TypeManager.IsGenericParameter (type)) {
 					ec.Report.Error (413, loc,
@@ -3105,9 +3110,9 @@ namespace Mono.CSharp
 			public override Expression ConvertResult (ResolveContext ec, Binary b)
 			{
 				if (left != null) {
-					b.left = EmptyCast.Create (b.left, left);
+					b.left = Convert.UserDefinedConversion (ec, b.left, left, Convert.UserConversionRestriction.ImplicitOnly, b.loc) ?? EmptyCast.Create (b.left, left);
 				} else if (right != null) {
-					b.right = EmptyCast.Create (b.right, right);
+					b.right = Convert.UserDefinedConversion (ec, b.right, right, Convert.UserConversionRestriction.ImplicitOnly, b.loc) ?? EmptyCast.Create (b.right, right);
 				}
 
 				TypeSpec r_type = ReturnType;
@@ -3443,7 +3448,7 @@ namespace Mono.CSharp
 			}
 		}
 
-		static CSharp.Operator.OpType ConvertBinaryToUserOperator (Operator op)
+		public static CSharp.Operator.OpType ConvertBinaryToUserOperator (Operator op)
 		{
 			switch (op) {
 			case Operator.Addition:
@@ -9959,7 +9964,7 @@ namespace Mono.CSharp
 
 			TypeSpec nested = null;
 			while (expr_type != null) {
-				nested = MemberCache.FindNestedType (expr_type, Name, Arity);
+				nested = MemberCache.FindNestedType (expr_type, Name, Arity, false);
 				if (nested == null) {
 					if (expr_type == tnew_expr) {
 						Error_IdentifierNotFound (rc, expr_type);
@@ -9967,7 +9972,7 @@ namespace Mono.CSharp
 					}
 
 					expr_type = tnew_expr;
-					nested = MemberCache.FindNestedType (expr_type, Name, Arity);
+					nested = MemberCache.FindNestedType (expr_type, Name, Arity, false);
 					ErrorIsInaccesible (rc, nested.GetSignatureForError (), loc);
 					break;
 				}
@@ -10008,7 +10013,7 @@ namespace Mono.CSharp
 
 		public void Error_IdentifierNotFound (IMemberContext rc, TypeSpec expr_type)
 		{
-			var nested = MemberCache.FindNestedType (expr_type, Name, -System.Math.Max (1, Arity));
+			var nested = MemberCache.FindNestedType (expr_type, Name, -System.Math.Max (1, Arity), false);
 
 			if (nested != null) {
 				Error_TypeArgumentsCannotBeUsed (rc, nested, expr.Location);
@@ -10947,9 +10952,18 @@ namespace Mono.CSharp
 
 		#region IBaseMembersProvider Members
 
-		IList<MemberSpec> OverloadResolver.IBaseMembersProvider.GetBaseMembers (TypeSpec baseType)
+		IList<MemberSpec> OverloadResolver.IBaseMembersProvider.GetBaseMembers (TypeSpec type)
 		{
-			return baseType == null ? null : MemberCache.FindMembers (baseType, MemberCache.IndexerNameAlias, false);
+			var baseType = type.BaseType;
+			var members = baseType == null ? null : MemberCache.FindMembers (baseType, MemberCache.IndexerNameAlias, false);
+
+			if (members == null && !type.IsInterface) {
+				var tps = queried_type as TypeParameterSpec;
+				if (tps != null)
+					members = MemberCache.FindInterfaceMembers (tps, MemberCache.IndexerNameAlias);
+			}
+
+			return members;
 		}
 
 		IParametersMember OverloadResolver.IBaseMembersProvider.GetOverrideMemberParameters (MemberSpec member)
@@ -12160,21 +12174,23 @@ namespace Mono.CSharp
 				args);
 		}
 
-		protected override Expression DoResolve (ResolveContext ec)
+		protected override Expression DoResolve (ResolveContext rc)
 		{
-			Expression e = base.DoResolve (ec);
+			Expression e = base.DoResolve (rc);
 			if (type == null)
 				return null;
 
 			if (type.IsDelegate) {
-				ec.Report.Error (1958, Initializers.Location,
+				rc.Report.Error (1958, Initializers.Location,
 					"Object and collection initializers cannot be used to instantiate a delegate");
 			}
 
-			Expression previous = ec.CurrentInitializerVariable;
-			ec.CurrentInitializerVariable = new InitializerTargetExpression (this);
-			initializers.Resolve (ec);
-			ec.CurrentInitializerVariable = previous;
+			Expression previous = rc.CurrentInitializerVariable;
+			rc.CurrentInitializerVariable = new InitializerTargetExpression (this);
+			using (rc.With (ResolveContext.Options.DontSetConditionalAccessReceiver, false)) {
+				initializers.Resolve (rc);
+			}
+			rc.CurrentInitializerVariable = previous;
 
 			dynamic = e as DynamicExpressionStatement;
 			if (dynamic != null)
@@ -12251,6 +12267,7 @@ namespace Mono.CSharp
 						throw new NotImplementedException ();
 
 					sf = ec.GetTemporaryField (type);
+					sf.AutomaticallyReuse = false;
 					sf.EmitAssign (ec, temp, false, false);
 					temp_target = sf;
 					temp.Release (ec);
@@ -12268,8 +12285,8 @@ namespace Mono.CSharp
 				temp.Release (ec);
 
 			if (sf != null)
-				sf.IsAvailableForReuse = true;
-
+				sf.PrepareCleanup (ec);
+			
 			return true;
 		}
 
@@ -12347,6 +12364,7 @@ namespace Mono.CSharp
 			int errors = ec.Report.Errors;
 			type.CreateContainer ();
 			type.DefineContainer ();
+			type.ExpandBaseInterfaces ();
 			type.Define ();
 			if ((ec.Report.Errors - errors) == 0) {
 				parent.Module.AddAnonymousType (type);

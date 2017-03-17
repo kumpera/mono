@@ -24,7 +24,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#if !MONO_FEATURE_NEW_TLS
 #if SECURITY_DEP
 
 #if MONO_SECURITY_ALIAS
@@ -95,7 +94,7 @@ namespace System.Net.Security
 
 		static MonoTlsProvider GetProvider ()
 		{
-			return MonoTlsProviderFactory.GetDefaultProvider ();
+			return MonoTlsProviderFactory.GetProvider ();
 		}
 
 		public SslStream (Stream innerStream)
@@ -123,6 +122,12 @@ namespace System.Net.Security
 			settings.RemoteCertificateValidationCallback = MNS.Private.CallbackHelpers.PublicToMono (userCertificateValidationCallback);
 			settings.ClientCertificateSelectionCallback = MNS.Private.CallbackHelpers.PublicToMono (userCertificateSelectionCallback);
 			impl = provider.CreateSslStream (innerStream, leaveInnerStreamOpen, settings);
+		}
+
+		[MonoLimitation ("encryptionPolicy is ignored")]
+		public SslStream (Stream innerStream, bool leaveInnerStreamOpen, RemoteCertificateValidationCallback userCertificateValidationCallback, LocalCertificateSelectionCallback userCertificateSelectionCallback, EncryptionPolicy encryptionPolicy)
+		: this (innerStream, leaveInnerStreamOpen, userCertificateValidationCallback, userCertificateSelectionCallback)
+		{
 		}
 
 		internal SslStream (Stream innerStream, bool leaveInnerStreamOpen, IMonoSslStream impl)
@@ -403,6 +408,4 @@ namespace System.Net.Security
 	{
 	}
 }
-#endif
-
 #endif

@@ -220,6 +220,18 @@ namespace System.Reflection.Emit {
 				throw new InvalidOperationException ("Unable to change after type has been created.");
 		}
 
+		internal void ResolveUserTypes () {
+			type = TypeBuilder.ResolveUserType (type);
+			TypeBuilder.ResolveUserTypes (modReq);
+			TypeBuilder.ResolveUserTypes (modOpt);
+			if (marshal_info != null)
+				marshal_info.marshaltyperef = TypeBuilder.ResolveUserType (marshal_info.marshaltyperef);
+		}
+
+		internal FieldInfo RuntimeResolve () {
+			return typeb.CreateType ().GetField (this);
+		}
+
 		public override Module Module {
 			get {
 				return base.Module;

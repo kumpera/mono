@@ -7,6 +7,7 @@
 #include <errno.h>
 #include <mono/utils/mono-io-portability.h>
 #include <mono/metadata/profiler-private.h>
+#include <mono/utils/mono-compiler.h>
 
 #ifndef DISABLE_PORTABILITY
 
@@ -387,4 +388,9 @@ static inline gchar *mono_portability_find_file_internal (GString **report, cons
 	g_free (new_pathname);
 	return(NULL);
 }
-#endif
+
+#else /* DISABLE_PORTABILITY */
+
+MONO_EMPTY_SOURCE_FILE (mono_io_portability);
+
+#endif /* DISABLE_PORTABILITY */

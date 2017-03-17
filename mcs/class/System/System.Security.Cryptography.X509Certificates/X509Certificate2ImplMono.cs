@@ -52,11 +52,11 @@ namespace System.Security.Cryptography.X509Certificates
 	{
 		bool _archived;
 		X509ExtensionCollection _extensions;
-		string _serial;
 		PublicKey _publicKey;
 		X500DistinguishedName issuer_name;
 		X500DistinguishedName subject_name;
 		Oid signature_algorithm;
+		X509CertificateImplCollection intermediateCerts;
 
 		MX.X509Certificate _cert;
 
@@ -77,18 +77,25 @@ namespace System.Security.Cryptography.X509Certificates
 			return IntPtr.Zero;
 		}
 
-		internal X509Certificate2ImplMono (MX.X509Certificate cert)
+		X509Certificate2ImplMono (MX.X509Certificate cert)
 		{
 			this._cert = cert;
+		}
+
+		X509Certificate2ImplMono (X509Certificate2ImplMono other)
+		{
+			_cert = other._cert;
+			if (other.intermediateCerts != null)
+				intermediateCerts = other.intermediateCerts.Clone ();
 		}
 
 		public override X509CertificateImpl Clone ()
 		{
 			ThrowIfContextInvalid ();
-			return new X509Certificate2ImplMono (_cert);
+			return new X509Certificate2ImplMono (this);
 		}
 
-		#region Implemented X509CertificateImpl members
+#region Implemented X509CertificateImpl members
 
 		public override string GetIssuerName (bool legacyV1Mode)
 		{
@@ -183,7 +190,7 @@ namespace System.Security.Cryptography.X509Certificates
 			}
 		}
 
-		#endregion
+#endregion
 
 		// constructors
 
@@ -459,6 +466,15 @@ namespace System.Security.Cryptography.X509Certificates
 					cert.RSA = (keypair as RSA);
 					cert.DSA = (keypair as DSA);
 				}
+				if (pfx.Certificates.Count > 1) {
+					intermediateCerts = new X509CertificateImplCollection ();
+					foreach (var c in pfx.Certificates) {
+						if (c == cert)
+							continue;
+						var impl = new X509Certificate2ImplMono (c);
+						intermediateCerts.Add (impl, true);
+					}
+				}
 				return cert;
 			}
 		}
@@ -466,6 +482,7 @@ namespace System.Security.Cryptography.X509Certificates
 		[MonoTODO ("missing KeyStorageFlags support")]
 		public override void Import (byte[] rawData, string password, X509KeyStorageFlags keyStorageFlags)
 		{
+			Reset ();
 			MX.X509Certificate cert = null;
 			if (password == null) {
 				try {
@@ -541,11 +558,14 @@ namespace System.Security.Cryptography.X509Certificates
 			_cert = null;
 			_archived = false;
 			_extensions = null;
-			_serial = null;
 			_publicKey = null;
 			issuer_name = null;
 			subject_name = null;
 			signature_algorithm = null;
+			if (intermediateCerts != null) {
+				intermediateCerts.Dispose ();
+				intermediateCerts = null;
+			}
 		}
 
 		public override string ToString ()
@@ -687,11 +707,19 @@ namespace System.Security.Cryptography.X509Certificates
 			return GetCertContentType (data);
 		}
 
+		internal override X509CertificateImplCollection IntermediateCertificates {
+			get { return intermediateCerts; }
+		}
+
 		// internal stuff because X509Certificate2 isn't complete enough
 		// (maybe X509Certificate3 will be better?)
 
 		internal MX.X509Certificate MonoCertificate {
 			get { return _cert; }
+		}
+
+		internal override X509Certificate2Impl FallbackImpl {
+			get { return this; }
 		}
 	}
 }

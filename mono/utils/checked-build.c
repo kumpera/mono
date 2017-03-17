@@ -146,7 +146,7 @@ translate_backtrace (gpointer native_trace[], int size)
 			g_string_append_printf (bt, "\tat %s\n", names [i]);
 	}
 
-	free (names);
+	g_free (names);
 	return g_string_free (bt, FALSE);
 }
 
@@ -245,7 +245,7 @@ mono_fatal_with_history (const char *msg, ...)
 #ifdef ENABLE_CHECKED_BUILD_GC
 
 void
-assert_gc_safe_mode (void)
+assert_gc_safe_mode (const char *file, int lineno)
 {
 	if (!mono_check_mode_enabled (MONO_CHECK_MODE_GC))
 		return;
@@ -254,19 +254,19 @@ assert_gc_safe_mode (void)
 	int state;
 
 	if (!cur)
-		mono_fatal_with_history ("Expected GC Safe mode but thread is not attached");
+		mono_fatal_with_history ("%s:%d: Expected GC Safe mode but thread is not attached", file, lineno);
 
 	switch (state = mono_thread_info_current_state (cur)) {
 	case STATE_BLOCKING:
 	case STATE_BLOCKING_AND_SUSPENDED:
 		break;
 	default:
-		mono_fatal_with_history ("Expected GC Safe mode but was in %s state", mono_thread_state_name (state));
+		mono_fatal_with_history ("%s:%d: Expected GC Safe mode but was in %s state", file, lineno, mono_thread_state_name (state));
 	}
 }
 
 void
-assert_gc_unsafe_mode (void)
+assert_gc_unsafe_mode (const char *file, int lineno)
 {
 	if (!mono_check_mode_enabled (MONO_CHECK_MODE_GC))
 		return;
@@ -275,7 +275,7 @@ assert_gc_unsafe_mode (void)
 	int state;
 
 	if (!cur)
-		mono_fatal_with_history ("Expected GC Unsafe mode but thread is not attached");
+		mono_fatal_with_history ("%s:%d: Expected GC Unsafe mode but thread is not attached", file, lineno);
 
 	switch (state = mono_thread_info_current_state (cur)) {
 	case STATE_RUNNING:
@@ -283,12 +283,12 @@ assert_gc_unsafe_mode (void)
 	case STATE_SELF_SUSPEND_REQUESTED:
 		break;
 	default:
-		mono_fatal_with_history ("Expected GC Unsafe mode but was in %s state", mono_thread_state_name (state));
+		mono_fatal_with_history ("%s:%d: Expected GC Unsafe mode but was in %s state", file, lineno, mono_thread_state_name (state));
 	}
 }
 
 void
-assert_gc_neutral_mode (void)
+assert_gc_neutral_mode (const char *file, int lineno)
 {
 	if (!mono_check_mode_enabled (MONO_CHECK_MODE_GC))
 		return;
@@ -297,7 +297,7 @@ assert_gc_neutral_mode (void)
 	int state;
 
 	if (!cur)
-		mono_fatal_with_history ("Expected GC Neutral mode but thread is not attached");
+		mono_fatal_with_history ("%s:%d: Expected GC Neutral mode but thread is not attached", file, lineno);
 
 	switch (state = mono_thread_info_current_state (cur)) {
 	case STATE_RUNNING:
@@ -307,7 +307,7 @@ assert_gc_neutral_mode (void)
 	case STATE_BLOCKING_AND_SUSPENDED:
 		break;
 	default:
-		mono_fatal_with_history ("Expected GC Neutral mode but was in %s state", mono_thread_state_name (state));
+		mono_fatal_with_history ("%s:%d: Expected GC Neutral mode but was in %s state", file, lineno, mono_thread_state_name (state));
 	}
 }
 
@@ -473,6 +473,12 @@ check_image_may_reference_image(MonoImage *from, MonoImage *to)
 			// For each queued image visit all directly referenced images
 			int inner_idx;
 
+			// 'files' and 'modules' semantically contain the same items but because of lazy loading we must check both
+			for (inner_idx = 0; !success && inner_idx < checking->file_count; inner_idx++)
+			{
+				CHECK_IMAGE_VISIT (checking->files[inner_idx]);
+			}
+
 			for (inner_idx = 0; !success && inner_idx < checking->module_count; inner_idx++)
 			{
 				CHECK_IMAGE_VISIT (checking->modules[inner_idx]);
@@ -480,8 +486,8 @@ check_image_may_reference_image(MonoImage *from, MonoImage *to)
 
 			for (inner_idx = 0; !success && inner_idx < checking->nreferences; inner_idx++)
 			{
-				// References are lazy-loaded and thus allowed to be NULL.
-				// If they are NULL, we don't care about them for this search, because they haven't impacted ref_count yet.
+				// Assembly references are lazy-loaded and thus allowed to be NULL.
+				// If they are NULL, we don't care about them for this search, because their images haven't impacted ref_count yet.
 				if (checking->references[inner_idx])
 				{
 					CHECK_IMAGE_VISIT (checking->references[inner_idx]->image);
@@ -540,10 +546,10 @@ check_image_set_may_reference_image_set (MonoImageSet *from, MonoImageSet *to)
 		if (to->images[to_idx] == mono_defaults.corlib)
 			seen = TRUE;
 
-		// For each item in to->images, scan over from->images looking for it.
+		// For each item in to->images, scan over from->images seeking a path to it.
 		for (from_idx = 0; !seen && from_idx < from->nimages; from_idx++)
 		{
-			if (to->images[to_idx] == from->images[from_idx])
+			if (check_image_may_reference_image (from->images[from_idx], to->images[to_idx]))
 				seen = TRUE;
 		}
 

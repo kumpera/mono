@@ -20,8 +20,8 @@ else
 install-local: install-extras
 endif
 
-PORTABLE_TARGETS_SRC=../../../external/buildtools/src/Portable/Targets
-PCL5_FX_SRC=../../../external/buildtools/src/Portable/Frameworks/v5.0
+PORTABLE_TARGETS_SRC:=data/Portable/Targets
+PCL5_FX_SRC:=data/Portable/Frameworks/v5.0
 
 NETFRAMEWORK_DIR=$(mono_libdir)/mono/xbuild-frameworks/.NETFramework
 PCL5_FX_DIR=$(mono_libdir)/mono/xbuild-frameworks/.NETPortable/v5.0
@@ -77,6 +77,8 @@ install-frameworks:
 	$(INSTALL_DATA) frameworks/net_4.6.xml $(DESTDIR)$(NETFRAMEWORK_DIR)/v4.6/RedistList/FrameworkList.xml
 	$(MKINSTALLDIRS) $(DESTDIR)$(NETFRAMEWORK_DIR)/v4.6.1/RedistList
 	$(INSTALL_DATA) frameworks/net_4.6.1.xml $(DESTDIR)$(NETFRAMEWORK_DIR)/v4.6.1/RedistList/FrameworkList.xml
+	$(MKINSTALLDIRS) $(DESTDIR)$(NETFRAMEWORK_DIR)/v4.6.2/RedistList
+	$(INSTALL_DATA) frameworks/net_4.6.2.xml $(DESTDIR)$(NETFRAMEWORK_DIR)/v4.6.2/RedistList/FrameworkList.xml
 
 install-pcl-targets:
 	$(MKINSTALLDIRS) $(DESTDIR)$(PORTABLE_TARGETS_DIR)
@@ -131,6 +133,7 @@ install-pcl5-framework:
 EXTRA_DISTFILES = \
 	data/xbuild.rsp \
 	data/xbuild.exe.config.in \
+	data/xbuild.exe.config_test.in \
 	data/Microsoft.Build.xsd \
 	data/2.0/Microsoft.Common.tasks \
 	data/3.5/Microsoft.Common.tasks \
@@ -151,6 +154,8 @@ EXTRA_DISTFILES = \
 	data/Microsoft.VisualBasic.targets \
 	data/MSBuild/Microsoft.Build.CommonTypes.xsd \
 	data/MSBuild/Microsoft.Build.Core.xsd \
+	data/Portable/Targets/* \
+	data/Portable/Frameworks/v5.0/* \
 	frameworks/net_2.0.xml \
 	frameworks/net_3.0.xml \
 	frameworks/net_3.5.xml \
@@ -161,6 +166,7 @@ EXTRA_DISTFILES = \
 	frameworks/net_4.5.2.xml \
 	frameworks/net_4.6.xml \
 	frameworks/net_4.6.1.xml \
+	frameworks/net_4.6.2.xml \
 	targets/Microsoft.WebApplication.targets	\
 	$(NUGET_BUILDTASKS_REPO_DIR)/src/Microsoft.NuGet.Build.Tasks/ImportBeforeAfter/Microsoft.NuGet.ImportBefore.props	\
 	$(NUGET_BUILDTASKS_REPO_DIR)/src/Microsoft.NuGet.Build.Tasks/ImportBeforeAfter/Microsoft.NuGet.ImportAfter.targets	\

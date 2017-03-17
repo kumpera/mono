@@ -6,6 +6,7 @@ Assembly/AssemblyInfo.cs
 ../../build/common/AssemblyRef.cs
 
 ReferenceSources/NativeOledbWrapper.cs
+ReferenceSources/PoolBlockingPeriod.cs
 ReferenceSources/Res.cs
 ReferenceSources/Res.missing.cs
 ReferenceSources/ResCategoryAttribute.cs
@@ -13,8 +14,9 @@ ReferenceSources/ResDescriptionAttribute.cs
 ReferenceSources/ThisAssembly.cs
 ReferenceSources/Win32NativeMethods.cs
 ReferenceSources/SqlInternalConnectionTds.cs
-
 ReferenceSources/mobile_DbConnectionPoolCounters.cs
+
+corefx/SR.cs
 
 Microsoft.SqlServer.Server/SqlDataRecord.cs
 Microsoft.SqlServer.Server/SqlMetaData.cs
@@ -63,6 +65,6 @@ System.Data.Common/DbTypes.cs
 System.Data.Common/ExceptionHelper.cs
 System.Data.Common/DbConnectionStringBuilderHelper.cs
 
-#include mobile_referencesource.sources
+MobileStubs.cs
 
-
+#include corefx.common.sources

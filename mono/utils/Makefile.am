@@ -11,7 +11,20 @@ mono-dtrace.h: $(top_srcdir)/data/mono.d
 
 endif
 
+if HOST_WIN32
+win32_sources = \
+	os-event-win32.c
+
+platform_sources = $(win32_sources)
+else
+unix_sources = \
+	os-event-unix.c
+
+platform_sources = $(unix_sources)
+endif
+
 monoutils_sources = \
+	$(platform_sources)	\
 	mono-md5.c		\
 	mono-sha1.c		\
 	mono-logger.c		\
@@ -27,9 +40,12 @@ monoutils_sources = \
 	mono-dl-darwin.c	\
 	mono-dl-posix.c		\
 	mono-dl.h		\
+	mono-dl-windows-internals.h	\
 	mono-log-windows.c	\
 	mono-log-common.c	\
 	mono-log-posix.c	\
+	mono-log-android.c \
+	mono-log-darwin.c \
 	mono-internal-hash.c	\
 	mono-internal-hash.h	\
 	mono-io-portability.c 	\
@@ -38,17 +54,20 @@ monoutils_sources = \
 	mono-filemap.c		\
 	mono-math.c  		\
 	mono-mmap.c  		\
+	mono-mmap-windows.c  		\
 	mono-mmap.h  		\
 	mono-mmap-internals.h	\
+	mono-mmap-windows-internals.h	\
 	mono-os-mutex.h		\
-	mono-os-mutex.c		\
 	mono-coop-mutex.h		\
 	mono-once.h		\
 	mono-lazy-init.h		\
 	mono-networkinterfaces.c		\
 	mono-networkinterfaces.h		\
 	mono-proclib.c		\
+	mono-proclib-windows.c		\
 	mono-proclib.h		\
+	mono-proclib-windows-internals.h		\
 	mono-publib.c		\
 	mono-string.h		\
 	mono-time.c  		\
@@ -59,7 +78,6 @@ monoutils_sources = \
 	mono-poll.c		\
 	mono-path.c		\
 	mono-os-semaphore.h	\
-	mono-os-semaphore.c	\
 	mono-coop-semaphore.h		\
 	mono-sigcontext.h	\
 	mono-stdlib.c 		\
@@ -108,21 +126,20 @@ monoutils_sources = \
 	mono-threads-state-machine.c	\
 	mono-threads-posix.c	\
 	mono-threads-posix-signals.c	\
-	mono-threads-posix-signals.h	\
 	mono-threads-mach.c	\
 	mono-threads-mach-helper.c	\
 	mono-threads-windows.c	\
 	mono-threads-linux.c	\
 	mono-threads-freebsd.c	\
+	mono-threads-netbsd.c	\
 	mono-threads-openbsd.c	\
 	mono-threads-android.c	\
+	mono-threads-haiku.c	\
 	mono-threads.h	\
+	mono-threads-debug.h	\
 	mono-threads-api.h	\
 	mono-threads-coop.c	\
 	mono-threads-coop.h	\
-	mono-threads-mach-abort-syscall.c	\
-	mono-threads-posix-abort-syscall.c	\
-	mono-threads-windows-abort-syscall.c	\
 	mono-tls.h	\
 	mono-tls.c	\
 	linux_magic.h	\
@@ -131,13 +148,12 @@ monoutils_sources = \
 	atomic.c	\
 	mono-hwcap.h	\
 	mono-hwcap.c	\
+	mono-hwcap-vars.h	\
 	bsearch.h	\
 	bsearch.c	\
 	mono-signal-handler.h	\
 	mono-conc-hashtable.h	\
 	mono-conc-hashtable.c	\
-	sha1.h		\
-	sha1.c	\
 	json.h	\
 	json.c	\
 	networking.c	\
@@ -147,15 +163,18 @@ monoutils_sources = \
 	networking-windows.c	\
 	networking.h	\
 	mono-rand.c	\
+	mono-rand-windows.c	\
 	mono-rand.h \
+	mono-rand-windows-internals.h \
 	memfuncs.c \
 	memfuncs.h \
 	parse.c \
 	parse.h	\
 	checked-build.c \
 	checked-build.h \
-	w32handle.c \
-	w32handle.h
+	os-event.h \
+	refcount.h	\
+	w32api.h
 
 arch_sources = 
 
@@ -183,48 +202,56 @@ arch_sources += mach-support-unknown.c
 
 endif
 
+if !CROSS_COMPILE
+
 if X86
-arch_sources += mono-hwcap-x86.c mono-hwcap-x86.h
+arch_sources += mono-hwcap-x86.c
 endif
 
 if AMD64
-arch_sources += mono-hwcap-x86.c mono-hwcap-x86.h
+arch_sources += mono-hwcap-x86.c
 endif
 
 if ARM
-arch_sources += mono-hwcap-arm.c mono-hwcap-arm.h
+arch_sources += mono-hwcap-arm.c
 endif
 
 if ARM64
-arch_sources += mono-hwcap-arm64.c mono-hwcap-arm64.h
+arch_sources += mono-hwcap-arm64.c
 endif
 
 if MIPS
-arch_sources += mono-hwcap-mips.c mono-hwcap-mips.h
+arch_sources += mono-hwcap-mips.c
 endif
 
 if POWERPC
-arch_sources += mono-hwcap-ppc.c mono-hwcap-ppc.h
+arch_sources += mono-hwcap-ppc.c
 endif
 
 if POWERPC64
-arch_sources += mono-hwcap-ppc.c mono-hwcap-ppc.h
+arch_sources += mono-hwcap-ppc.c
 endif
 
 if SPARC
-arch_sources += mono-hwcap-sparc.c mono-hwcap-sparc.h
+arch_sources += mono-hwcap-sparc.c
 endif
 
 if SPARC64
-arch_sources += mono-hwcap-sparc.c mono-hwcap-sparc.h
+arch_sources += mono-hwcap-sparc.c
 endif
 
 if IA64
-arch_sources += mono-hwcap-ia64.c mono-hwcap-ia64.h
+arch_sources += mono-hwcap-ia64.c
 endif
 
 if S390X
-arch_sources += mono-hwcap-s390x.c mono-hwcap-s390x.h
+arch_sources += mono-hwcap-s390x.c
+endif
+
+else
+
+arch_sources += mono-hwcap-cross.c
+
 endif
 
 libmonoutils_la_SOURCES = $(monoutils_sources) $(arch_sources)

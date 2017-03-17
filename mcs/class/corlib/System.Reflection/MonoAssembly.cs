@@ -41,6 +41,8 @@ using System.Security;
 using System.Security.Policy;
 using System.Security.Permissions;
 
+using Mono;
+
 namespace System.Reflection {
 
 	abstract class RuntimeAssembly : Assembly
@@ -129,7 +131,7 @@ namespace System.Reflection {
 
                 if (!suppressSecurityChecks)
                 {
-#if FEATURE_MONO_CAS
+#if MONO_FEATURE_CAS
 #pragma warning disable 618
                     new SecurityPermission(SecurityPermissionFlag.ControlEvidence).Demand();
 #pragma warning restore 618
@@ -162,12 +164,8 @@ namespace System.Reflection {
 				var _ = CodeBase; // this will ensure the Demand is made
 			}
 #endif
-
-			AssemblyName aname = new AssemblyName ();
-			FillName (this, aname);
-			return aname;
+			return AssemblyName.Create (this, true);
 		}
-
 	}
 
 	[ComVisible (true)]

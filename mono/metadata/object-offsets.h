@@ -56,6 +56,8 @@ DECL_SIZE(gpointer)
 DECL_OFFSET(MonoObject, vtable)
 DECL_OFFSET(MonoObject, synchronisation)
 
+DECL_OFFSET(MonoObjectHandlePayload, __raw)
+
 DECL_OFFSET(MonoClass, interface_bitmap)
 DECL_OFFSET(MonoClass, byval_arg)
 DECL_OFFSET(MonoClass, cast_class)
@@ -74,6 +76,7 @@ DECL_OFFSET(MonoVTable, max_interface_id)
 DECL_OFFSET(MonoVTable, interface_bitmap)
 DECL_OFFSET(MonoVTable, vtable)
 DECL_OFFSET(MonoVTable, rank)
+DECL_OFFSET(MonoVTable, initialized)
 DECL_OFFSET(MonoVTable, type)
 DECL_OFFSET(MonoVTable, runtime_generic_context)
 
@@ -90,6 +93,7 @@ DECL_OFFSET(MonoDelegate, extra_arg)
 DECL_OFFSET(MonoInternalThread, tid)
 DECL_OFFSET(MonoInternalThread, small_id)
 DECL_OFFSET(MonoInternalThread, static_data)
+DECL_OFFSET(MonoInternalThread, last)
 
 DECL_OFFSET(MonoMulticastDelegate, delegates)
 
@@ -131,10 +135,8 @@ DECL_OFFSET(MonoThreadsSync, nest)
 
 #ifdef HAVE_SGEN_GC
 DECL_OFFSET(SgenClientThreadInfo, in_critical_region)
-#ifndef HAVE_KW_THREAD
-DECL_OFFSET(SgenThreadInfo, tlab_next_addr)
+DECL_OFFSET(SgenThreadInfo, tlab_next)
 DECL_OFFSET(SgenThreadInfo, tlab_temp_end)
-#endif
 #endif
 
 #endif //DISABLE METADATA OFFSETS
@@ -202,6 +204,9 @@ DECL_OFFSET(MonoLMF, fp)
 DECL_OFFSET(MonoLMF, ip)
 DECL_OFFSET(MonoLMF, iregs)
 DECL_OFFSET(MonoLMF, fregs)
+DECL_OFFSET(DynCallArgs, fpregs)
+DECL_OFFSET(DynCallArgs, has_fpregs)
+DECL_OFFSET(SeqPointInfo, ss_tramp_addr)
 #elif defined(TARGET_ARM64)
 DECL_OFFSET(MonoLMF, pc)
 DECL_OFFSET(MonoLMF, gregs)
@@ -237,6 +242,8 @@ DECL_OFFSET(GSharedVtCallInfo, gsharedvt_in)
 #endif
 
 #if defined(TARGET_ARM64)
+DECL_OFFSET (MonoContext, has_fregs)
+
 DECL_OFFSET(GSharedVtCallInfo, stack_usage)
 DECL_OFFSET(GSharedVtCallInfo, gsharedvt_in)
 DECL_OFFSET(GSharedVtCallInfo, ret_marshal)

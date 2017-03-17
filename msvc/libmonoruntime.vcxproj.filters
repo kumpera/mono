@@ -16,6 +16,15 @@
     <ClCompile Include="..\mono\metadata\console-win32.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="..\mono\metadata\w32mutex-win32.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\mono\metadata\w32semaphore-win32.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\mono\metadata\w32event-win32.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="..\mono\metadata\coree.c">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -37,7 +46,7 @@
     <ClCompile Include="..\mono\metadata\exception.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="..\mono\metadata\file-io.c">
+    <ClCompile Include="..\mono\metadata\w32file.c">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="..\mono\metadata\file-mmap-windows.c">
@@ -118,7 +127,10 @@
     <ClCompile Include="..\mono\metadata\opcodes.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="..\mono\metadata\process.c">
+    <ClCompile Include="..\mono\metadata\w32process.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\mono\metadata\w32process-win32.c">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="..\mono\metadata\profiler.c">
@@ -142,7 +154,7 @@
     <ClCompile Include="..\mono\metadata\seq-points-data.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="..\mono\metadata\socket-io.c">
+    <ClCompile Include="..\mono\metadata\w32socket.c">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="..\mono\metadata\string-icalls.c">
@@ -151,10 +163,13 @@
     <ClCompile Include="..\mono\metadata\sysmath.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="..\mono\metadata\threadpool-ms.c">
+    <ClCompile Include="..\mono\metadata\threadpool.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="..\mono\metadata\threadpool-ms-io.c">
+    <ClCompile Include="..\mono\metadata\threadpool-worker-default.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\mono\metadata\threadpool-io.c">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="..\mono\metadata\threads.c">
@@ -165,15 +180,6 @@
     </ClCompile>
     <ClCompile Include="..\mono\metadata\boehm-gc.c">
       <Filter>Source Files\boehm</Filter>
-    </ClCompile>
-    <ClCompile Include="..\mono\metadata\sgen-os-mach.c">
-      <Filter>Source Files\sgen</Filter>
-    </ClCompile>
-    <ClCompile Include="..\mono\metadata\sgen-os-posix.c">
-      <Filter>Source Files\sgen</Filter>
-    </ClCompile>
-    <ClCompile Include="..\mono\metadata\sgen-os-win32.c">
-      <Filter>Source Files\sgen</Filter>
     </ClCompile>
     <ClCompile Include="..\mono\metadata\appdomain.c">
       <Filter>Source Files\gc</Filter>
@@ -221,6 +227,48 @@
       <Filter>Source Files\sgen</Filter>
     </ClCompile>
     <ClCompile Include="..\mono\metadata\metadata-cross-helpers.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\mono\metadata\custom-attrs.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\mono\metadata\dynamic-image.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\mono\metadata\dynamic-stream.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\mono\metadata\sre.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\mono\metadata\sre-encode.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\mono\metadata\sre-save.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\mono\metadata\w32socket-win32.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\mono\metadata\w32file-win32.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\mono\metadata\w32error-win32.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\mono\metadata\icall-windows.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\mono\metadata\marshal-windows.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\mono\metadata\mono-security-windows.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\mono\metadata\class-accessors.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\mono\metadata\property-bag.c">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
@@ -276,7 +324,13 @@
     <ClInclude Include="..\mono\metadata\exception.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\mono\metadata\file-io.h">
+    <ClInclude Include="..\mono\metadata\w32file.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\mono\metadata\w32error.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\mono\utils\w32api.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="..\mono\metadata\filewatcher.h">
@@ -372,7 +426,13 @@
     <ClInclude Include="..\mono\metadata\opcodes.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\mono\metadata\process.h">
+    <ClInclude Include="..\mono\metadata\w32process.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\mono\metadata\w32process-internals.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\mono\metadata\w32process-win32-internals.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="..\mono\metadata\profiler.h">
@@ -405,7 +465,7 @@
     <ClInclude Include="..\mono\metadata\seq-points-data.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\mono\metadata\socket-io.h">
+    <ClInclude Include="..\mono\metadata\w32socket.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="..\mono\metadata\string-icalls.h">
@@ -417,13 +477,16 @@
     <ClInclude Include="..\mono\metadata\tabledefs.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\mono\metadata\threadpool-ms.h">
+    <ClInclude Include="..\mono\metadata\threadpool.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\mono\metadata\threadpool-worker.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="..\mono\metadata\wrapper-types.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\mono\metadata\threadpool-ms-io.h">
+    <ClInclude Include="..\mono\metadata\threadpool-io.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="..\mono\metadata\threads-types.h">
@@ -452,6 +515,60 @@
     </ClInclude>
     <ClInclude Include="..\mono\metadata\gc-internals.h">
       <Filter>Header Files\gc</Filter>
+    </ClInclude>
+    <ClInclude Include="..\mono\metadata\custom-attrs-internals.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\mono\metadata\dynamic-image-internals.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\mono\metadata\dynamic-stream-internals.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\mono\metadata\reflection-cache.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\mono\metadata\reflection-internals.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\mono\metadata\sre-internals.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\mono\metadata\w32socket-internals.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\mono\metadata\coree-internals.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\mono\metadata\console-win32-internals.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\mono\metadata\w32file-win32-internals.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\mono\metadata\w32file-internals.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\mono\metadata\icall-internals.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\mono\metadata\icall-windows-internals.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\mono\metadata\marshal-windows-internals.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\mono\metadata\marshal-internals.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\mono\metadata\mono-security-windows-internals.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\mono\metadata\property-bag.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\mono\metadata\cominterop-win32-internals.h">
+      <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
@@ -482,5 +599,10 @@
     <Filter Include="Header Files\gc">
       <UniqueIdentifier>{e37c9a88-bfb3-47dd-948c-a74dea25b3ad}</UniqueIdentifier>
     </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\mono\metadata\Makefile.am">
+      <Filter>Resource Files</Filter>
+    </None>
   </ItemGroup>
 </Project>

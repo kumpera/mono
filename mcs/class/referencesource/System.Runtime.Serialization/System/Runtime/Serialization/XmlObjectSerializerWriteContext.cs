@@ -14,7 +14,9 @@ namespace System.Runtime.Serialization
     using System.Xml;
     using System.Collections.Generic;
     using System.Xml.Serialization;
+#if !MONO
     using System.ServiceModel.Diagnostics;
+#endif
     using System.Security;
     using System.Security.Permissions;
     using System.Runtime.CompilerServices;
@@ -494,7 +496,7 @@ namespace System.Runtime.Serialization
         [MethodImpl(MethodImplOptions.NoInlining)]
         internal void GetObjectData(ISerializable obj, SerializationInfo serInfo, StreamingContext context)
         {
-#if FEATURE_MONO_CAS
+#if MONO_FEATURE_CAS
             // Demand the serialization formatter permission every time
             Globals.SerializationFormatterPermission.Demand();
 #endif

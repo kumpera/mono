@@ -30,9 +30,12 @@
 #include <mach/message.h>
 #include <mach/mach_host.h>
 #include <mach/host_info.h>
-#endif
-#if defined (__NetBSD__) || defined (__APPLE__)
 #include <sys/sysctl.h>
+#endif
+#if defined (__NetBSD__)
+#include <sys/param.h>
+#include <sys/sysctl.h>
+#include <sys/vmmeter.h>
 #endif
 #include "metadata/mono-perfcounters.h"
 #include "metadata/appdomain.h"
@@ -45,7 +48,6 @@
 #include "utils/mono-networkinterfaces.h"
 #include "utils/mono-error-internals.h"
 #include "utils/atomic.h"
-#include <mono/io-layer/io-layer.h>
 
 /* map of CounterSample.cs */
 struct _MonoCounterSample {
@@ -425,7 +427,7 @@ mono_determine_physical_ram_size (void)
 	int mib[2] = {
 		CTL_HW,
 #ifdef __NetBSD__
-		HW_PHYSMEM
+		HW_PHYSMEM64
 #else
 		HW_MEMSIZE
 #endif
@@ -474,29 +476,22 @@ mono_determine_physical_ram_available_size (void)
 #elif defined (__NetBSD__)
 	struct vmtotal vm_total;
 	guint64 page_size;
-	int mib [2];
+	int mib[2];
 	size_t len;
 
+	mib[0] = CTL_VM;
+	mib[1] = VM_METER;
 
-	mib = {
-		CTL_VM,
-#if defined (VM_METER)
-		VM_METER
-#else
-		VM_TOTAL
-#endif
-	};
 	len = sizeof (vm_total);
 	sysctl (mib, 2, &vm_total, &len, NULL, 0);
 
-	mib = {
-		CTL_HW,
-		HW_PAGESIZE
-	};
-	len = sizeof (page_size);
-	sysctl (mib, 2, &page_size, &len, NULL, 0
+	mib[0] = CTL_HW;
+	mib[1] = HW_PAGESIZE;
 
-	return ((guint64) value.t_free * page_size) / 1024;
+	len = sizeof (page_size);
+	sysctl (mib, 2, &page_size, &len, NULL, 0);
+
+	return ((guint64) vm_total.t_free * page_size) / 1024;
 #elif defined (__APPLE__)
 	mach_msg_type_number_t count = HOST_VM_INFO_COUNT;
 	mach_port_t host = mach_host_self();
@@ -1300,7 +1295,7 @@ custom_get_impl (SharedCategory *cat, MonoString *counter, MonoString* instance,
 	SharedInstance* inst;
 	char *name;
 
-	mono_error_init (error);
+	error_init (error);
 	scounter = find_custom_counter (cat, counter);
 	if (!scounter)
 		return NULL;
@@ -1694,7 +1689,7 @@ get_string_array (void **array, int count, gboolean is_process, MonoError *error
 {
 	int i;
 	MonoDomain *domain = mono_domain_get ();
-	mono_error_init (error);
+	error_init (error);
 	MonoArray * res = mono_array_new_checked (mono_domain_get (), mono_get_string_class (), count, error);
 	return_val_if_nok (error, NULL);
 	for (i = 0; i < count; ++i) {
@@ -1719,7 +1714,7 @@ get_string_array_of_strings (void **array, int count, MonoError *error)
 {
 	int i;
 	MonoDomain *domain = mono_domain_get ();
-	mono_error_init (error);
+	error_init (error);
 	MonoArray * res = mono_array_new_checked (mono_domain_get (), mono_get_string_class (), count, error);
 	return_val_if_nok (error, NULL);
 	for (i = 0; i < count; ++i) {
@@ -1737,7 +1732,7 @@ get_mono_instances (MonoError *error)
 	int res;
 	void **buf = NULL;
 	MonoArray *array;
-	mono_error_init (error);
+	error_init (error);
 	do {
 		count *= 2;
 		g_free (buf);
@@ -1755,7 +1750,7 @@ get_cpu_instances (MonoError *error)
 	void **buf = NULL;
 	int i, count;
 	MonoArray *array;
-	mono_error_init (error);
+	error_init (error);
 	count = mono_cpu_count () + 1; /* +1 for "_Total" */
 	buf = g_new (void*, count);
 	for (i = 0; i < count; ++i)
@@ -1772,7 +1767,7 @@ get_processes_instances (MonoError *error)
 	MonoArray *array;
 	int count = 0;
 	void **buf = mono_process_list (&count);
-	mono_error_init (error);
+	error_init (error);
 	if (!buf)
 		return get_string_array (NULL, 0, FALSE, error);
 	array = get_string_array (buf, count, TRUE, error);
@@ -1785,7 +1780,7 @@ get_networkinterface_instances (MonoError *error)
 {
 	MonoArray *array;
 	int count = 0;
-	mono_error_init (error);
+	error_init (error);
 	void **buf = mono_networkinterface_list (&count);
 	if (!buf)
 		return get_string_array_of_strings (NULL, 0, error);
@@ -1798,7 +1793,7 @@ static MonoArray*
 get_custom_instances (MonoString *category, MonoError *error)
 {
 	SharedCategory *scat;
-	mono_error_init (error);
+	error_init (error);
 	scat = find_custom_category (category);
 	if (scat) {
 		GSList *list = get_custom_instances_list (scat);

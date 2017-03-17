@@ -382,10 +382,23 @@ namespace System.IO {
                 }
 
                 Contract.Assert(byteBuffer != null, "expected byteBuffer to be non-null");
-                unsafe {
-                    fixed (byte* pBytes = byteBuffer)
-                    fixed (char* pChars = buffer) {
-                        charsRead = m_decoder.GetChars(pBytes + position, numBytes, pChars + index, charsRemaining, false);
+
+                checked { 
+
+                    if (position < 0 || numBytes < 0 || position + numBytes > byteBuffer.Length) {
+                        throw new ArgumentOutOfRangeException("byteCount");
+                    }
+
+                    if (index < 0 || charsRemaining < 0 || index + charsRemaining > buffer.Length) {
+                       throw new ArgumentOutOfRangeException("charsRemaining");
+                    }
+
+                    unsafe {
+                        fixed (byte* pBytes = byteBuffer) {
+                            fixed (char* pChars = buffer) {
+                                charsRead = m_decoder.GetChars(pBytes + position, numBytes, pChars + index, charsRemaining, false);
+                            }
+                        }
                     }
                 }
 
@@ -408,7 +421,7 @@ namespace System.IO {
             // put in InternalReadChars.   
             int charsRead = 0;
             int numBytes = 0;
-            long posSav = posSav = 0;
+            long posSav = 0;
             
             if (m_stream.CanSeek)
                 posSav = m_stream.Position;

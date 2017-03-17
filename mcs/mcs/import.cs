@@ -142,6 +142,7 @@ namespace Mono.CSharp
 			compiled_types = new Dictionary<MetaType, TypeSpec> (40, ReferenceEquality<MetaType>.Default);
 			assembly_2_definition = new Dictionary<Assembly, IAssemblyDefinition> (ReferenceEquality<Assembly>.Default);
 			IgnorePrivateMembers = true;
+			IgnoreCompilerGeneratedField = true;
 		}
 
 		#region Properties
@@ -153,6 +154,8 @@ namespace Mono.CSharp
 		}
 
 		public bool IgnorePrivateMembers { get; set; }
+
+		public bool IgnoreCompilerGeneratedField { get; set; }
 
 		#endregion
 
@@ -179,8 +182,10 @@ namespace Mono.CSharp
 					break;
 				default:
 					// Ignore private fields (even for error reporting) to not require extra dependencies
-					if ((IgnorePrivateMembers && !declaringType.IsStruct) ||
-						HasAttribute (CustomAttributeData.GetCustomAttributes (fi), "CompilerGeneratedAttribute", CompilerServicesNamespace))
+					if (IgnorePrivateMembers && !declaringType.IsStruct)
+						return null;
+
+					if (IgnoreCompilerGeneratedField && HasAttribute (CustomAttributeData.GetCustomAttributes (fi), "CompilerGeneratedAttribute", CompilerServicesNamespace))
 						return null;
 
 					mod = Modifiers.PRIVATE;
@@ -360,7 +365,7 @@ namespace Mono.CSharp
 					// }
 					//
 					if (!IsMissingType (type) && type.IsGenericTypeDefinition) {
-						var start_pos = spec.DeclaringType == null ? 0 : spec.DeclaringType.MemberDefinition.TypeParametersCount;
+						var start_pos = GetDeclaringTypesTypeParametersCount (spec);
 						var targs = CreateGenericArguments (start_pos, type.GetGenericArguments (), dtype);
 						spec = spec.MakeGenericType (module, targs);
 					}
@@ -374,6 +379,17 @@ namespace Mono.CSharp
 			}
 
 			return tspec;
+		}
+
+		static int GetDeclaringTypesTypeParametersCount (TypeSpec spec)
+		{
+			int total = 0;
+			while (spec.DeclaringType != null) {
+				total += spec.DeclaringType.MemberDefinition.TypeParametersCount;
+				spec = spec.DeclaringType;
+			}
+
+			return total;
 		}
 
 		public MethodSpec CreateMethod (MethodBase mb, TypeSpec declaringType)
@@ -814,7 +830,7 @@ namespace Mono.CSharp
 						if (t.Kind == MemberKind.MissingType)
 							spec = t;
 						else
-							spec = MemberCache.FindNestedType (spec, t.Name, t.Arity);
+							spec = MemberCache.FindNestedType (spec, t.Name, t.Arity, false);
 
 						if (t.Arity > 0) {
 							spec = spec.MakeGenericType (module, targs.Skip (targs_pos).Take (spec.Arity).ToArray ());
@@ -834,7 +850,7 @@ namespace Mono.CSharp
 						if (index > 0)
 							name = name.Substring (0, index);
 
-						spec = MemberCache.FindNestedType (spec, name, targs.Length - targs_pos);
+						spec = MemberCache.FindNestedType (spec, name, targs.Length - targs_pos, false);
 
 						if (spec.Arity > 0) {
 							spec = spec.MakeGenericType (module, targs.Skip (targs_pos).ToArray ());

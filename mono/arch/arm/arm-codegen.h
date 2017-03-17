@@ -500,14 +500,24 @@ typedef struct {
 /* Rd := (Rm * Rs)[31:0]; 32 x 32 -> 32 */
 #define ARM_MUL_COND(p, rd, rm, rs, cond) \
 	ARM_EMIT(p, ARM_DEF_MUL_COND(ARMOP_MUL, rd, rm, rs, 0, 0, cond))
+#define ARM_UMULL_COND(p, rdhi, rdlo, rm, rs, cond) \
+	ARM_EMIT(p, ARM_DEF_MUL_COND(ARMOP_UMULL, rdhi, rm, rs, rdlo, 0, cond))
+#define ARM_SMULL_COND(p, rdhi, rdlo, rm, rs, cond) \
+	ARM_EMIT(p, ARM_DEF_MUL_COND(ARMOP_SMULL, rdhi, rm, rs, rdlo, 0, cond))
 #define ARM_MUL(p, rd, rm, rs) \
 	ARM_MUL_COND(p, rd, rm, rs, ARMCOND_AL)
+#define ARM_UMULL(p, rdhi, rdlo, rm, rs) \
+	ARM_UMULL_COND(p, rdhi, rdlo, rm, rs, ARMCOND_AL)
+#define ARM_SMULL(p, rdhi, rdlo, rm, rs) \
+	ARM_SMULL_COND(p, rdhi, rdlo, rm, rs, ARMCOND_AL)
 #define ARM_MULS_COND(p, rd, rm, rs, cond) \
 	ARM_EMIT(p, ARM_DEF_MUL_COND(ARMOP_MUL, rd, rm, rs, 0, 1, cond))
 #define ARM_MULS(p, rd, rm, rs) \
 	ARM_MULS_COND(p, rd, rm, rs, ARMCOND_AL)
 #define ARM_MUL_REG_REG(p, rd, rm, rs) ARM_MUL(p, rd, rm, rs)
 #define ARM_MULS_REG_REG(p, rd, rm, rs) ARM_MULS(p, rd, rm, rs)
+#define ARM_UMULL_REG_REG(p, rdhi, rdlo, rm, rs) ARM_UMULL(p, rdhi, rdlo, rm, rs)
+#define ARM_SMULL_REG_REG(p, rdhi, rdlo, rm, rs) ARM_SMULL(p, rdhi, rdlo, rm, rs)
 
 /* inline */
 #define ARM_IASM_MUL_COND(rd, rm, rs, cond) \
@@ -1079,6 +1089,16 @@ typedef union {
 
 #define ARM_MCR(p, coproc, opc1, rt, crn, crm, opc2) \
 	ARM_MCR_COND ((p), (coproc), (opc1), (rt), (crn), (crm), (opc2), ARMCOND_AL)
+
+/* MRC */
+#define ARM_DEF_MRC_COND(coproc, opc1, rt, crn, crm, opc2, cond)	\
+	ARM_DEF_COND ((cond)) | ((0xe << 24) | (((opc1) & 0x7) << 21) | (1 << 20) | (((crn) & 0xf) << 16) | (((rt) & 0xf) << 12) | (((coproc) & 0xf) << 8) | (((opc2) & 0x7) << 5) | (1 << 4) | (((crm) & 0xf) << 0))
+
+#define ARM_MRC_COND(p, coproc, opc1, rt, crn, crm, opc2, cond)	\
+	ARM_EMIT(p, ARM_DEF_MRC_COND ((coproc), (opc1), (rt), (crn), (crm), (opc2), (cond)))
+
+#define ARM_MRC(p, coproc, opc1, rt, crn, crm, opc2) \
+	ARM_MRC_COND ((p), (coproc), (opc1), (rt), (crn), (crm), (opc2), ARMCOND_AL)
 
 /* ARMv7VE */
 #define ARM_SDIV_COND(p, rd, rn, rm, cond) ARM_EMIT (p, (((cond) << 28) | (0xe << 23) | (0x1 << 20) | ((rd) << 16) | (0xf << 12) | ((rm) << 8) | (0x0 << 5) | (0x1 << 4) | ((rn) << 0)))

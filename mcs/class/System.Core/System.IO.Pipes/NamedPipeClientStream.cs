@@ -37,6 +37,8 @@ using System.Security.AccessControl;
 using System.Security.Permissions;
 using System.Security.Principal;
 using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.Win32;
 using Microsoft.Win32.SafeHandles;
 
@@ -98,22 +100,30 @@ namespace System.IO.Pipes
 #endif
 		}
 
-#if !MOBILE
 		public NamedPipeClientStream (string serverName, string pipeName, PipeAccessRights desiredAccessRights, PipeOptions options, TokenImpersonationLevel impersonationLevel, HandleInheritability inheritability)
 			: base (ToDirection (desiredAccessRights), DefaultBufferSize)
 		{
 			if (impersonationLevel != TokenImpersonationLevel.None ||
 			    inheritability != HandleInheritability.None)
 				throw ThrowACLException ();
-
+#if MOBILE
+			throw new NotImplementedException ();
+#else
 			if (IsWindows)
 				impl = new Win32NamedPipeClient (this, serverName, pipeName, desiredAccessRights, options, inheritability);
 			else
 				impl = new UnixNamedPipeClient (this, serverName, pipeName, desiredAccessRights, options, inheritability);
-		}
 #endif
 
+		}
+
+		~NamedPipeClientStream () {
+			Dispose (false);
+		}
+
+#if !MOBILE
 		INamedPipeClient impl;
+#endif
 
 		public void Connect ()
 		{
@@ -137,10 +147,38 @@ namespace System.IO.Pipes
 #endif
 		}
 
+		public Task ConnectAsync ()
+		{
+			return ConnectAsync (Timeout.Infinite, CancellationToken.None);
+		}
+
+		public Task ConnectAsync (int timeout)
+		{
+			return ConnectAsync (timeout, CancellationToken.None);
+		}
+
+		public Task ConnectAsync (CancellationToken cancellationToken)
+		{
+			return ConnectAsync (Timeout.Infinite, cancellationToken);
+		}
+
+		public Task ConnectAsync (int timeout, CancellationToken cancellationToken)
+		{
+			throw new NotImplementedException ();
+		}
+
+		protected override internal void CheckPipePropertyOperations () {
+			base.CheckPipePropertyOperations();
+		}
+
 		public int NumberOfServerInstances {
 			get {
 				CheckPipePropertyOperations ();
+#if MOBILE
+				throw new NotImplementedException ();
+#else
 				return impl.NumberOfServerInstances;
+#endif
 			}
 		}
 	}

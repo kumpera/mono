@@ -381,7 +381,7 @@ namespace System.Net.Security {
                 // demand the same permissions, then we should remove our
                 // demand here.
                 //
-                #if FEATURE_MONO_CAS
+                #if MONO_FEATURE_CAS
                 ExceptionHelper.KeyContainerPermissionOpen.Demand(); 
                 #endif
                 
@@ -393,7 +393,7 @@ namespace System.Net.Security {
                 if (store != null)
                 {
                     collectionEx = store.Certificates.Find(X509FindType.FindByThumbprint, certHash, false);
-                    if (collectionEx.Count > 0 && collectionEx[0].PrivateKey != null)
+                    if (collectionEx.Count > 0 && collectionEx[0].HasPrivateKey)
                     {
                         if (Logging.On) Logging.PrintInfo(Logging.Web, this, SR.GetString(SR.net_log_found_cert_in_store, (m_ServerMode ? "LocalMachine" : "CurrentUser")));
                         return collectionEx[0];
@@ -404,7 +404,7 @@ namespace System.Net.Security {
                 if (store != null)
                 {
                     collectionEx = store.Certificates.Find(X509FindType.FindByThumbprint, certHash, false);
-                    if (collectionEx.Count > 0 && collectionEx[0].PrivateKey != null)
+                    if (collectionEx.Count > 0 && collectionEx[0].HasPrivateKey)
                     {
                         if (Logging.On) Logging.PrintInfo(Logging.Web, this, SR.GetString(SR.net_log_found_cert_in_store, (m_ServerMode ? "CurrentUser" : "LocalMachine")));
                         return collectionEx[0];
@@ -437,7 +437,7 @@ namespace System.Net.Security {
                             // For v 1.1 compat We want to ensure the store is opened under the **process** acount.
                             //
                             try {
-#if FEATURE_MONO_CAS
+#if MONO_FEATURE_CAS
                                 using (WindowsIdentity.Impersonate(IntPtr.Zero))
 #endif
                                 {
@@ -583,7 +583,7 @@ namespace System.Net.Security {
         //          Note: We call a user certificate selection delegate under permission
         //          assert but the signature of the delegate is unique so it's safe
         //
-        #if FEATURE_MONO_CAS
+        #if MONO_FEATURE_CAS
         [StorePermission(SecurityAction.Assert, Unrestricted=true)]
         #endif
         private bool AcquireClientCredentials(ref byte[] thumbPrint)
@@ -791,6 +791,12 @@ namespace System.Net.Security {
                 else
                 {
                     SecureCredential.Flags flags = SecureCredential.Flags.ValidateManual | SecureCredential.Flags.NoDefaultCred;
+
+                    if (!ServicePointManager.DisableSendAuxRecord)
+                    {
+                        flags |= SecureCredential.Flags.SendAuxRecord;
+                    }
+
                     if (!ServicePointManager.DisableStrongCrypto 
                         && ((m_ProtocolFlags & (SchProtocols.Tls10 | SchProtocols.Tls11 | SchProtocols.Tls12)) != 0)
                         && (m_EncryptionPolicy != EncryptionPolicy.AllowNoEncryption) && (m_EncryptionPolicy != EncryptionPolicy.NoEncryption))
@@ -826,7 +832,7 @@ namespace System.Net.Security {
         //          Note: We call a user certificate selection delegate under permission
         //          assert but the signature of the delegate is unique so it's safe
         //
-        #if FEATURE_MONO_CAS
+        #if MONO_FEATURE_CAS
         [StorePermission(SecurityAction.Assert, Unrestricted=true)]
         #endif
         private bool AcquireServerCredentials(ref byte[] thumbPrint)
@@ -876,7 +882,14 @@ namespace System.Net.Security {
                 }
                 else
                 {
-                    SecureCredential secureCredential = new SecureCredential(SecureCredential.CurrentVersion, selectedCert, SecureCredential.Flags.Zero, m_ProtocolFlags, m_EncryptionPolicy);
+                    SecureCredential.Flags flags = SecureCredential.Flags.Zero;
+
+                    if (!ServicePointManager.DisableSendAuxRecord)
+                    {
+                        flags |= SecureCredential.Flags.SendAuxRecord;
+                    }
+
+                    SecureCredential secureCredential = new SecureCredential(SecureCredential.CurrentVersion, selectedCert, flags, m_ProtocolFlags, m_EncryptionPolicy);
                     m_CredentialsHandle = AcquireCredentialsHandle(CredentialUse.Inbound, ref secureCredential);
                     thumbPrint = guessedThumbPrint;
                     m_ServerCertificate = localCertificate;
@@ -906,7 +919,7 @@ namespace System.Net.Security {
                 //
                 // For v 1.1 compat We want to ensure the credential are accessed under >>process<< acount.
                 //
-#if FEATURE_MONO_CAS
+#if MONO_FEATURE_CAS
                 using (WindowsIdentity.Impersonate(IntPtr.Zero))
 #endif
                 {
@@ -1285,7 +1298,7 @@ namespace System.Net.Security {
         //SECURITY: The scenario is allowed in semitrust StorePermission is asserted for Chain.Build
         //          A user callback has unique signature so it is safe to call it under permisison assert.
         //
-        #if FEATURE_MONO_CAS
+        #if MONO_FEATURE_CAS
         [StorePermission(SecurityAction.Assert, Unrestricted=true)]
         #endif
         internal bool VerifyRemoteCertificate(RemoteCertValidationCallback remoteCertValidationCallback)

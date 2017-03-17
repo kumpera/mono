@@ -373,8 +373,13 @@ namespace Mono.CSharp {
 					var entry_pm = entry as IParametersMember;
 					if (entry_pm != null) {
 						entry_param = entry_pm.Parameters;
-						if (!TypeSpecComparer.Override.IsEqual (entry_param, member_param))
-							continue;
+						if (entry.DeclaringType != member.DeclaringType) {
+							if (!TypeSpecComparer.Override.IsEqual (entry_param, member_param))
+								continue;
+						} else {
+							if (!TypeSpecComparer.Equals (entry_param.Types, member_param.Types))
+								continue;
+						}
 					}
 				}
 
@@ -406,8 +411,13 @@ namespace Mono.CSharp {
 
 		public static MemberSpec FindMember (TypeSpec container, MemberFilter filter, BindingRestriction restrictions)
 		{
+			if (filter.Kind == MemberKind.Method && container.Kind == MemberKind.TypeParameter && filter.Parameters == null)
+				throw new NotSupportedException ("type parameters methods cannot be lookup up due to two stage setup");
+
+			IList<MemberSpec> applicable;
+			var top_container = container;
+
 			do {
-				IList<MemberSpec> applicable;
 				if (container.MemberCache.member_hash.TryGetValue (filter.Name, out applicable)) {
 					// Start from the end because interface members are in reverse order
 					for (int i = applicable.Count - 1; i >= 0; i--) {
@@ -438,6 +448,26 @@ namespace Mono.CSharp {
 				container = container.BaseType;
 			} while (container != null);
 
+			var tps = top_container as TypeParameterSpec;
+			if (tps != null && tps.InterfaceCache != null) {
+				if (tps.InterfaceCache.member_hash.TryGetValue (filter.Name, out applicable)) {
+					for (int i = applicable.Count - 1; i >= 0; i--) {
+						var entry = applicable [i];
+
+						if ((restrictions & BindingRestriction.NoAccessors) != 0 && entry.IsAccessor)
+							continue;
+
+						if ((restrictions & BindingRestriction.OverrideOnly) != 0 && (entry.Modifiers & Modifiers.OVERRIDE) == 0)
+							continue;
+
+						if (!filter.Equals (entry))
+							continue;
+
+						return entry;
+					}
+				}
+			}
+
 			return null;
 		}
 
@@ -450,9 +480,9 @@ namespace Mono.CSharp {
 		//
 		public static IList<MemberSpec> FindMembers (TypeSpec container, string name, bool declaredOnlyClass)
 		{
-			IList<MemberSpec> applicable;
-
 			do {
+				IList<MemberSpec> applicable;
+				
 				if (container.MemberCache.member_hash.TryGetValue (name, out applicable) || declaredOnlyClass)
 					return applicable;
 
@@ -462,10 +492,21 @@ namespace Mono.CSharp {
 			return null;
 		}
 
+		public static IList<MemberSpec> FindInterfaceMembers (TypeParameterSpec typeParameter, string name)
+		{
+			if (typeParameter.InterfaceCache != null) {
+				IList<MemberSpec> applicable;
+				typeParameter.InterfaceCache.member_hash.TryGetValue (name, out applicable);
+				return applicable;
+			}
+
+			return null;
+		}
+
 		//
 		// Finds the nested type in container
 		//
-		public static TypeSpec FindNestedType (TypeSpec container, string name, int arity)
+		public static TypeSpec FindNestedType (TypeSpec container, string name, int arity, bool declaredOnlyClass)
 		{
 			IList<MemberSpec> applicable;
 			TypeSpec best_match = null;
@@ -494,7 +535,7 @@ namespace Mono.CSharp {
 						if (arity < 0) {
 							if (best_match == null) {
 								best_match = ts;
-							} else if (System.Math.Abs (ts.Arity + arity) < System.Math.Abs (ts.Arity + arity)) {
+							} else if (System.Math.Abs (ts.Arity + arity) < System.Math.Abs (best_match.Arity + arity)) {
 								best_match = ts;
 							}
 						}
@@ -502,7 +543,7 @@ namespace Mono.CSharp {
 				}
 
 				container = container.BaseType;
-			} while (container != null);
+			} while (container != null && !declaredOnlyClass);
 
 			return best_match;
 		}
@@ -988,6 +1029,7 @@ namespace Mono.CSharp {
 										shared_list = false;
 										prev = new List<MemberSpec> (found.Count + 1);
 										prev.AddRange (found);
+										found = prev;
 									} else {
 										prev = (List<MemberSpec>) found;
 									}
