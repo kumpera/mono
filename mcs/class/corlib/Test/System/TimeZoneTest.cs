@@ -379,7 +379,8 @@ public class TimeZoneTest {
 			dto.ToLocalTime ();
 		}
 
-#if !WIN_PLATFORM
+		//This test should live on XI as it depends on types not in mono
+#if FALSE
 		// On device we cannot read the OS file system to look for /etc/localtime
 		// and /usr/share/zoneinfo - so we must initialize the BCL TimeZoneInfo
 		// from NSTimeZoneInfo. The tests here check the code paths between the

@@ -1,4 +1,4 @@
-//
+	//
 // System.Reflection.Assembly Test Cases
 //
 // Authors:
@@ -190,6 +190,7 @@ namespace MonoTests.System.Reflection
 		}
 
 		[Test]
+		[Category("MobileNotWorking")]
 		public void GetEntryAssembly ()
 		{
 			// note: only available in default appdomain
@@ -261,11 +262,13 @@ namespace MonoTests.System.Reflection
 		}
 
 		[Test]
+		[Category("MobileNotWorking")]
 		public void Corlib_test ()
 		{
 			Assembly corlib_test = Assembly.GetExecutingAssembly ();
-#if MONODROID || FULL_AOT_DESKTOP || __WATCHOS__
 			Assert.IsNull (corlib_test.EntryPoint, "EntryPoint");
+
+#if MONODROID || FULL_AOT_DESKTOP || __WATCHOS__
 			Assert.IsNull (corlib_test.Evidence, "Evidence");
 #elif MOBILE
 			Assert.IsNotNull (corlib_test.EntryPoint, "EntryPoint");
