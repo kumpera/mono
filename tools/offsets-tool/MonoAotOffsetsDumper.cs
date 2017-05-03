@@ -28,6 +28,8 @@ namespace CppSharp
         static string AndroidNdkPath = @"";
         static string MaccoreDir = @"";
         static string TargetDir = @"";
+        static bool Verbose = false;
+        static string Platform = @"";
 
         public enum TargetPlatform
         {
@@ -191,13 +193,16 @@ namespace CppSharp
         {
             ParseCommandLineArgs(args);
 
+            if (MonoDir != "")
+                MonoDir = Path.GetFullPath (MonoDir);
+
             string monodroidDir;
             if (!Directory.Exists (MonodroidDir) &&
                 GetParentSubDirectoryPath ("monodroid", out monodroidDir)) {
                 MonodroidDir = Path.Combine (monodroidDir);
             }
 
-            if (Directory.Exists (MonodroidDir))
+            if (Platform == "android" || Directory.Exists (MonodroidDir))
                 SetupAndroidTargets();
 
             string maccoreDir;
@@ -206,7 +211,7 @@ namespace CppSharp
                 MaccoreDir = Path.Combine (maccoreDir);
             }
 
-            if (Directory.Exists(MaccoreDir))
+            if (Platform == "ios" || Directory.Exists(MaccoreDir))
                 SetupiOSTargets();
 
             foreach (var target in Targets)
@@ -274,6 +279,8 @@ namespace CppSharp
                 { "android-ndk=", "Path to Android NDK", v => AndroidNdkPath = v },
                 { "targetdir=", "Path to the directory containing the mono build", v =>TargetDir = v },
                 { "mono=", "include directory", v => MonoDir = v },
+                { "platform=", "platform (ios, android)", v => Platform = v },
+                { "v|verbose", "Verbose output", v => Verbose = true },
                 { "h|help",  "show this message and exit",  v => showHelp = v != null },
             };
 
@@ -340,7 +347,10 @@ namespace CppSharp
                 string targetPath = Path.Combine (MaccoreDir, "builds");
                 if (!Directory.Exists (MonoDir))
                     MonoDir = Path.GetFullPath (Path.Combine (targetPath, "../../mono"));
-                targetBuild = Path.Combine(targetPath, target.Build);
+                if (!string.IsNullOrEmpty (TargetDir))
+                    targetBuild = TargetDir;
+                else
+                    targetBuild = Path.Combine(targetPath, target.Build);
                 break;
             }
             default:
