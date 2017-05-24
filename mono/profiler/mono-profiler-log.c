@@ -4801,6 +4801,11 @@ mono_profiler_startup (const char *desc)
 	const char *opt;
 	int calls_enabled = 0;
 	int allocs_enabled = 0;
+	int counters_enabled = 0;
+	int sampling_enabled = 0;
+	int quiet_mode = 0;
+	int basic_gc_events_enabled = 0;
+
 	int events = MONO_PROFILE_GC|MONO_PROFILE_ALLOCATIONS|
 		MONO_PROFILE_GC_MOVES|MONO_PROFILE_CLASS_EVENTS|MONO_PROFILE_THREADS|
 		MONO_PROFILE_ENTER_LEAVE|MONO_PROFILE_JIT_COMPILATION|MONO_PROFILE_EXCEPTIONS|
@@ -4848,6 +4853,7 @@ mono_profiler_startup (const char *desc)
 			no_counters = TRUE;
 			continue;
 		}
+
 		if ((opt = match_option (p, "time", &val)) != p) {
 			// For backwards compatibility.
 			if (strcmp (val, "fast") && strcmp (val, "null"))
@@ -4886,6 +4892,7 @@ mono_profiler_startup (const char *desc)
 			events &= ~MONO_PROFILE_ENTER_LEAVE;
 			nocalls = 1;
 			set_sample_freq (val);
+			sampling_enabled = 1;
 			continue;
 		}
 		if ((opt = match_option (p, "zip", NULL)) != p) {
@@ -4926,7 +4933,7 @@ mono_profiler_startup (const char *desc)
 			continue;
 		}
 		if ((opt = match_option (p, "counters", NULL)) != p) {
-			// For backwards compatibility.
+			counters_enabled = 1;
 			continue;
 		}
 		if ((opt = match_option (p, "coverage", NULL)) != p) {
@@ -4970,6 +4977,15 @@ mono_profiler_startup (const char *desc)
 			g_ptr_array_add (filters, val);
 			continue;
 		}
+		if ((opt = match_option (p, "quiet", NULL)) != p) {
+			quiet_mode = 1;
+			continue;
+		}
+		if ((opt = match_option (p, "gc", NULL)) != p) {
+			basic_gc_events_enabled = 1;
+			continue;
+		}
+
 		if (opt == p) {
 			usage (0);
 			exit (0);
@@ -5006,6 +5022,34 @@ mono_profiler_startup (const char *desc)
 		PROF_TLS_FREE ();
 		return;
 	}
+
+	if (quiet_mode) {
+		//We always emit type loading events, as those are needed for pretty much everything else
+		int events = MONO_PROFILE_CLASS_EVENTS|MONO_PROFILE_MODULE_EVENTS|MONO_PROFILE_APPDOMAIN_EVENTS|
+			MONO_PROFILE_CONTEXT_EVENTS| MONO_PROFILE_ASSEMBLY_EVENTS;
+
+		//Allocs don't get you GC moves unless you ask for gc events
+		if (allocs_enabled) {
+			events |= MONO_PROFILE_THREADS; //allocs need thread info
+			events |= MONO_PROFILE_ALLOCATIONS;
+		}
+
+		if (basic_gc_events_enabled) {
+			events |= MONO_PROFILE_GC;
+			if (allocs_enabled)
+				events |= MONO_PROFILE_GC_MOVES;
+		}
+
+		if (calls_enabled) {
+			events |= MONO_PROFILE_ENTER_LEAVE;
+			nocalls = 0;
+		}
+		if (!counters_enabled)
+			no_counters = TRUE;
+		
+	}
+	int sampling_enabled = 0;
+	int quiet_mode = 0;
 
 	mono_lls_init (&profiler_thread_list, NULL);
 
