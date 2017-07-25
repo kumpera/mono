@@ -156,15 +156,6 @@ mono_thread_state_init_from_handle (MonoThreadUnwindState *tctx, MonoThreadInfo 
 	return FALSE;
 }
 
-
-//mono-threads-wasm.c
-
-void
-mono_threads_platform_get_stack_bounds (guint8 **staddr, size_t *stsize)
-{
-	staddr = (void*)-1;
-	*stsize = 65536;
-}
 //w32file-wasm.c
 
 gboolean

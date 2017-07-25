@@ -125,6 +125,7 @@ monoutils_sources = \
 	mono-linked-list-set.h	\
 	mono-threads.c	\
 	mono-threads-state-machine.c	\
+	mono-threads-wasm.c	\
 	mono-threads-posix.c	\
 	mono-threads-posix-signals.c	\
 	mono-threads-mach.c	\
