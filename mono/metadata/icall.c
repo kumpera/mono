@@ -8071,6 +8071,7 @@ static GHashTable *jit_icall_hash_addr = NULL;
 void
 mono_icall_init (void)
 {
+	printf ("oi\n");
 #ifndef DISABLE_ICALL_TABLES
 	int i = 0;
 
@@ -8098,9 +8099,11 @@ mono_icall_init (void)
 			}
 		}
 	}
+	printf ("hello\n");
 #endif
 
 	icall_hash = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
+	printf ("---33\n");
 	mono_os_mutex_init (&icall_mutex);
 }
 

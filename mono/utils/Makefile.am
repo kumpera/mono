@@ -39,6 +39,7 @@ monoutils_sources = \
 	mono-dl-windows.c	\
 	mono-dl-darwin.c	\
 	mono-dl-posix.c		\
+	mono-dl-wasm.c		\
 	mono-dl.h		\
 	mono-dl-windows-internals.h	\
 	mono-log-windows.c	\

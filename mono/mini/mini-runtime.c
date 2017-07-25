@@ -3972,17 +3972,25 @@ mini_init (const char *filename, const char *runtime_version)
 	/*Init arch tls information only after the metadata side is inited to make sure we see dynamic appdomain tls keys*/
 	mono_arch_finish_init ();
 
+	printf ("---1\n");
 	mono_icall_init ();
 
+	printf ("---2\n");
 	/* This must come after mono_init () in the aot-only case */
 	mono_exceptions_init ();
+
+	printf ("---3\n");
 
 	/* This should come after mono_init () too */
 	mini_gc_init ();
 
+	printf ("---4\n");
+
 #ifndef DISABLE_JIT
 	mono_create_helper_signatures ();
 #endif
+
+	printf ("---5\n");
 
 	register_jit_stats ();
 
@@ -3991,12 +3999,18 @@ mini_init (const char *filename, const char *runtime_version)
 	/* Needs to be called here since register_jit_icall depends on it */
 	mono_marshal_init ();
 
+	printf ("---6\n");
+
 	mono_arch_register_lowlevel_calls ();
+
+	printf ("---7\n");
 
 	register_icalls ();
 
 	mono_generic_sharing_init ();
 #endif
+
+	printf ("---8\n");
 
 #ifdef MONO_ARCH_SIMD_INTRINSICS
 	mono_simd_intrinsics_init ();
@@ -4005,6 +4019,8 @@ mini_init (const char *filename, const char *runtime_version)
 	mono_tasklets_init ();
 
 	register_trampolines (domain);
+
+	printf ("---9\n");
 
 	if (mono_compile_aot)
 		/*
@@ -4015,6 +4031,8 @@ mini_init (const char *filename, const char *runtime_version)
 
 	mono_mem_account_register_counters ();
 
+	printf ("---10\n");
+
 #define JIT_RUNTIME_WORKS
 #ifdef JIT_RUNTIME_WORKS
 	mono_install_runtime_cleanup ((MonoDomainFunc)mini_cleanup);
@@ -4024,12 +4042,15 @@ mini_init (const char *filename, const char *runtime_version)
 	MONO_PROFILER_RAISE (thread_name, (MONO_NATIVE_THREAD_ID_TO_UINT (mono_native_thread_id_get ()), "Main"));
 #endif
 
+	printf ("---11\n");
+
 	if (mono_profiler_sampling_enabled ())
 		mono_runtime_setup_stat_profiler ();
 
 	MONO_PROFILER_RAISE (runtime_initialized, ());
 
 	MONO_VES_INIT_END ();
+	printf ("---12\n");
 
 	return domain;
 }
