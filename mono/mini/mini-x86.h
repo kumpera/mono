@@ -163,7 +163,7 @@ typedef struct {
 
 #define MONO_CONTEXT_SET_LLVM_EXC_REG(ctx, exc) do { (ctx)->eax = (gsize)exc; } while (0)
 
-#ifdef _MSC_VER
+#if defined (_MSC_VER)
 
 #define MONO_INIT_CONTEXT_FROM_FUNC(ctx, start_func) do { \
     unsigned int stackptr; \
@@ -184,7 +184,6 @@ typedef struct {
 		MONO_CONTEXT_SET_BP ((ctx), __builtin_frame_address (0));	\
 		MONO_CONTEXT_SET_SP ((ctx), __builtin_frame_address (0));	\
 	} while (0)
-
 #endif
 
 #define MONO_ARCH_INIT_TOP_LMF_ENTRY(lmf) do { (lmf)->ebp = -1; } while (0)

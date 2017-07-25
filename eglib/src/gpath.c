@@ -164,7 +164,7 @@ g_path_get_basename (const char *filename)
 // This is from BSD's strtok_r
 
 char *
-strtok_r(char *s, const char *delim, char **last)
+strtok_r2(char *s, const char *delim, char **last)
 {
 	char *spanp;
 	int c, sc;

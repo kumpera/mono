@@ -245,6 +245,11 @@ if S390X
 arch_sources += mono-hwcap-s390x.c
 endif
 
+if WASM
+arch_sources += mono-hwcap-wasm.c
+endif
+
+
 else
 
 arch_sources += mono-hwcap-cross.c

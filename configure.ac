@@ -109,251 +109,13 @@ host_win32=no
 target_win32=no
 platform_android=no
 host_darwin=no
-case "$host" in
-	*-mingw*|*-*-cygwin*)
-		AC_DEFINE(DISABLE_PORTABILITY,1,[Disable the io-portability layer])
-		AC_DEFINE(PLATFORM_NO_SYMLINKS,1,[This platform does not support symlinks])
-		host_win32=yes
-		mono_cv_clang=no
-		if test "x$cross_compiling" = "xno"; then
-			if test "x$host" = "x$build" -a "x$host" = "x$target"; then
-				target_win32=yes
-			fi
-		else
-			if test "x$host" = "x$target"; then
-				target_win32=yes
-			fi
-		fi
-		HOST_CC="gcc"
-		# Windows Vista or later is required
-		CPPFLAGS="$CPPFLAGS -DWINVER=0x0600 -D_WIN32_WINNT=0x0600 -D_WIN32_IE=0x0501 -D_UNICODE -DUNICODE -DWIN32_THREADS -DFD_SETSIZE=1024"
-		LDFLAGS="$LDFLAGS -lmswsock -lws2_32 -lole32 -loleaut32 -lpsapi -lversion -ladvapi32 -lwinmm -lkernel32 -liphlpapi"
-		libmono_cflags="-mms-bitfields -mwindows"
-		libmono_ldflags="-mms-bitfields -mwindows"
-		libdl=
-		libgc_threads=win32
-		with_sigaltstack=no
-		with_tls=pthread
-		with_sgen_default_concurrent=yes
-		LN_S=cp
-		# This forces libgc to use the DllMain based thread registration code on win32
-		libgc_configure_args="$libgc_configure_args --enable-win32-dllmain=yes"
-		;;
-	*-*-*netbsd*)
-		CPPFLAGS="$CPPFLAGS -D_REENTRANT -DGC_NETBSD_THREADS -D_GNU_SOURCE"
-		libmono_cflags="-D_REENTRANT"
-		LDFLAGS="$LDFLAGS -pthread"
-		CPPFLAGS="$CPPFLAGS -DPLATFORM_BSD"
-		libmono_ldflags="-pthread"
-		need_link_unlink=yes
-		libdl="-ldl"
-		libgc_threads=pthreads
-		with_sigaltstack=no
-		use_sigposix=yes
-		with_sgen_default_concurrent=yes
-		;;
-	*-*-kfreebsd*-gnu)
-		CPPFLAGS="$CPPFLAGS -DGC_FREEBSD_THREADS -D_GNU_SOURCE -D_REENTRANT -DUSE_MMAP -DUSE_MUNMAP -DTHREAD_LOCAL_ALLOC -pthread"
-		libmono_cflags="-D_REENTRANT -DTHREAD_LOCAL_ALLOC -pthread"
-		libmono_ldflags="-lpthread -pthread"
-		libdl="-ldl"
-		libgc_threads=pthreads
-		need_link_unlink=yes
-		with_sigaltstack=no
-		use_sigposix=yes
-		with_sgen_default_concurrent=yes
-		;;
-	*-*-*freebsd*)
-		if test "x$PTHREAD_CFLAGS" = "x"; then
-			CPPFLAGS="$CPPFLAGS -DGC_FREEBSD_THREADS"
-			libmono_cflags=
-		else
-			CPPFLAGS="$CPPFLAGS $PTHREAD_CFLAGS -DGC_FREEBSD_THREADS"
-			libmono_cflags="$PTHREAD_CFLAGS"
-		fi
-		if test "x$PTHREAD_LIBS" = "x"; then
-			LDFLAGS="$LDFLAGS -pthread -L/usr/local/lib"
-			libmono_ldflags="-pthread"
-		else
-			LDFLAGS="$LDFLAGS $PTHREAD_LIBS -L/usr/local/lib"
-			libmono_ldflags="$PTHREAD_LIBS"
-		fi
-		CPPFLAGS="$CPPFLAGS -DPLATFORM_BSD"
-		need_link_unlink=yes
-		AC_DEFINE(PTHREAD_POINTER_ID, 1, [pthread is a pointer])
-		libdl=
-		libgc_threads=pthreads
-		use_sigposix=yes
-		has_dtrace=yes
-		with_sgen_default_concurrent=yes
-		;;
-	*-*-*openbsd*)
-		CPPFLAGS="$CPPFLAGS -D_THREAD_SAFE -DGC_OPENBSD_THREADS -DPLATFORM_BSD -D_REENTRANT -DUSE_MMAP"
-		if test "x$disable_munmap" != "xyes"; then
-		CPPFLAGS="$CPPFLAGS -DUSE_MUNMAP"
-		fi
-		libmono_cflags="-D_THREAD_SAFE -D_REENTRANT"
-		LDFLAGS="$LDFLAGS -pthread"
-		need_link_unlink=yes
-		AC_DEFINE(PTHREAD_POINTER_ID)
-		libdl=
-		libgc_threads=pthreads
-		with_sigaltstack=no
-		use_sigposix=yes
-		with_sgen_default_concurrent=yes
-		;;
-	*-*-linux-android*)
-		platform_android=yes
-		AC_DEFINE(PLATFORM_ANDROID,1,[Targeting the Android platform])
-		AC_DEFINE(TARGET_ANDROID,1,[Targeting the Android platform])
 
-		CPPFLAGS="$CPPFLAGS -DGC_LINUX_THREADS -D_GNU_SOURCE -D_REENTRANT -DUSE_MMAP"
-		if test "x$disable_munmap" != "xyes"; then
-			CPPFLAGS="$CPPFLAGS -DUSE_MUNMAP"
-		fi
-		libmono_cflags="-D_REENTRANT"
-		libdl="-ldl"
-		libgc_threads=pthreads
-		use_sigposix=yes
+#HACK HACK HACK
+CFLAGS="$CFLAGS -D_REENTRANT -D_GNU_SOURCE"
+CPPFLAGS="$CPPFLAGS -D_REENTRANT -DUSE_MMAP -D_GNU_SOURCE"
+libdl="-ldl"
+libgc_threads=pthreads
 
-		with_tls=pthread
-		with_sigaltstack=no
-		with_static_mono=no
-
-		# Android doesn't support boehm, as it's missing <link.h>
-		support_boehm=no
-		with_gc=sgen
-
-		# isinf(3) requires -lm; see isinf check below
-		LDFLAGS="$LDFLAGS -lm"
-
-		# Bionic's <pthread.h> sets PTHREAD_STACK_MIN=2*PAGE_SIZE; doesn't define
-		# PAGE_SIZE; breaks mono/io-layer/collection.c
-		# Bionic doesn't provide S_IWRITE; breaks io-layer/io.c
-		CFLAGS="$CFLAGS -DPAGE_SIZE=4096 -DS_IWRITE=S_IWUSR"
-		CXXFLAGS="$CXXFLAGS -DPAGE_SIZE=4096 -DS_IWRITE=S_IWUSR"
-
-		# to bypass the underscore linker check, can't work when cross-compiling
-		mono_cv_uscore=yes
-		mono_cv_clang=no
-		;;
-	*-*-linux*)
-		CPPFLAGS="$CPPFLAGS -DGC_LINUX_THREADS -D_GNU_SOURCE -D_REENTRANT -DUSE_MMAP"
-		if test "x$disable_munmap" != "xyes"; then
-			CPPFLAGS="$CPPFLAGS -DUSE_MUNMAP"
-		fi
-		libmono_cflags="-D_REENTRANT"
-		libdl="-ldl"
-		libgc_threads=pthreads
-		use_sigposix=yes
-		if test "x$cross_compiling" != "xno"; then
-                	# to bypass the underscore linker check, not
-                	# available during cross-compilation
-                	mono_cv_uscore=no
-                fi
-		case "$host" in
-		aarch64-*)
-			support_boehm=no
-			with_gc=sgen
-			;;
-		powerpc*-*-linux*)
-			# https://bugzilla.novell.com/show_bug.cgi?id=504411
-			disable_munmap=yes
-			;;
-		esac
-		with_sgen_default_concurrent=yes
-		;;
-	*-*-nacl*)
-		echo "nacl no longer supported."
-		exit 1
-		;;
-	*-*-hpux*)
-		CPPFLAGS="$CPPFLAGS -DGC_HPUX_THREADS -D_HPUX_SOURCE -D_XOPEN_SOURCE_EXTENDED -D_REENTRANT"
-		# +ESdbgasm only valid on bundled cc on RISC
-		# silently ignored for ia64
-		if test $GCC != "yes"; then
-			CFLAGS="$CFLAGS +ESdbgasm"
-			# Arrange for run-time dereferencing of null
-			# pointers to produce a SIGSEGV signal.
-			LDFLAGS="$LDFLAGS -z"
-		fi
-		CFLAGS="$CFLAGS +ESdbgasm"
-		LDFLAGS="$LDFLAGS -z"
-		libmono_cflags="-D_REENTRANT"
-		libmono_ldflags="-lpthread"
-		libgc_threads=pthreads
-		need_link_unlink=yes
-		use_sigposix=yes
-		;;
-	*-*-solaris*)
-		CPPFLAGS="$CPPFLAGS -DGC_SOLARIS_THREADS -DGC_SOLARIS_PTHREADS -D_REENTRANT -D_POSIX_PTHREAD_SEMANTICS -DUSE_MMAP -DUSE_MUNMAP -DPLATFORM_SOLARIS"
-		need_link_unlink=yes
-		libmono_cflags="-D_REENTRANT"
-		libgc_threads=pthreads
-		has_dtrace=yes
-		use_sigposix=yes
-		enable_solaris_tar_check=yes
-		;;
-	*-*-darwin*)
-		parallel_mark="Disabled_Currently_Hangs_On_MacOSX"
-		host_darwin=yes
-		target_mach=yes
-		CPPFLAGS="$CPPFLAGS -D_THREAD_SAFE -DGC_MACOSX_THREADS -DPLATFORM_MACOSX -DUSE_MMAP -DUSE_MUNMAP"
-		libmono_cflags="-D_THREAD_SAFE"
-		need_link_unlink=yes
-		AC_DEFINE(PTHREAD_POINTER_ID)
-		AC_DEFINE(USE_MACH_SEMA, 1, [...])
-		libdl=
-		libgc_threads=pthreads
-		has_dtrace=yes
-		if test "x$cross_compiling" = "xyes"; then
-			has_broken_apple_cpp=yes
-		fi
-		dnl Snow Leopard is horribly broken -- it reports itself as i386-apple-darwin*, but
-		dnl its gcc defaults to 64-bit mode.  They have also deprecated the usage of ucontext
-		dnl we need to set some flags to build our 32-bit binaries on 10.6 properly
-		case "$host" in
-			dnl Snow Leopard and newer config.guess reports as this
-			i*86-*-darwin*)
-				BROKEN_DARWIN_FLAGS="-arch i386 -D_XOPEN_SOURCE"
-				BROKEN_DARWIN_CPPFLAGS="-D_XOPEN_SOURCE"
-				CPPFLAGS="$CPPFLAGS $BROKEN_DARWIN_CPPFLAGS"
-				CFLAGS="$CFLAGS $BROKEN_DARWIN_FLAGS"
-				CXXFLAGS="$CXXFLAGS $BROKEN_DARWIN_FLAGS"
-				CCASFLAGS="$CCASFLAGS $BROKEN_DARWIN_FLAGS"
-				CPPFLAGS_FOR_LIBGC="$CPPFLAGS_FOR_LIBGC $BROKEN_DARWIN_CPPFLAGS"
-				CFLAGS_FOR_LIBGC="$CFLAGS_FOR_LIBGC $BROKEN_DARWIN_FLAGS"
-				CPPFLAGS_FOR_EGLIB="$CPPFLAGS_FOR_EGLIB $BROKEN_DARWIN_CPPFLAGS"
-				CFLAGS_FOR_EGLIB="$CFLAGS_FOR_EGLIB $BROKEN_DARWIN_FLAGS"
-				with_sgen_default_concurrent=yes
-				;;
-			x*64-*-darwin*)
-				with_sgen_default_concurrent=yes
-				;;
-			arm*-darwin*)
-				has_dtrace=no
-				;;			
-		esac
-		;;
-	*-*-haiku*)
-		CPPFLAGS="$CPPFLAGS -D_REENTRANT -D_THREAD_SAFE"
-		libmono_cflags="-D_REENTRANT -D_THREAD_SAFE"
-		libdl=
-		LIBS="$LIBS -lnetwork -ltextencoding"
-		need_link_unlink=yes
-		AC_DEFINE(PTHREAD_POINTER_ID)
-		dnl Haiku does not support static TLS with __thread
-		with_tls=pthread
-		dnl Boehm is too much work to backport Haiku support for
-		support_boehm=no
-		libgc_threads=pthreads
-		use_sigposix=yes
-		;;
-	*)
-		AC_MSG_WARN([*** Please add $host to configure.ac checks!])
-		libdl="-ldl"
-		;;
-esac
 AC_MSG_RESULT(ok)
 
 if test x$need_link_unlink = xyes; then
@@ -3036,339 +2798,19 @@ jit_wanted=true
 boehm_supported=true
 BTLS_SUPPORTED=no
 BTLS_PLATFORM=
-case "$host" in
-	mips*)
-		TARGET=MIPS;
-		arch_target=mips;
-		with_tls=pthread;
-		ACCESS_UNALIGNED="no"
 
-		AC_MSG_CHECKING(for mips n32)
-		AC_TRY_COMPILE([],[
-		#if _MIPS_SIM != _ABIN32
-		#error Not mips n32
-		#endif
-		return 0;
-		],[
-		AC_MSG_RESULT(yes)
-		sizeof_register=8
-		],[
-		AC_MSG_RESULT(no)
-		])
-		;;
-	i*86-*-*)
-		TARGET=X86;
-		arch_target=x86;
-		case $host_os in
-		  solaris*)
-			LIBC="libc.so"
-			INTL="libintl.so"
-			if test "x$ac_cv_sizeof_void_p" = "x8"; then
-				TARGET=AMD64
-				arch_target=amd64
-			fi
 
-			# On solaris 10 x86, gcc prints a warning saying 'visibility attribute not supported on this configuration; ignored', but linking fails. A test case:
-			# int astruct __attribute__ ((visibility ("hidden")));
-			# void foo ()
-			# {
-			#	void *p = &astruct;
-			# }
-			# gcc -fPIC --shared -o libfoo.so foo.c
-			# yields:
-			# foo.c:6: warning: visibility attribute not supported in this configuration; ignored
-			# ld: fatal: relocation error: R_386_GOTOFF: file /var/tmp//ccxYR96k.o: symbol astruct: relocation must bind locally
-			have_visibility_hidden=no
-			;;
-		  mingw*|cygwin*)
-			have_visibility_hidden=no		  
-			;;
-		  haiku*)
-			LIBC=libroot.so
-			;;
-		  linux*)
-			AOT_SUPPORTED="yes"
-			BTLS_SUPPORTED=yes
-			BTLS_PLATFORM=i386
-			AC_CHECK_HEADER(stdalign.h,[],[BTLS_SUPPORTED=no])
-			;;
-		  darwin*)
-			AOT_SUPPORTED="yes"
-			BTLS_SUPPORTED=yes
-			BTLS_PLATFORM=i386
-			;;
-		  openbsd*|freebsd*|kfreebsd-gnu*)
-		        ;;
-		esac
-		;;
-	x86_64-*-* | amd64-*-*)
-		TARGET=AMD64;
-		arch_target=amd64;
-		if test "x$ac_cv_sizeof_void_p" = "x4"; then
-			AC_DEFINE(__mono_ilp32__, 1, [64 bit mode with 4 byte longs and pointers])
-			sizeof_register=8
-		fi
-		case $host_os in
-		  linux*)
-			AOT_SUPPORTED="yes"
-			BTLS_SUPPORTED=yes
-			BTLS_PLATFORM=x86_64
-			AC_CHECK_HEADER(stdalign.h,[],[BTLS_SUPPORTED=no])
-			;;
-		  darwin*)
-			AOT_SUPPORTED="yes"
-			BTLS_SUPPORTED=yes
-			BTLS_PLATFORM=x86_64
-			boehm_supported=false
-			;;
-		  openbsd*|freebsd*|kfreebsd-gnu*)
-			;;
-		  mingw*)
-			;;
-		esac
-		;;
-	sparc*-*-*)
-		if test "x$ac_cv_sizeof_void_p" = "x8"; then
-		   TARGET=SPARC64
-		else
-			TARGET=SPARC
-		fi
-		arch_target=sparc;
-		ACCESS_UNALIGNED="no"
-		case $host_os in
-		  linux*) ;;
-		  *)
-			LIBC="libc.so"
-			INTL="libintl.so"
-		esac
-		if test x"$GCC" = xyes; then
-			# We don't support v8 cpus
-			CFLAGS="$CFLAGS -Wno-cast-align -mcpu=v9"
-		fi
-		if test x"$AR" = xfalse; then
-			AC_MSG_ERROR([The required utility 'ar' is not found in your PATH. Usually it can be found in /usr/ccs/bin.])
-		fi
-		;;
-	*-mingw*|*-*-cygwin*)
-		# When this is enabled, it leads to very strange crashes at runtime (gcc-3.4.4)
-		have_visibility_hidden=no
-		INTL="intl"
-		;;
-	macppc-*-openbsd* | powerpc*-*-linux* | powerpc-*-openbsd* | \
-        powerpc-*-sysv* | powerpc-*-darwin* | powerpc-*-netbsd* | powerpc-*-freebsd* )
-		if test "x$ac_cv_sizeof_void_p" = "x8"; then
-			TARGET=POWERPC64;
-			CPPFLAGS="$CPPFLAGS -D__mono_ppc__ -D__mono_ppc64__"
-			CFLAGS="$CFLAGS -mminimal-toc"
-		else
-			TARGET=POWERPC;
-			CPPFLAGS="$CPPFLAGS -D__mono_ppc__"
-		fi
-		arch_target=ppc;
-		case $host_os in
-		  linux*|darwin*)
-			;;
-		esac
-		;;
-	armv7k-*-darwin*)
-		TARGET=ARM;
-		TARGET_SYS=WATCHOS
-		arch_target=arm;
-		arm_fpu=VFP_HARD
-		ACCESS_UNALIGNED="no"
-		CPPFLAGS="$CPPFLAGS -D__ARM_EABI__"
-		;;
 
-	arm*-darwin*)
-		TARGET=ARM;
-		arch_target=arm;
-		ACCESS_UNALIGNED="no"
-		CPPFLAGS="$CPPFLAGS -D__ARM_EABI__"
-		;;
-	arm*-linux*)
-		TARGET=ARM;
-		arch_target=arm;
-		ACCESS_UNALIGNED="no"
-		AOT_SUPPORTED="yes"
-		CPPFLAGS="$CPPFLAGS -D__ARM_EABI__"
-		BTLS_SUPPORTED=yes
-		BTLS_PLATFORM=arm
-		AC_CHECK_HEADER(stdalign.h,[],[BTLS_SUPPORTED=no])
-		case "$target" in
-		arm*-linux*-gnueabi)
-			BTLS_PLATFORM=armsoft
-			;;
-		esac
-		;;
-	arm*-netbsd*-eabi*)
-		TARGET=ARM;
-		arch_target=arm;
-		ACCESS_UNALIGNED="no"
-		CPPFLAGS="$CPPFLAGS -D__ARM_EABI__"
-		;;
-	aarch64-*)
-		# https://lkml.org/lkml/2012/7/15/133
-		TARGET=ARM64
-		arch_target=arm64
-		boehm_supported=false
-		AOT_SUPPORTED="yes"
-		BTLS_SUPPORTED=yes
-		BTLS_PLATFORM=aarch64
-		AC_CHECK_HEADER(stdalign.h,[],[BTLS_SUPPORTED=no])
-		;;
-	s390x-*-linux*)
-		TARGET=S390X;
-		arch_target=s390x;
-		ACCESS_UNALIGNED="yes"
-		CFLAGS="$CFLAGS -mbackchain -D__USE_STRING_INLINES"
-		;;
-esac
 
-HOST=$TARGET
 
-if test "x$host" != "x$target"; then
-   AC_DEFINE(MONO_CROSS_COMPILE,1,[The runtime is compiled for cross-compiling mode])
-   enable_mcs_build=no
-   BTLS_SUPPORTED=no
-   case "$target" in
-   arm*-darwin*)
-		TARGET=ARM;
-		arch_target=arm;
-		ACCESS_UNALIGNED="no"
-		CPPFLAGS="$CPPFLAGS -D__ARM_EABI__"
-		# Can't use tls, since it depends on the runtime detection of tls offsets
-		# in mono-compiler.h
-		with_tls=pthread
-		case "$target" in
-		armv7k-*)
-			arm_fpu=VFP_HARD
-			AC_DEFINE(TARGET_WATCHOS, 1, [...])
-			;;
-		esac		
-		;;
-   powerpc64-ps3-linux-gnu)
-		TARGET=POWERPC64
-		arch_target=powerpc64
-		AC_DEFINE(TARGET_PS3, 1, [...])
-		# It would be better to just use TARGET_POWERPC64, but lots of code already
-		# uses this define
-		AC_DEFINE(__mono_ppc64__, 1, [...])
-		AC_DEFINE(__mono_ilp32__, 1, [64 bit mode with 4 byte longs and pointers])
-		sizeof_register=8
-		target_byte_order=G_BIG_ENDIAN
-		;;
-   powerpc64-xbox360-linux-gnu)
-		TARGET=POWERPC64
-		arch_target=powerpc64
-		AC_DEFINE(TARGET_XBOX360, 1, [...])
-		# It would be better to just use TARGET_POWERPC64, but lots of code already
-		# uses this define
-		sizeof_register=8
-		target_byte_order=G_BIG_ENDIAN
-		;;
-   arm*-linux-*)
-		TARGET=ARM;
-		arch_target=arm;
-		AC_DEFINE(TARGET_ARM, 1, [...])
-		ACCESS_UNALIGNED="no"
-		CPPFLAGS="$CPPFLAGS -D__ARM_EABI__"
-		# Can't use tls, since it depends on the runtime detection of tls offsets
-		# in mono-compiler.h
-		with_tls=pthread
-		target_mach=no
-		case "$target" in
-		armv7l-unknown-linux-gnueabi*)
-			# TEGRA
-			CPPFLAGS="$CPPFLAGS"
-			;;
-   		armv5-*-linux-androideabi*)
-			AC_DEFINE(TARGET_ANDROID, 1, [...])
-			CPPFLAGS="$CPPFLAGS"
-			;;
-   		*-linux-androideabi*)
-			AC_DEFINE(TARGET_ANDROID, 1, [...])
-			CPPFLAGS="$CPPFLAGS"
-			;;
-		esac
-		;;
-   arm*-netbsd*-eabi*)
-		TARGET=ARM;
-		arch_target=arm;
-		AC_DEFINE(TARGET_ARM, 1, [...])
-		ACCESS_UNALIGNED="no"
-		CPPFLAGS="$CPPFLAGS -D__ARM_EABI__"
-		# Can't use tls, since it depends on the runtime detection of tls offsets
-		# in mono-compiler.h
-		with_tls=pthread
-		target_mach=no
-		;;
-   i686*-linux-*)
-		TARGET=X86;
-		arch_target=x86;
-		AC_DEFINE(TARGET_X86, 1, [...])
-		CPPFLAGS="$CPPFLAGS"
-		# Can't use tls, since it depends on the runtime detection of tls offsets
-		# in mono-compiler.h		
-		with_tls=pthread
-		target_mach=no
-
-		case "$target" in
-		*-linux-android*)
-			AC_DEFINE(TARGET_ANDROID, 1, [...])
-			;;
-		esac
-		;;
-   x86_64*-linux-*)
-		TARGET=AMD64;
-		arch_target=amd64;
-		AC_DEFINE(TARGET_AMD64, 1, [...])
-		CPPFLAGS="$CPPFLAGS"
-		# Can't use tls, since it depends on the runtime detection of tls offsets
-		# in mono-compiler.h
-		with_tls=pthread
-		target_mach=no
-
-		case "$target" in
-		*-linux-android*)
-			AC_DEFINE(TARGET_ANDROID, 1, [...])
-			;;
-		esac
-		;;
-   x86_64-ps4-freebsd)
-		TARGET=AMD64;
-		arch_target=amd64;
-		AC_DEFINE(TARGET_AMD64, 1, [...])
-		AC_DEFINE(TARGET_PS4, 1, [...])
-		AC_DEFINE(DISABLE_HW_TRAPS, 1, [...])
-		CPPFLAGS="$CPPFLAGS"
-		# Can't use tls, since it depends on the runtime detection of tls offsets
-		# in mono-compiler.h
-		with_tls=pthread
-		target_mach=no
-		target_win32=no
-		;;
-   aarch64*-linux-*)
-		TARGET=ARM64;
-		arch_target=arm64;
-		AC_DEFINE(TARGET_ARM64, 1, [...])
-		CPPFLAGS="$CPPFLAGS"
-		# Can't use tls, since it depends on the runtime detection of tls offsets
-		# in mono-compiler.h
-		with_tls=pthread
-		target_mach=no
-		case "$target" in
-		*-linux-android*)
-			AC_DEFINE(TARGET_ANDROID, 1, [...])
-			;;
-		esac
-		;;
-	aarch64-*)
-		TARGET=ARM64
-		;;
-	*)
-		AC_MSG_ERROR([Cross compiling is not supported for target $target])
-	esac
-fi
+TARGET=WASM
+HOST=WASM
+arch_target=wasm
+AC_DEFINE(MONO_CROSS_COMPILE,1,[The runtime is compiled for cross-compiling mode])
+enable_mcs_build=no
+BTLS_SUPPORTED=no
+with_tls=pthread
+target_mach=no
 
 case "$TARGET" in
 X86)
@@ -3401,6 +2843,9 @@ SPARC)
 	;;
 SPARC64)
 	AC_DEFINE(TARGET_SPARC64, 1, [...])
+	;;
+WASM)
+	AC_DEFINE(TARGET_WASM, 1, [...])
 	;;
 esac
 
@@ -3435,6 +2880,9 @@ SPARC)
 	;;
 SPARC64)
 	AC_DEFINE(HOST_SPARC64, 1, [...])
+	;;
+WASM)
+	AC_DEFINE(HOST_WASM, 1, [...])
 	;;
 esac
 
@@ -4127,10 +3575,12 @@ AM_CONDITIONAL(POWERPC64, test x$TARGET = xPOWERPC64)
 AM_CONDITIONAL(ARM, test x$TARGET = xARM)
 AM_CONDITIONAL(ARM64, test x$TARGET = xARM64)
 AM_CONDITIONAL(S390X, test x$TARGET = xS390X)
+AM_CONDITIONAL(WASM, test x$TARGET = xWASM)
 AM_CONDITIONAL(HOST_X86, test x$HOST = xX86)
 AM_CONDITIONAL(HOST_AMD64, test x$HOST = xAMD64)
 AM_CONDITIONAL(HOST_ARM, test x$HOST = xARM)
 AM_CONDITIONAL(HOST_ARM64, test x$HOST = xARM64)
+AM_CONDITIONAL(HOST_WASM, test x$HOST = xWASM)
 AM_CONDITIONAL(CROSS_COMPILE, test "x$host" != "x$target")
 
 AC_SUBST(LIBC)

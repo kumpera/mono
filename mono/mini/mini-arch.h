@@ -5,7 +5,9 @@
 #ifndef __MONO_MINI_ARCH_H__
 #define __MONO_MINI_ARCH_H__
 
-#ifdef TARGET_X86
+#ifdef TARGET_WASM
+#include "mini-wasm.h"
+#elif TARGET_X86
 #include "mini-x86.h"
 #elif defined(TARGET_AMD64)
 #include "mini-amd64.h"

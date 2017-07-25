@@ -19,7 +19,7 @@
 #ifndef HAVE_INET_PTON
 
 int
-inet_pton (int family, const char *address, void *inaddrp)
+inet_pton2 (int family, const char *address, void *inaddrp)
 {
 	if (family == AF_INET) {
 #ifdef HAVE_INET_ATON

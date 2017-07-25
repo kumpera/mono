@@ -1,4 +1,4 @@
-#!/usr/bin/perl -w
+	#!/usr/bin/perl -w
 
 # perl replacement of genmdesc.c for use when cross-compiling
 
@@ -20,7 +20,7 @@ sub INST_MAX   () {return 6;}
 
 # this must include all the #defines used in mini-ops.h
 my @defines = qw (__i386__ __x86_64__ __ppc__ __powerpc__ __ppc64__ __arm__ 
-	__sparc__ sparc __s390__ s390 __alpha__ __mips__ __aarch64__);
+	__sparc__ sparc __s390__ s390 __alpha__ __mips__ __aarch64__ __wasm__);
 my %table =();
 my %template_table =();
 my @opcodes = ();
@@ -76,6 +76,9 @@ sub load_opcodes
 	die "$arch arch is not supported.\n" unless $arch_found;
 
 	my $arch_define = $arch;
+	if ($arch =~ "__wasm__") {
+		$arch_define = "TARGET_WASM";
+	}
 	if ($arch =~ "__i386__") {
 		$arch_define = "TARGET_X86";
 	}

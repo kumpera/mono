@@ -9,6 +9,7 @@ AM_CPPFLAGS = \
 	-I$(top_srcdir) 	\
 	$(GLIB_CFLAGS)
 
+if !WASM
 if !HOST_WIN32
 if !DISABLE_LIBRARIES
 if !DISABLE_PROFILER
@@ -53,6 +54,7 @@ if !ENABLE_COOP
 check_targets = testlog
 endif
 
+endif
 endif
 endif
 endif
