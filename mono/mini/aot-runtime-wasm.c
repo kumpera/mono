@@ -54,6 +54,9 @@ wasm_throw_corlib_exception (void)
 static char
 type_to_c (MonoType *t)
 {
+	if (t->byref)
+		return 'I';
+
 handle_enum:
 	switch (t->type) {
 	case MONO_TYPE_BOOLEAN:
@@ -88,14 +91,32 @@ handle_enum:
 			goto handle_enum;
 		}
 
-		printf ("struct is %s\n", mono_type_full_name (t));
-		return 'S';
+		// printf ("struct is %s\n", mono_type_full_name (t));
+		// return 'S';
+		return 'I';
 	case MONO_TYPE_GENERICINST:
-		return 'G';
+		if (t->data.klass->valuetype)
+			return 'S';
+		return 'I';
 	default:
 		g_warning ("CANT TRANSLATE %s", mono_type_full_name (t));
 		return 'X';
 	}
+}
+
+
+static void
+wasm_invoke_vi (void *target_func, InterpMethodArguments *margs)
+{
+	void (*func)(gpointer a) = target_func;
+	func (margs->iargs [0]);
+}
+
+static void
+wasm_invoke_vii (void *target_func, InterpMethodArguments *margs)
+{
+	void (*func)(gpointer a, gpointer b) = target_func;
+	func (margs->iargs [0], margs->iargs [1]);
 }
 
 static void
@@ -106,10 +127,24 @@ wasm_invoke_viii (void *target_func, InterpMethodArguments *margs)
 }
 
 static void
-wasm_invoke_vi (void *target_func, InterpMethodArguments *margs)
+wasm_invoke_viiii (void *target_func, InterpMethodArguments *margs)
 {
-	void (*func)(gpointer a) = target_func;
-	func (margs->iargs [0]);
+	void (*func)(gpointer a, gpointer b, gpointer c, gpointer d) = target_func;
+	func (margs->iargs [0], margs->iargs [1], margs->iargs [2], margs->iargs [3]);
+}
+
+static void
+wasm_invoke_viiiii (void *target_func, InterpMethodArguments *margs)
+{
+	void (*func)(gpointer a, gpointer b, gpointer c, gpointer d, gpointer e) = target_func;
+	func (margs->iargs [0], margs->iargs [1], margs->iargs [2], margs->iargs [3], margs->iargs [4]);
+}
+
+static void
+wasm_invoke_viiiiii (void *target_func, InterpMethodArguments *margs)
+{
+	void (*func)(gpointer a, gpointer b, gpointer c, gpointer d, gpointer e, gpointer f) = target_func;
+	func (margs->iargs [0], margs->iargs [1], margs->iargs [2], margs->iargs [3], margs->iargs [4], margs->iargs [5]);
 }
 
 static void
@@ -136,12 +171,19 @@ wasm_invoke_iii (void *target_func, InterpMethodArguments *margs)
 	*(int*)margs->retval = res;
 }
 
-
 static void
 wasm_invoke_iiii (void *target_func, InterpMethodArguments *margs)
 {
 	int (*func)(gpointer a, gpointer b, gpointer c) = target_func;
 	int res = func (margs->iargs [0], margs->iargs [1], margs->iargs [2]);
+	*(int*)margs->retval = res;
+}
+
+static void
+wasm_invoke_iiiii (void *target_func, InterpMethodArguments *margs)
+{
+	int (*func)(gpointer a, gpointer b, gpointer c, gpointer d) = target_func;
+	int res = func (margs->iargs [0], margs->iargs [1], margs->iargs [2], margs->iargs [3]);
 	*(int*)margs->retval = res;
 }
 
@@ -153,6 +195,47 @@ wasm_invoke_iiiiii (void *target_func, InterpMethodArguments *margs)
 	*(int*)margs->retval = res;
 }
 
+typedef union {
+	gint64 l;
+	struct {
+		gint32 lo;
+		gint32 hi;
+	} pair;
+} interp_pair;
+
+static void
+wasm_invoke_ll (void *target_func, InterpMethodArguments *margs)
+{
+	gint64 (*func)(gint64 a) = target_func;
+
+	interp_pair p;
+	p.pair.lo = (gint32)margs->iargs [0];
+	p.pair.hi = (gint32)margs->iargs [1];
+
+	gint64 res = func (p.l);
+	*(gint64*)margs->retval = res;
+}
+
+static void
+wasm_invoke_li (void *target_func, InterpMethodArguments *margs)
+{
+	gint64 (*func)(int a) = target_func;
+	gint64 res = func (margs->iargs [0]);
+	*(gint64*)margs->retval = res;
+}
+
+static void
+wasm_invoke_lil (void *target_func, InterpMethodArguments *margs)
+{
+	gint64 (*func)(int a, gint64 b) = target_func;
+
+	interp_pair p;
+	p.pair.lo = (gint32)margs->iargs [1];
+	p.pair.hi = (gint32)margs->iargs [2];
+
+	gint64 res = func (margs->iargs [0], p.l);
+	*(gint64*)margs->retval = res;
+}
 
 static void
 wasm_enter_icall_trampoline (void *target_func, InterpMethodArguments *margs)
@@ -175,8 +258,18 @@ wasm_enter_icall_trampoline (void *target_func, InterpMethodArguments *margs)
 
 	// printf ("cookie %s (%d)\n", cookie, c_count);
 
-	if (!strcmp ("VIII", cookie))
+	if (!strcmp ("VI", cookie))
+		wasm_invoke_vi (target_func, margs);
+	else if (!strcmp ("VII", cookie))
+		wasm_invoke_vii (target_func, margs);
+	else if (!strcmp ("VIII", cookie))
 		wasm_invoke_viii (target_func, margs);
+	else if (!strcmp ("VIIII", cookie))
+		wasm_invoke_viiii (target_func, margs);
+	else if (!strcmp ("VIIIII", cookie))
+		wasm_invoke_viiiii (target_func, margs);
+	else if (!strcmp ("VIIIIII", cookie))
+		wasm_invoke_viiiiii (target_func, margs);
 	else if (!strcmp ("I", cookie))
 		wasm_invoke_i (target_func, margs);
 	else if (!strcmp ("II", cookie))
@@ -185,10 +278,16 @@ wasm_enter_icall_trampoline (void *target_func, InterpMethodArguments *margs)
 		wasm_invoke_iii (target_func, margs);
 	else if (!strcmp ("IIII", cookie))
 		wasm_invoke_iiii (target_func, margs);
+	else if (!strcmp ("IIIII", cookie))
+		wasm_invoke_iiiii (target_func, margs);
 	else if (!strcmp ("IIIIII", cookie))
 		wasm_invoke_iiiiii (target_func, margs);
-	else if (!strcmp ("VI", cookie))
-		wasm_invoke_vi (target_func, margs);
+	else if (!strcmp ("LL", cookie))
+		wasm_invoke_ll (target_func, margs);
+	else if (!strcmp ("LI", cookie))
+		wasm_invoke_li (target_func, margs);
+	else if (!strcmp ("LIL", cookie))
+		wasm_invoke_lil (target_func, margs);
 	else {
 		printf ("CANNOT HANDLE COOKIE %s\n", cookie);
 		g_assert (0);

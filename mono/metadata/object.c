@@ -5235,7 +5235,9 @@ mono_object_new_checked (MonoDomain *domain, MonoClass *klass, MonoError *error)
 
 	MonoVTable *vtable;
 
-	vtable = mono_class_vtable (domain, klass);
+	vtable = mono_class_vtable_full (domain, klass, error);
+	if (!is_ok (error))
+		return NULL;
 	g_assert (vtable); /* FIXME don't swallow the error */
 
 	MonoObject *o = mono_object_new_specific_checked (vtable, error);

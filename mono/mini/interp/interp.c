@@ -2315,10 +2315,13 @@ ves_exec_method_with_context (MonoInvocation *frame, ThreadContext *context, uns
 		ip = start_with_ip;
 	}
 
-	char *m_name = mono_method_full_name (rtm->method, 1);
-	// printf ("::: RUNNING :: %s\n", m_name);
-	g_free (m_name);
-
+	// static int method_count;
+	// ++method_count;
+	// if ((method_count % 100) == 0) {
+	// 	char *m_name = mono_method_full_name (rtm->method, 1);
+	// 	printf ("::: RUNNING [%d]:: %s\n", method_count, m_name);
+	// 	g_free (m_name);
+	// }
 	sp = frame->stack = (stackval *) ((char *) frame->args + rtm->args_size);
 	vt_sp = (unsigned char *) sp + rtm->stack_size;
 #if DEBUG_INTERP
