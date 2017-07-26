@@ -99,14 +99,21 @@ handle_enum:
 }
 
 static void
-invoke_viii (void *target_func, InterpMethodArguments *margs)
+wasm_invoke_viii (void *target_func, InterpMethodArguments *margs)
 {
 	void (*func)(gpointer a, gpointer b, gpointer c) = target_func;
 	func (margs->iargs [0], margs->iargs [1], margs->iargs [2]);
 }
 
 static void
-invoke_i (void *target_func, InterpMethodArguments *margs)
+wasm_invoke_vi (void *target_func, InterpMethodArguments *margs)
+{
+	void (*func)(gpointer a) = target_func;
+	func (margs->iargs [0]);
+}
+
+static void
+wasm_invoke_i (void *target_func, InterpMethodArguments *margs)
 {
 	int (*func)(void) = target_func;
 	int res = func ();
@@ -114,12 +121,39 @@ invoke_i (void *target_func, InterpMethodArguments *margs)
 }
 
 static void
-invoke_iii (void *target_func, InterpMethodArguments *margs)
+wasm_invoke_ii (void *target_func, InterpMethodArguments *margs)
+{
+	int (*func)(gpointer a) = target_func;
+	int res = func (margs->iargs [0]);
+	*(int*)margs->retval = res;
+}
+
+static void
+wasm_invoke_iii (void *target_func, InterpMethodArguments *margs)
 {
 	int (*func)(gpointer a, gpointer b) = target_func;
 	int res = func (margs->iargs [0], margs->iargs [1]);
 	*(int*)margs->retval = res;
 }
+
+
+static void
+wasm_invoke_iiii (void *target_func, InterpMethodArguments *margs)
+{
+	int (*func)(gpointer a, gpointer b, gpointer c) = target_func;
+	int res = func (margs->iargs [0], margs->iargs [1], margs->iargs [2]);
+	*(int*)margs->retval = res;
+}
+
+static void
+wasm_invoke_iiiiii (void *target_func, InterpMethodArguments *margs)
+{
+	int (*func)(gpointer a, gpointer b, gpointer c, gpointer d, gpointer e) = target_func;
+	int res = func (margs->iargs [0], margs->iargs [1], margs->iargs [2], margs->iargs [3], margs->iargs [4]);
+	*(int*)margs->retval = res;
+}
+
+
 static void
 wasm_enter_icall_trampoline (void *target_func, InterpMethodArguments *margs)
 {
@@ -139,14 +173,22 @@ wasm_enter_icall_trampoline (void *target_func, InterpMethodArguments *margs)
 		cookie [1 + sig->hasthis + i ] = type_to_c (sig->params [i]);
 	cookie [c_count] = 0;
 
-	printf ("cookie %s (%d)\n", cookie, c_count);
+	// printf ("cookie %s (%d)\n", cookie, c_count);
 
 	if (!strcmp ("VIII", cookie))
-		invoke_viii (target_func, margs);
+		wasm_invoke_viii (target_func, margs);
 	else if (!strcmp ("I", cookie))
-		invoke_i (target_func, margs);
+		wasm_invoke_i (target_func, margs);
+	else if (!strcmp ("II", cookie))
+		wasm_invoke_ii (target_func, margs);
 	else if (!strcmp ("III", cookie))
-		invoke_iii (target_func, margs);
+		wasm_invoke_iii (target_func, margs);
+	else if (!strcmp ("IIII", cookie))
+		wasm_invoke_iiii (target_func, margs);
+	else if (!strcmp ("IIIIII", cookie))
+		wasm_invoke_iiiiii (target_func, margs);
+	else if (!strcmp ("VI", cookie))
+		wasm_invoke_vi (target_func, margs);
 	else {
 		printf ("CANNOT HANDLE COOKIE %s\n", cookie);
 		g_assert (0);

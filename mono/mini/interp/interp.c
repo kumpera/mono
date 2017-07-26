@@ -998,7 +998,7 @@ ves_pinvoke_method (MonoInvocation *frame, MonoMethodSignature *sig, MonoFuncV a
 
 	g_assert (!frame->runtime_method);
 	if (!mono_interp_enter_icall_trampoline) {
-		printf ("LOADING icall tramp to invoke %p\n", addr);
+		// printf ("LOADING icall tramp to invoke %p\n", addr);
 		if (mono_aot_only) {
 			mono_interp_enter_icall_trampoline = mono_aot_get_trampoline ("enter_icall_trampoline");
 		} else {
@@ -1009,7 +1009,7 @@ ves_pinvoke_method (MonoInvocation *frame, MonoMethodSignature *sig, MonoFuncV a
 		}
 	}
 
-	printf ("***1\n");
+	// printf ("***1\n");
 	InterpMethodArguments *margs = build_args_from_sig (sig, frame);
 #if DEBUG_INTERP
 	g_print ("ICALL: mono_interp_enter_icall_trampoline = %p, addr = %p\n", mono_interp_enter_icall_trampoline, addr);
@@ -1020,11 +1020,11 @@ ves_pinvoke_method (MonoInvocation *frame, MonoMethodSignature *sig, MonoFuncV a
 	context->managed_code = 0;
 
 	interp_push_lmf (&ext, frame);
-	printf ("***2\n");
+	// printf ("***2\n");
 
 	mono_interp_enter_icall_trampoline (addr, margs);
 
-	printf ("***3\n");
+	// printf ("***3\n");
 
 	interp_pop_lmf (&ext);
 
@@ -1044,7 +1044,7 @@ ves_pinvoke_method (MonoInvocation *frame, MonoMethodSignature *sig, MonoFuncV a
 	context->current_frame = old_frame;
 	context->env_frame = old_env_frame;
 	context->current_env = old_env;
-	printf ("***4\n");
+	// printf ("***4\n");
 
 	g_free (margs->iargs);
 	g_free (margs->fargs);
@@ -1669,6 +1669,7 @@ do_icall (ThreadContext *context, int op, stackval *sp, gpointer ptr)
 		return sp;
 	}
 
+	// printf ("---DO ICALL %x -> %p\n", op, ptr);
 	context->env_frame = context->current_frame;
 	context->current_env = &env;
 	context->managed_code = 0;
@@ -1676,23 +1677,28 @@ do_icall (ThreadContext *context, int op, stackval *sp, gpointer ptr)
 	switch (op) {
 	case MINT_ICALL_V_V: {
 		void (*func)(void) = ptr;
-        	func ();
+		// printf ("\tfunc %p\n", func);
+        func ();
 		break;
 	}
 	case MINT_ICALL_V_P: {
 		gpointer (*func)(void) = ptr;
+		// printf ("\tV_P %p\n", func);
 		sp++;
 		sp [-1].data.p = func ();
 		break;
 	}
 	case MINT_ICALL_P_V: {
 		void (*func)(gpointer) = ptr;
-        	func (sp [-1].data.p);
+		// printf ("\tP_V %p\n", func);
+
+        func (sp [-1].data.p);
 		sp --;
 		break;
 	}
 	case MINT_ICALL_P_P: {
 		gpointer (*func)(gpointer) = ptr;
+		// printf ("\tP_P %p\n", func);
 		sp [-1].data.p = func (sp [-1].data.p);
 		break;
 	}
@@ -2226,7 +2232,7 @@ static int opcode_counts[512];
 #endif
 
 #ifdef __GNUC__
-#define USE_COMPUTED_GOTO 1
+// #define USE_COMPUTED_GOTO 1
 #endif
 #if USE_COMPUTED_GOTO
 #define MINT_IN_SWITCH(op) COUNT_OP(op); goto *in_labels[op];
@@ -2308,6 +2314,11 @@ ves_exec_method_with_context (MonoInvocation *frame, ThreadContext *context, uns
 	} else {
 		ip = start_with_ip;
 	}
+
+	char *m_name = mono_method_full_name (rtm->method, 1);
+	// printf ("::: RUNNING :: %s\n", m_name);
+	g_free (m_name);
+
 	sp = frame->stack = (stackval *) ((char *) frame->args + rtm->args_size);
 	vt_sp = (unsigned char *) sp + rtm->stack_size;
 #if DEBUG_INTERP
@@ -2331,6 +2342,9 @@ ves_exec_method_with_context (MonoInvocation *frame, ThreadContext *context, uns
 		/* g_assert (sp >= frame->stack); */
 		/* g_assert(vt_sp - vtalloc <= rtm->vt_stack_size); */
 		DUMP_INSTR();
+		// printf ("running %x:\n", *ip);
+
+		// printf ("running %x: ", *ip); mono_interp_dis_mintop(rtm->code, ip);printf ("\n");
 		MINT_IN_SWITCH (*ip) {
 		MINT_IN_CASE(MINT_INITLOCALS)
 			memset (locals, 0, rtm->locals_size);
@@ -2580,7 +2594,7 @@ ves_exec_method_with_context (MonoInvocation *frame, ThreadContext *context, uns
 				*sp = *endsp;
 				sp++;
 			}
-			printf (">5\n");
+			// printf (">5\n");
 			MINT_IN_BREAK;
 		}
 		MINT_IN_CASE(MINT_CALL) {
@@ -4467,6 +4481,7 @@ array_constructed:
 		MINT_IN_CASE(MINT_ICALL_PI_P)
 		MINT_IN_CASE(MINT_ICALL_PPP_V)
 		MINT_IN_CASE(MINT_ICALL_PPI_V)
+			// printf ("REALLY?!?!?! %x\n", *ip);
 			sp = do_icall (context, *ip, sp, rtm->data_items [*(guint16 *)(ip + 1)]);
 			if (*mono_thread_interruption_request_flag ()) {
 				MonoException *exc = mono_thread_interruption_checkpoint ();

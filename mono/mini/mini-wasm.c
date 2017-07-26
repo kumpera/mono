@@ -17,19 +17,19 @@ mono_arch_get_delegate_virtual_invoke_impl (MonoMethodSignature *sig, MonoMethod
 void
 mono_arch_cpu_init (void)
 {
-	printf ("mono_arch_cpu_init\n");
+	// printf ("mono_arch_cpu_init\n");
 }
 
 void
 mono_arch_finish_init (void)
 {
-	printf ("mono_arch_finish_init\n");
+	// printf ("mono_arch_finish_init\n");
 }
 
 void
 mono_arch_init (void)
 {
-	printf ("mono_arch_init\n");
+	// printf ("mono_arch_init\n");
 }
 
 void
@@ -223,7 +223,7 @@ sigsuspend(const sigset_t *sigmask)
 
 int getdtablesize (void)
 {
-	printf ("getdtablesize\n");
+	// printf ("getdtablesize\n");
 	return 10;
 }
 

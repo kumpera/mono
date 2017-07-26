@@ -5169,7 +5169,6 @@ no_trampolines (void)
 gpointer
 mono_aot_get_trampoline_full (const char *name, MonoTrampInfo **out_tinfo)
 {
-	printf ("mono_aot_get_trampoline_full %s\n", name);
 	MonoAotModule *amodule = get_mscorlib_aot_module ();
 
 	if (mono_llvm_only) {
@@ -5189,7 +5188,7 @@ mono_aot_get_trampoline (const char *name)
 	gpointer code;
 
 	code =  mono_aot_get_trampoline_full (name, &out_tinfo);
-	printf ("name %s code %p -> %p\n", name, code, out_tinfo);
+	// printf ("name %s code %p -> %p\n", name, code, out_tinfo);
 	mono_aot_tramp_info_register (out_tinfo, NULL);
 
 	return code;

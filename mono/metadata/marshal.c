@@ -8000,7 +8000,8 @@ mono_marshal_get_native_wrapper (MonoMethod *method, gboolean check_exceptions, 
 	}
 
 	/* hack - redirect certain string constructors to CreateString */
-	if (piinfo->addr == ves_icall_System_String_ctor_RedirectToCreateString) {
+	if (piinfo->addr == ves_icall_System_String_ctor_RedirectToCreateString && method->string_ctor) {
+		printf ("----THE PIINFO IS FOR %s\n", mono_method_full_name (method,1));
 		g_assert (!pinvoke);
 		g_assert (method->string_ctor);
 		g_assert (sig->hasthis);

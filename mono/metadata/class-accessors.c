@@ -28,6 +28,8 @@ typedef enum {
 MonoGenericClass*
 mono_class_get_generic_class (MonoClass *klass)
 {
+	if (!mono_class_is_ginst (klass))
+		printf ("Trying to get the generic class of %p %s:%s\n", klass, klass->name_space, klass->name);
 	g_assert (mono_class_is_ginst (klass));
 	return ((MonoClassGenericInst*)klass)->generic_class;
 }

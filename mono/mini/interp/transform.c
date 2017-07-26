@@ -3440,7 +3440,7 @@ generate (MonoMethod *method, RuntimeMethod *rtm, unsigned char *is_bb_start, Mo
 					td.ip += 5;
 					func = mono_method_get_wrapper_data (method, token);
 					info = mono_find_jit_icall_by_name (func);
-					// printf ("\tINVOKE %p -> %s\n", info, info->name, info->func);
+					// printf ("\tINVOKE func %s info %p -> name %s -> func %p\n", func, info, info->name, info->func);
 					g_assert (info);
 
 					CHECK_STACK (&td, info->sig->param_count);
@@ -3484,7 +3484,7 @@ generate (MonoMethod *method, RuntimeMethod *rtm, unsigned char *is_bb_start, Mo
 					if (func == mono_ftnptr_to_delegate) {
 						g_error ("TODO: ?");
 					}
-					ADD_CODE(&td, get_data_item_index (&td, func));
+					ADD_CODE(&td, get_data_item_index (&td, info->func));
 					td.sp -= info->sig->param_count;
 
 					if (!MONO_TYPE_IS_VOID (info->sig->ret)) {

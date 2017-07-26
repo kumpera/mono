@@ -64,7 +64,7 @@ mono_dl_convert_flags (int flags)
 void *
 mono_dl_open_file (const char *file, int flags)
 {
-	printf ("mono_dl_open_file -> %s %x\n", file, flags);
+	// printf ("mono_dl_open_file -> %s %x\n", file, flags);
 	return NULL;
 }
 
