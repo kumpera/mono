@@ -28,7 +28,8 @@ mono_arch_patch_plt_entry (guint8 *code, gpointer *got, mgreg_t *regs, guint8 *a
 gpointer
 mono_arch_get_enter_icall_trampoline (MonoTrampInfo **info)
 {
-	g_error ("mono_arch_get_enter_icall_trampoline");
+	printf ("mono_arch_get_enter_icall_trampoline");
+	g_assert (0);
 	return NULL;
 }
 

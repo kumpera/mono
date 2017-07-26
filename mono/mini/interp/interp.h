@@ -16,6 +16,7 @@ struct _InterpMethodArguments {
 	double *fargs;
 	gpointer *retval;
 	size_t is_float_ret;
+	MonoMethodSignature *sig;
 };
 
 typedef struct _InterpMethodArguments InterpMethodArguments;

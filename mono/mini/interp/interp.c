@@ -794,6 +794,8 @@ static InterpMethodArguments* build_args_from_sig (MonoMethodSignature *sig, Mon
 	int i8_align = mono_arm_i8_align ();
 #endif
 
+	margs->sig = sig;
+
 	if (sig->hasthis)
 		margs->ilen++;
 
@@ -996,6 +998,7 @@ ves_pinvoke_method (MonoInvocation *frame, MonoMethodSignature *sig, MonoFuncV a
 
 	g_assert (!frame->runtime_method);
 	if (!mono_interp_enter_icall_trampoline) {
+		printf ("LOADING icall tramp to invoke %p\n", addr);
 		if (mono_aot_only) {
 			mono_interp_enter_icall_trampoline = mono_aot_get_trampoline ("enter_icall_trampoline");
 		} else {
@@ -1006,6 +1009,7 @@ ves_pinvoke_method (MonoInvocation *frame, MonoMethodSignature *sig, MonoFuncV a
 		}
 	}
 
+	printf ("***1\n");
 	InterpMethodArguments *margs = build_args_from_sig (sig, frame);
 #if DEBUG_INTERP
 	g_print ("ICALL: mono_interp_enter_icall_trampoline = %p, addr = %p\n", mono_interp_enter_icall_trampoline, addr);
@@ -1016,8 +1020,11 @@ ves_pinvoke_method (MonoInvocation *frame, MonoMethodSignature *sig, MonoFuncV a
 	context->managed_code = 0;
 
 	interp_push_lmf (&ext, frame);
+	printf ("***2\n");
 
 	mono_interp_enter_icall_trampoline (addr, margs);
+
+	printf ("***3\n");
 
 	interp_pop_lmf (&ext);
 
@@ -1037,6 +1044,7 @@ ves_pinvoke_method (MonoInvocation *frame, MonoMethodSignature *sig, MonoFuncV a
 	context->current_frame = old_frame;
 	context->env_frame = old_env_frame;
 	context->current_env = old_env;
+	printf ("***4\n");
 
 	g_free (margs->iargs);
 	g_free (margs->fargs);
@@ -2572,6 +2580,7 @@ ves_exec_method_with_context (MonoInvocation *frame, ThreadContext *context, uns
 				*sp = *endsp;
 				sp++;
 			}
+			printf (">5\n");
 			MINT_IN_BREAK;
 		}
 		MINT_IN_CASE(MINT_CALL) {
