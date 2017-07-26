@@ -5189,6 +5189,7 @@ mono_aot_get_trampoline (const char *name)
 	gpointer code;
 
 	code =  mono_aot_get_trampoline_full (name, &out_tinfo);
+	printf ("name %s code %p -> %p\n", name, code, out_tinfo);
 	mono_aot_tramp_info_register (out_tinfo, NULL);
 
 	return code;

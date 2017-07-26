@@ -8071,7 +8071,6 @@ static GHashTable *jit_icall_hash_addr = NULL;
 void
 mono_icall_init (void)
 {
-	printf ("oi\n");
 #ifndef DISABLE_ICALL_TABLES
 	int i = 0;
 
@@ -8099,11 +8098,9 @@ mono_icall_init (void)
 			}
 		}
 	}
-	printf ("hello\n");
 #endif
 
 	icall_hash = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
-	printf ("---33\n");
 	mono_os_mutex_init (&icall_mutex);
 }
 
@@ -8650,10 +8647,14 @@ mono_find_jit_icall_by_addr (gconstpointer addr)
 	MonoJitICallInfo *info;
 	g_assert (jit_icall_hash_addr);
 
+	printf ("looking up icalls %p\n", addr);
 	mono_icall_lock ();
 	info = (MonoJitICallInfo *)g_hash_table_lookup (jit_icall_hash_addr, (gpointer)addr);
 	mono_icall_unlock ();
-
+	//
+	// if (info) {
+	// 	printf ("\tfound %p -> %s %s\n", info, info->name, info->c_symbol);
+	// }
 	return info;
 }
 
@@ -8692,6 +8693,7 @@ void
 mono_register_jit_icall_wrapper (MonoJitICallInfo *info, gconstpointer wrapper)
 {
 	mono_icall_lock ();
+	// printf ("Inserting %p -> %s\n", wrapper, info->name);
 	g_hash_table_insert (jit_icall_hash_addr, (gpointer)wrapper, info);
 	mono_icall_unlock ();
 }
@@ -8736,6 +8738,7 @@ mono_register_jit_icall_full (gconstpointer func, const char *name, MonoMethodSi
 
 	g_hash_table_insert (jit_icall_hash_name, (gpointer)info->name, info);
 	g_hash_table_insert (jit_icall_hash_addr, (gpointer)func, info);
+	// printf ("Inserting/2 %p -> %s\n", func, info->name);
 
 	mono_icall_unlock ();
 	return info;

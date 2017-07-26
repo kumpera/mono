@@ -999,7 +999,7 @@ mono_jit_exec (MonoDomain *domain, MonoAssembly *assembly, int argc, char *argv[
 	guint32 entry = mono_image_get_entry_point (image);
 
 	if (!entry) {
-		g_print ("Assembly '%s' doesn't have an entry point.\n", mono_image_get_filename (image));
+		g_print ("Assemblyks '%s' doesn't have an entry point.\n", mono_image_get_filename (image));
 		/* FIXME: remove this silly requirement. */
 		mono_environment_exitcode_set (1);
 		return 1;
@@ -2379,6 +2379,11 @@ mono_jit_set_aot_mode (MonoAotMode mode)
 	if (mono_aot_mode == MONO_AOT_MODE_INTERP) {
 		mono_aot_only = TRUE;
 		mono_use_interpreter = TRUE;
+	}
+	if (mono_aot_mode == MONO_AOT_MODE_INTERP_LLVMONLY) {
+		mono_aot_only = TRUE;
+		mono_use_interpreter = TRUE;
+		mono_llvm_only = TRUE;
 	}
 }
 

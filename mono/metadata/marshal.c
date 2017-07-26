@@ -1675,6 +1675,7 @@ emit_ptr_to_object_conv (MonoMethodBuilder *mb, MonoType *type, MonoMarshalConv 
 static gpointer
 conv_to_icall (MonoMarshalConv conv, int *ind_store_type)
 {
+	g_error ("not conv_to_icall");
 	int dummy;
 	if (!ind_store_type)
 		ind_store_type = &dummy;
@@ -2413,9 +2414,11 @@ emit_struct_free (MonoMethodBuilder *mb, MonoClass *klass, int struct_var)
 }
 
 static void
-emit_thread_interrupt_checkpoint_call (MonoMethodBuilder *mb, gpointer checkpoint_func)
+emit_thread_interrupt_checkpoint_call (MonoMethodBuilder *mb, const char *checkpoint_func_name)
 {
 	int pos_noabort, pos_noex;
+
+	// printf (">mono_thread_force_interruption_checkpoint_noraise cp func %p\n", checkpoint_func_name);
 
 	mono_mb_emit_byte (mb, MONO_CUSTOM_PREFIX);
 	mono_mb_emit_byte (mb, CEE_MONO_LDPTR_INT_REQ_FLAG);
@@ -2425,7 +2428,8 @@ emit_thread_interrupt_checkpoint_call (MonoMethodBuilder *mb, gpointer checkpoin
 	mono_mb_emit_byte (mb, MONO_CUSTOM_PREFIX);
 	mono_mb_emit_byte (mb, CEE_MONO_NOT_TAKEN);
 
-	mono_mb_emit_icall (mb, checkpoint_func);
+	mono_mb_emit_icall_by_name (mb, checkpoint_func_name);
+
 	/* Throw the exception returned by the checkpoint function, if any */
 	mono_mb_emit_byte (mb, CEE_DUP);
 	pos_noex = mono_mb_emit_branch (mb, CEE_BRFALSE);
@@ -2442,13 +2446,13 @@ emit_thread_interrupt_checkpoint (MonoMethodBuilder *mb)
 	if (strstr (mb->name, "mono_thread_interruption_checkpoint"))
 		return;
 	
-	emit_thread_interrupt_checkpoint_call (mb, mono_thread_interruption_checkpoint);
+	emit_thread_interrupt_checkpoint_call (mb, "mono_thread_interruption_checkpoint");
 }
 
 static void
 emit_thread_force_interrupt_checkpoint (MonoMethodBuilder *mb)
 {
-	emit_thread_interrupt_checkpoint_call (mb, mono_thread_force_interruption_checkpoint_noraise);
+	emit_thread_interrupt_checkpoint_call (mb, "mono_thread_force_interruption_checkpoint_noraise");
 }
 
 void
@@ -2915,7 +2919,7 @@ mono_marshal_method_from_wrapper (MonoMethod *wrapper)
 			return NULL;
 	case MONO_WRAPPER_RUNTIME_INVOKE:
 		if (info && (info->subtype == WRAPPER_SUBTYPE_RUNTIME_INVOKE_DIRECT || info->subtype == WRAPPER_SUBTYPE_RUNTIME_INVOKE_VIRTUAL))
-			return info->d.runtime_invoke.method;
+            return info->d.runtime_invoke.method;
 		else
 			return NULL;
 	case MONO_WRAPPER_DELEGATE_INVOKE:

@@ -1395,7 +1395,7 @@ generate (MonoMethod *method, RuntimeMethod *rtm, unsigned char *is_bb_start, Mo
 	td.gen_sdb_seq_points = debug_options.gen_sdb_seq_points;
 	td.seq_points = g_ptr_array_new ();
 	td.relocs = g_ptr_array_new ();
-	td.verbose_level = mono_interp_traceopt;
+	td.verbose_level = 0;
 	rtm->data_items = td.data_items;
 	for (i = 0; i < header->code_size; i++) {
 		td.stack_height [i] = -1;
@@ -1520,6 +1520,8 @@ generate (MonoMethod *method, RuntimeMethod *rtm, unsigned char *is_bb_start, Mo
 	while (td.ip < end) {
 		int in_offset;
 
+		// printf ("tp.ip %p end %p sp %p stack %p\n", td.ip, end, td.sp, td.stack);
+		// printf ("\t%x %x %x %x %x %x %x %x\n", td.ip [0], td.ip [1], td.ip [2], td.ip [3], td.ip [4], td.ip [5], td.ip [6], td.ip [7]);
 		g_assert (td.sp >= td.stack);
 		g_assert (td.vt_sp < 0x10000000);
 		in_offset = td.ip - header->code;
@@ -1537,6 +1539,7 @@ generate (MonoMethod *method, RuntimeMethod *rtm, unsigned char *is_bb_start, Mo
 			if (td.stack_height [in_offset] > 0)
 				memcpy (td.stack, td.stack_state [in_offset], td.stack_height [in_offset] * sizeof(td.stack [0]));
 			td.sp = td.stack + td.stack_height [in_offset];
+			// printf ("\tSP updated to %p\n", td.sp);
 			td.vt_sp = td.vt_stack_size [in_offset];
 		}
 		if (is_bb_start [in_offset]) {
@@ -1548,12 +1551,14 @@ generate (MonoMethod *method, RuntimeMethod *rtm, unsigned char *is_bb_start, Mo
 			continue;
 		}
 		if (td.verbose_level > 1) {
+			char *ip2 = td.ip;
+			int opcode = mono_opcode_value (&ip2, end);
 			printf("IL_%04lx %s %-10s -> IL_%04lx, sp %ld, %s %-12s vt_sp %u (max %u)\n", 
 				td.ip - td.il_code,
 				td.is_bb_start [td.ip - td.il_code] == 3 ? "<>" :
 				td.is_bb_start [td.ip - td.il_code] == 2 ? "< " :
 				td.is_bb_start [td.ip - td.il_code] == 1 ? " >" : "  ",
-				mono_opcode_name (*td.ip), td.new_ip - td.new_code, td.sp - td.stack, 
+				mono_opcode_name (opcode), td.new_ip - td.new_code, td.sp - td.stack, 
 				td.sp > td.stack ? stack_type_string [td.sp [-1].type] : "  ",
 				(td.sp > td.stack && (td.sp [-1].type == STACK_TYPE_O || td.sp [-1].type == STACK_TYPE_VT)) ? (td.sp [-1].klass == NULL ? "?" : td.sp [-1].klass->name) : "",
 				td.vt_sp, td.max_vt_sp);
@@ -3419,7 +3424,7 @@ generate (MonoMethod *method, RuntimeMethod *rtm, unsigned char *is_bb_start, Mo
 					token = read32 (td.ip + 1);
 					td.ip += 5;
 					func = mono_method_get_wrapper_data (method, token);
-					info = mono_find_jit_icall_by_addr (func);
+					info = mono_find_jit_icall_by_name (func);
 
 					ADD_CODE (&td, MINT_LDFTN);
 					ADD_CODE (&td, get_data_item_index (&td, func));
@@ -3434,7 +3439,8 @@ generate (MonoMethod *method, RuntimeMethod *rtm, unsigned char *is_bb_start, Mo
 					token = read32 (td.ip + 1);
 					td.ip += 5;
 					func = mono_method_get_wrapper_data (method, token);
-					info = mono_find_jit_icall_by_addr (func);
+					info = mono_find_jit_icall_by_name (func);
+					// printf ("\tINVOKE %p -> %s\n", info, info->name, info->func);
 					g_assert (info);
 
 					CHECK_STACK (&td, info->sig->param_count);

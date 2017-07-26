@@ -213,14 +213,20 @@ mono_get_seq_point_for_native_offset (MonoDomain *domain, MonoMethod *method, gi
 void
 mono_exceptions_init (void)
 {
+	printf ("HERE\n");
 	MonoRuntimeExceptionHandlingCallbacks cbs;
 	if (mono_aot_only) {
+		printf (">>>1\n");
 		restore_context_func = mono_aot_get_trampoline ("restore_context");
+		printf (">>>2\n");
 		call_filter_func = mono_aot_get_trampoline ("call_filter");
+		printf (">>>3\n");
 		throw_exception_func = mono_aot_get_trampoline ("throw_exception");
+		printf (">>>4\n");
 		rethrow_exception_func = mono_aot_get_trampoline ("rethrow_exception");
 	} else {
 		MonoTrampInfo *info;
+		printf (">>>122\n");
 
 		restore_context_func = mono_arch_get_restore_context (&info, FALSE);
 		mono_tramp_info_register (info, NULL);
@@ -231,6 +237,8 @@ mono_exceptions_init (void)
 		rethrow_exception_func = mono_arch_get_rethrow_exception (&info, FALSE);
 		mono_tramp_info_register (info, NULL);
 	}
+
+	printf (">>>133\n");
 #ifdef MONO_ARCH_HAVE_RESTORE_STACK_SUPPORT
 	if (!mono_llvm_only) {
 		try_more_restore_tramp = mono_create_specific_trampoline (try_more_restore, MONO_TRAMPOLINE_RESTORE_STACK_PROT, mono_domain_get (), NULL);

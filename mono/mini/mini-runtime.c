@@ -471,6 +471,7 @@ mono_tramp_info_register_internal (MonoTrampInfo *info, MonoDomain *domain, gboo
 	if (!info)
 		return;
 
+	printf ("---HA!\n");
 	if (!domain)
 		domain = mono_get_root_domain ();
 
@@ -483,6 +484,7 @@ mono_tramp_info_register_internal (MonoTrampInfo *info, MonoDomain *domain, gboo
 	copy->code_size = info->code_size;
 	copy->name = g_strdup (info->name);
 
+	printf ("HE\n");
 	if (info->unwind_ops) {
 		copy->uw_info = mono_unwind_ops_encode (info->unwind_ops, &copy->uw_info_len);
 		copy->owns_uw_info = TRUE;
@@ -499,8 +501,11 @@ mono_tramp_info_register_internal (MonoTrampInfo *info, MonoDomain *domain, gboo
 		copy->uw_info_len = info->uw_info_len;
 	}
 
+	printf ("HE 11\n");
+
 	mono_save_trampoline_xdebug_info (info);
 	mono_lldb_save_trampoline_info (info);
+	printf ("HE 222\n");
 
 #ifdef MONO_ARCH_HAVE_UNWIND_TABLE
 	if (!aot)
@@ -516,11 +521,16 @@ mono_tramp_info_register_internal (MonoTrampInfo *info, MonoDomain *domain, gboo
 		/* Only register trampolines that have unwind infos */
 		register_trampoline_jit_info (domain, copy);
 	}
+	printf ("HE 33\n");
 
 	if (mono_jit_map_is_enabled ())
 		mono_emit_jit_tramp (info->code, info->code_size, info->name);
 
+	printf ("HE 44\n");
+
 	mono_tramp_info_free (info);
+	printf ("HE 55\n");
+	
 }
 
 void

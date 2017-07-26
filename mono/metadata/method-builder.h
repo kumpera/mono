@@ -85,7 +85,9 @@ void
 mono_mb_emit_managed_call (MonoMethodBuilder *mb, MonoMethod *method, MonoMethodSignature *opt_sig);
 
 void
-mono_mb_emit_icall (MonoMethodBuilder *mb, gpointer func);
+mono_mb_emit_icall_by_name (MonoMethodBuilder *mb, const char *name);
+
+#define mono_mb_emit_icall(mb, func) mono_mb_emit_icall_by_name (mb, #func)
 
 int
 mono_mb_add_local (MonoMethodBuilder *mb, MonoType *type);

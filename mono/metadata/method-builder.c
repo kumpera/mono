@@ -619,10 +619,10 @@ mono_mb_emit_native_call (MonoMethodBuilder *mb, MonoMethodSignature *sig, gpoin
 }
 
 void
-mono_mb_emit_icall (MonoMethodBuilder *mb, gpointer func)
+mono_mb_emit_icall_by_name (MonoMethodBuilder *mb, const char *func_name)
 {
 	mono_mb_emit_byte (mb, MONO_CUSTOM_PREFIX);
-	mono_mb_emit_op (mb, CEE_MONO_ICALL, func);
+	mono_mb_emit_op (mb, CEE_MONO_ICALL, func_name);
 }
 
 void
