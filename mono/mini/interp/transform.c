@@ -1372,6 +1372,10 @@ generate (MonoMethod *method, RuntimeMethod *rtm, unsigned char *is_bb_start, Mo
 		verbose_method_inited = TRUE;
 	}
 
+	// char *x = mono_method_full_name (method, 1);
+	// printf ("generating %x\n", x);
+	// g_free (x);
+
 	memset (&td, 0, sizeof(td));
 	td.method = method;
 	td.rtm = rtm;
@@ -3440,6 +3444,8 @@ generate (MonoMethod *method, RuntimeMethod *rtm, unsigned char *is_bb_start, Mo
 					td.ip += 5;
 					func = mono_method_get_wrapper_data (method, token);
 					info = mono_find_jit_icall_by_name (func);
+					if (!info)
+						printf ("COULD NOT FIND ICALL %s\n", func);
 					// printf ("\tINVOKE func %s info %p -> name %s -> func %p\n", func, info, info->name, info->func);
 					g_assert (info);
 

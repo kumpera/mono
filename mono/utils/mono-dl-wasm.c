@@ -44,7 +44,7 @@ mono_dl_get_system_dir (void)
 void*
 mono_dl_lookup_symbol (MonoDl *module, const char *name)
 {
-	printf ("mono_dl_lookup_symbol -> %p name %s\n", module, name);
+	// printf ("mono_dl_lookup_symbol -> %p name %s\n", module, name);
 	return NULL;
 }
 

@@ -104,6 +104,18 @@ handle_enum:
 	}
 }
 
+#if SIZEOF_VOID_P == 4
+#define FIDX(x) ((x) * 2)
+#else
+#define FIDX(x) (x)
+#endif
+
+static void
+wasm_invoke_v (void *target_func, InterpMethodArguments *margs)
+{
+	void (*func)(void) = target_func;
+	func ();
+}
 
 static void
 wasm_invoke_vi (void *target_func, InterpMethodArguments *margs)
@@ -219,7 +231,7 @@ wasm_invoke_ll (void *target_func, InterpMethodArguments *margs)
 static void
 wasm_invoke_li (void *target_func, InterpMethodArguments *margs)
 {
-	gint64 (*func)(int a) = target_func;
+	gint64 (*func)(gpointer a) = target_func;
 	gint64 res = func (margs->iargs [0]);
 	*(gint64*)margs->retval = res;
 }
@@ -227,7 +239,7 @@ wasm_invoke_li (void *target_func, InterpMethodArguments *margs)
 static void
 wasm_invoke_lil (void *target_func, InterpMethodArguments *margs)
 {
-	gint64 (*func)(int a, gint64 b) = target_func;
+	gint64 (*func)(gpointer a, gint64 b) = target_func;
 
 	interp_pair p;
 	p.pair.lo = (gint32)margs->iargs [1];
@@ -236,6 +248,72 @@ wasm_invoke_lil (void *target_func, InterpMethodArguments *margs)
 	gint64 res = func (margs->iargs [0], p.l);
 	*(gint64*)margs->retval = res;
 }
+
+static void
+wasm_invoke_dd (void *target_func, InterpMethodArguments *margs)
+{
+	double (*func)(double a) = target_func;
+
+	double res = func (margs->fargs [FIDX (0)]);
+	*(double*)margs->retval = res;
+}
+
+static void
+wasm_invoke_ddd (void *target_func, InterpMethodArguments *margs)
+{
+	double (*func)(double a, double b) = target_func;
+
+	double res = func (margs->fargs [FIDX (0)], margs->fargs [FIDX (1)]);
+	*(double*)margs->retval = res;
+}
+
+
+	
+static void
+wasm_invoke_vif (void *target_func, InterpMethodArguments *margs)
+{
+	void (*func)(gpointer a, float b) = target_func;
+
+	func (margs->iargs [0], 
+		*(float*)&margs->fargs [FIDX (0)]);
+}
+
+static void
+wasm_invoke_viff (void *target_func, InterpMethodArguments *margs)
+{
+	void (*func)(gpointer a, float b, float c) = target_func;
+
+	func (margs->iargs [0], 
+		*(float*)&margs->fargs [FIDX (0)],
+		*(float*)&margs->fargs [FIDX (1)]);
+}
+
+static void
+wasm_invoke_viffff (void *target_func, InterpMethodArguments *margs)
+{
+	void (*func)(gpointer a, float b, float c, float d, float e) = target_func;
+
+	func (margs->iargs [0], 
+		*(float*)&margs->fargs [FIDX (0)],
+		*(float*)&margs->fargs [FIDX (1)],
+		*(float*)&margs->fargs [FIDX (2)],
+		*(float*)&margs->fargs [FIDX (3)]);
+}
+
+static void
+wasm_invoke_vifffffi (void *target_func, InterpMethodArguments *margs)
+{
+	void (*func)(gpointer a, float b, float c, float d, float e, float f, int g) = target_func;
+
+	func (margs->iargs [0], 
+		*(float*)&margs->fargs [FIDX (0)],
+		*(float*)&margs->fargs [FIDX (1)],
+		*(float*)&margs->fargs [FIDX (2)],
+		*(float*)&margs->fargs [FIDX (3)],
+		*(float*)&margs->fargs [FIDX (4)],
+		*(float*)&margs->iargs [1]);
+}
+
 
 static void
 wasm_enter_icall_trampoline (void *target_func, InterpMethodArguments *margs)
@@ -258,7 +336,9 @@ wasm_enter_icall_trampoline (void *target_func, InterpMethodArguments *margs)
 
 	// printf ("cookie %s (%d)\n", cookie, c_count);
 
-	if (!strcmp ("VI", cookie))
+	if (!strcmp ("V", cookie))
+		wasm_invoke_v (target_func, margs);
+	else if (!strcmp ("VI", cookie))
 		wasm_invoke_vi (target_func, margs);
 	else if (!strcmp ("VII", cookie))
 		wasm_invoke_vii (target_func, margs);
@@ -288,6 +368,18 @@ wasm_enter_icall_trampoline (void *target_func, InterpMethodArguments *margs)
 		wasm_invoke_li (target_func, margs);
 	else if (!strcmp ("LIL", cookie))
 		wasm_invoke_lil (target_func, margs);
+	else if (!strcmp ("DD", cookie))
+		wasm_invoke_dd (target_func, margs);
+	else if (!strcmp ("DDD", cookie))
+		wasm_invoke_ddd (target_func, margs);
+	else if (!strcmp ("VIF", cookie))
+		wasm_invoke_vif (target_func, margs);
+	else if (!strcmp ("VIFF", cookie))
+		wasm_invoke_viff (target_func, margs);
+	else if (!strcmp ("VIFFFF", cookie))
+		wasm_invoke_viffff (target_func, margs);
+	else if (!strcmp ("VIFFFFFI", cookie))
+		wasm_invoke_vifffffi (target_func, margs);
 	else {
 		printf ("CANNOT HANDLE COOKIE %s\n", cookie);
 		g_assert (0);
