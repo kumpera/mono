@@ -267,4 +267,10 @@ mono_thread_internal_describe (MonoInternalThread *internal, GString *str);
 gboolean
 mono_thread_internal_is_current (MonoInternalThread *internal);
 
+gboolean
+mono_thread_name_changed (MonoInternalThread *this_obj);
+
+void
+mono_thread_reset_state (MonoInternalThread* this_obj, guint32 state);
+
 #endif /* _MONO_METADATA_THREADS_TYPES_H_ */

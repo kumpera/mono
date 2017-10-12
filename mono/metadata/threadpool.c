@@ -347,14 +347,14 @@ worker_callback (void)
 
 		domains_unlock ();
 
-		MonoString *thread_name = mono_string_new_checked (mono_get_root_domain (), "Threadpool worker", &error);
-		mono_error_assert_ok (&error);
-		mono_thread_set_name_internal (thread, thread_name, FALSE, TRUE, &error);
-		mono_error_assert_ok (&error);
+		if (mono_thread_name_changed (thread)) {
+			MonoString *thread_name = mono_string_new_checked (mono_get_root_domain (), "Threadpool worker", &error);
+			mono_error_assert_ok (&error);
+			mono_thread_set_name_internal (thread, thread_name, FALSE, TRUE, &error);
+			mono_error_assert_ok (&error);
+		}
 
-		mono_thread_clr_state (thread, (MonoThreadState)~ThreadState_Background);
-		if (!mono_thread_test_state (thread , ThreadState_Background))
-			ves_icall_System_Threading_Thread_SetState (thread, ThreadState_Background);
+		mono_thread_reset_state (thread, ThreadState_Background);
 
 		mono_thread_push_appdomain_ref (tpdomain->domain);
 		if (mono_domain_set (tpdomain->domain, FALSE)) {

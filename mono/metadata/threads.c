@@ -1599,6 +1599,12 @@ ves_icall_System_Threading_Thread_GetName_internal (MonoInternalThread *this_obj
 	return str;
 }
 
+gboolean
+mono_thread_name_changed (MonoInternalThread *this_obj)
+{
+	return (this_obj->flags & MONO_THREAD_FLAG_NAME_SET) || this_obj->name == NULL;
+}
+
 void 
 mono_thread_set_name_internal (MonoInternalThread *this_obj, MonoString *name, gboolean permanent, gboolean reset, MonoError *error)
 {
@@ -2230,6 +2236,31 @@ ves_icall_System_Threading_Thread_SetState (MonoInternalThread* this_obj, guint3
 	mono_thread_set_state (this_obj, (MonoThreadState)state);
 	
 	if (state & ThreadState_Background) {
+		/* If the thread changes the background mode, the main thread has to
+		 * be notified, since it has to rebuild the list of threads to
+		 * wait for.
+		 */
+		mono_os_event_set (&background_change_event);
+	}
+}
+
+void
+mono_thread_reset_state (MonoInternalThread* this_obj, guint32 state)
+{
+	guint32 old_state;
+	//fast path in case nothing changed
+	if (this_obj->state == state)
+		return;
+
+	LOCK_THREAD (this_obj);
+
+	old_state = this_obj->state;
+	this_obj->state = state;
+
+	UNLOCK_THREAD (this_obj);
+
+	//thread changed to background
+	if (!(old_state & ThreadState_Background) && (state & ThreadState_Background)) {
 		/* If the thread changes the background mode, the main thread has to
 		 * be notified, since it has to rebuild the list of threads to
 		 * wait for.
