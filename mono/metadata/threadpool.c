@@ -47,13 +47,26 @@
 #include <mono/utils/mono-time.h>
 #include <mono/utils/refcount.h>
 #include <mono/utils/mono-os-wait.h>
+#include <mono/utils/hazard-pointer.h>
+
+//// MonoConcArray temporary place
+
+typedef struct _conc_set_data conc_set_data;
 
 typedef struct {
+	volatile conc_set_data *data;
+} MonoConcArraySet;
+
+///////
+typedef struct {
+	MonoRefCount ref;
 	MonoDomain *domain;
 	/* Number of outstanding jobs */
-	gint32 outstanding_request;
+	volatile gint32 outstanding_request;
 	/* Number of currently executing jobs */
-	gint32 threadpool_jobs;
+	volatile gint32 threadpool_jobs;
+	/* index in the tp set */
+	gint32 index;
 	/* Signalled when threadpool_jobs + outstanding_request is 0 */
 	/* Protected by threadpool.domains_lock */
 	MonoCoopCond cleanup_cond;
@@ -69,8 +82,7 @@ typedef union {
 
 typedef struct {
 	MonoRefCount ref;
-
-	GPtrArray *domains; // ThreadPoolDomain* []
+	MonoConcArraySet conc_domains;
 	MonoCoopMutex domains_lock;
 
 	ThreadPoolCounter counters;
@@ -104,27 +116,19 @@ COUNTER_READ (void)
 	return counter;
 }
 
-static inline void
-domains_lock (void)
-{
-	mono_coop_mutex_lock (&threadpool.domains_lock);
-}
-
-static inline void
-domains_unlock (void)
-{
-	mono_coop_mutex_unlock (&threadpool.domains_lock);
-}
+static void
+worker_callback (void);
+static void
+mono_conc_array_set_init (MonoConcArraySet *set);
+static void
+mono_conc_array_destroy (MonoConcArraySet *set);
 
 static void
 destroy (gpointer unused)
 {
-	g_ptr_array_free (threadpool.domains, TRUE);
 	mono_coop_mutex_destroy (&threadpool.domains_lock);
+	mono_conc_array_destroy (&threadpool.conc_domains);
 }
-
-static void
-worker_callback (void);
 
 static void
 initialize (void)
@@ -133,8 +137,8 @@ initialize (void)
 
 	mono_refcount_init (&threadpool, destroy);
 
-	threadpool.domains = g_ptr_array_new ();
 	mono_coop_mutex_init (&threadpool.domains_lock);
+	mono_conc_array_set_init (&threadpool.conc_domains);
 
 	threadpool.limit_io_min = mono_cpu_count ();
 	threadpool.limit_io_max = CLAMP (threadpool.limit_io_min * 100, MIN (threadpool.limit_io_min, 200), MAX (threadpool.limit_io_min, 200));
@@ -193,83 +197,223 @@ mono_threadpool_enqueue_work_item (MonoDomain *domain, MonoObject *work_item, Mo
 	return TRUE;
 }
 
-/* LOCKING: domains_lock must be held. */
-static ThreadPoolDomain *
-tpdomain_create (MonoDomain *domain)
+//----------------------------------------
+
+#define INITIAL_SIZE 16
+
+struct _conc_set_data {
+	volatile size_t len;
+	size_t capacity;
+	volatile ThreadPoolDomain *data [1];
+};
+
+static void
+mono_conc_array_set_init (MonoConcArraySet *set)
 {
-	ThreadPoolDomain *tpdomain;
+	conc_set_data *data = g_malloc0 ((INITIAL_SIZE + 2) * sizeof (gpointer));
+	data->len = 0;
+	data->capacity = INITIAL_SIZE;
 
-	tpdomain = g_new0 (ThreadPoolDomain, 1);
-	tpdomain->domain = domain;
-	mono_coop_cond_init (&tpdomain->cleanup_cond);
-
-	g_ptr_array_add (threadpool.domains, tpdomain);
-
-	return tpdomain;
-}
-
-/* LOCKING: domains_lock must be held. */
-static gboolean
-tpdomain_remove (ThreadPoolDomain *tpdomain)
-{
-	g_assert (tpdomain);
-	return g_ptr_array_remove (threadpool.domains, tpdomain);
-}
-
-/* LOCKING: domains_lock must be held */
-static ThreadPoolDomain *
-tpdomain_get (MonoDomain *domain)
-{
-	gint i;
-
-	g_assert (domain);
-
-	for (i = 0; i < threadpool.domains->len; ++i) {
-		ThreadPoolDomain *tpdomain;
-
-		tpdomain = (ThreadPoolDomain *)g_ptr_array_index (threadpool.domains, i);
-		if (tpdomain->domain == domain)
-			return tpdomain;
-	}
-
-	return NULL;
+	mono_atomic_store_release (&set->data, data);
 }
 
 static void
-tpdomain_free (ThreadPoolDomain *tpdomain)
+mono_conc_array_destroy (MonoConcArraySet *set)
 {
+	gpointer old = InterlockedExchangePointer ((gpointer)&set->data, NULL);
+	if (old)
+		mono_thread_hazardous_try_free (old, g_free);
+}
+
+static void
+tpdomain_real_free (void *arg)
+{
+	ThreadPoolDomain *tpdomain = arg;
+	mono_coop_cond_destroy (&tpdomain->cleanup_cond);
 	g_free (tpdomain);
 }
 
-/* LOCKING: domains_lock must be held */
-static ThreadPoolDomain *
-tpdomain_get_next (ThreadPoolDomain *current)
+static void
+tpdomain_queue_destroy (void *domain)
 {
-	ThreadPoolDomain *tpdomain = NULL;
-	gint len;
+	mono_thread_hazardous_try_free (domain, tpdomain_real_free);
+}
 
-	len = threadpool.domains->len;
-	if (len > 0) {
-		gint i, current_idx = -1;
-		if (current) {
-			for (i = 0; i < len; ++i) {
-				if (current == g_ptr_array_index (threadpool.domains, i)) {
-					current_idx = i;
-					break;
-				}
-			}
-		}
-		for (i = current_idx + 1; i < len + current_idx + 1; ++i) {
-			ThreadPoolDomain *tmp = (ThreadPoolDomain *)g_ptr_array_index (threadpool.domains, i % len);
-			if (tmp->outstanding_request > 0) {
-				tpdomain = tmp;
-				break;
-			}
+static void
+domains_set_lock (void)
+{
+	mono_coop_mutex_lock (&threadpool.domains_lock);
+}
+
+static void
+domains_set_unlock (void)
+{
+	mono_coop_mutex_unlock (&threadpool.domains_lock);
+}
+
+/* LOCKING: domains_set_lock will be acquired. Returns object with RC + 1. Returns NULL if the domain is unloading */
+static ThreadPoolDomain *
+tpdomain_try_create (MonoDomain *domain)
+{
+
+	ThreadPoolDomain *tpdomain;
+	ThreadPoolDomain *res = NULL;
+
+	tpdomain = g_new0 (ThreadPoolDomain, 1);
+	tpdomain->domain = domain;
+	mono_refcount_init (tpdomain, tpdomain_queue_destroy);
+	mono_coop_cond_init (&tpdomain->cleanup_cond);
+	tpdomain->ref.ref = 2; //1 for the conc set + 1 for the caller
+
+
+	domains_set_lock ();
+
+	//Must be done under domain_lock to coordinate with remove_domain_jobs
+	if (mono_domain_is_unloading (domain))
+		goto done;
+
+	//no other mutation happening, we can avoid the conc machinery
+	int i;
+	conc_set_data *data = (conc_set_data *)threadpool.conc_domains.data;
+	for (i = 0; i < data->len; ++i) {
+		ThreadPoolDomain *cur = (ThreadPoolDomain *)data->data [i];
+		if (cur && cur->domain == domain) {
+			/* RC can't drop to zero for items in the domain set while we hold the domains_set_lock as we DEC after removing from the set while holding the same lock */
+			g_assert (mono_refcount_tryinc (cur));
+			res = cur;
+			goto done;
 		}
 	}
 
+	//ensure we have space
+	if (data->len == data->capacity) {
+		conc_set_data *new_data = g_malloc0 ((data->capacity * 2 + 2) * sizeof (gpointer));
+		new_data->len = data->len;
+		new_data->capacity = data->capacity * 2;
+		memcpy ((gpointer)new_data->data, (gpointer)data->data, data->len * sizeof (gpointer));
+
+		// all copied data to new_data *must* be visible before we publish it
+		mono_atomic_store_release (&threadpool.conc_domains.data, new_data);
+
+		mono_thread_hazardous_try_free (data, g_free);
+		data = new_data;
+	}
+
+	//insert in the first NULL slow
+	for (i = 0; i <= data->len; ++i) {
+		if (!data->data [i])
+			break;
+	}
+
+	//Ensure tpdomain init is fully visible
+	tpdomain->index = i;
+	mono_atomic_store_release (&data->data [i], tpdomain);
+	//stored at the end
+	if (i == data->len)
+		mono_atomic_store_release (&data->len, data->len + 1);	//The previous store *must* be visible before we bump len
+
+	res = tpdomain;
+done:
+	domains_set_unlock ();
+	if (res != tpdomain && tpdomain)
+		tpdomain_real_free (tpdomain);
+	return res;
+}
+
+/* LOCKING: domains_set_lock will be acquired. If removed, object is RC - 1 */
+static gboolean
+tpdomain_remove (ThreadPoolDomain *tpdomain)
+{
+	g_assert (tpdomain);;
+
+	domains_set_lock ();
+	int i;
+	conc_set_data *data = (conc_set_data *)threadpool.conc_domains.data;
+
+	for (i = 0; i < data->len; ++i) {
+		if (data->data [i] == tpdomain) {
+			if (i == data->len - 1)
+				data->len = data->len - 1;
+
+			//The previous store *must* be visible before we null the value
+			mono_atomic_store_release (&data->data [i], NULL);
+			g_assert (tpdomain->ref.ref >= 2); //caller owns this object plus the set
+			mono_refcount_dec (tpdomain);
+
+			domains_set_unlock ();
+			return TRUE;
+		}
+	}
+
+	domains_set_unlock ();
+	return FALSE;
+}
+
+static void
+tpdomain_unref (ThreadPoolDomain *tpdomain)
+{
+	mono_refcount_dec (tpdomain);
+}
+
+/* Returns object with RC + 1 */
+static ThreadPoolDomain *
+tpdomain_get (MonoDomain *domain)
+{
+	g_assert (domain);
+
+	MonoThreadHazardPointers *hp = mono_hazard_pointer_get ();
+	ThreadPoolDomain *res = NULL;
+
+	//conc_set_data goes to HP0, ThreadPoolDomain goes to HP1
+	int i;
+	conc_set_data *data = (conc_set_data *)mono_get_hazardous_pointer ((gpointer volatile*)&threadpool.conc_domains.data, hp, 0);
+	for (i = 0; i < data->len; ++i) {
+		res = (ThreadPoolDomain *)mono_get_hazardous_pointer ((gpointer volatile*)&data->data[i], hp, 1);
+		if (res && res->domain == domain) {
+			/* We failed to INC, meaning we raced to another thread deleting it */
+			if (!mono_refcount_tryinc (res))
+				res = NULL;
+			goto done;
+		}
+	}
+
+done:
+	mono_hazard_pointer_clear (hp, 1);
+	mono_hazard_pointer_clear (hp, 0);
+	return res;
+}
+
+
+/* Returns object with RC + 1 */
+static ThreadPoolDomain *
+tpdomain_get_next (int prev_index)
+{
+	ThreadPoolDomain *tpdomain = NULL;
+
+	MonoThreadHazardPointers *hp = mono_hazard_pointer_get ();
+
+	int i;
+	conc_set_data *data = (conc_set_data *)mono_get_hazardous_pointer ((gpointer volatile*)&threadpool.conc_domains.data, hp, 0);
+	int len = data->len;
+	if (len == 0)
+		goto done;
+	for (i = prev_index + 1; i < len + prev_index + 1; ++i) {
+		ThreadPoolDomain *tmp = (ThreadPoolDomain *)mono_get_hazardous_pointer ((gpointer volatile*)&data->data[i % len], hp, 1);
+		if (tmp && tmp->outstanding_request > 0 && mono_refcount_tryinc (tmp)) {
+			tpdomain = tmp;
+			break;
+		}
+	}
+
+done:
+	mono_hazard_pointer_clear (hp, 1);
+	mono_hazard_pointer_clear (hp, 0);
 	return tpdomain;
 }
+
+
+//----------------------------------------
+
 
 static MonoObject*
 try_invoke_perform_wait_callback (MonoObject** exc, MonoError *error)
@@ -284,9 +428,10 @@ static void
 worker_callback (void)
 {
 	MonoError error;
-	ThreadPoolDomain *tpdomain, *previous_tpdomain;
+	ThreadPoolDomain *tpdomain;
 	ThreadPoolCounter counter;
 	MonoInternalThread *thread;
+	int previous_idx = -1;
 
 	if (!mono_refcount_tryinc (&threadpool))
 		return;
@@ -316,36 +461,31 @@ worker_callback (void)
 	 */
 	mono_defaults.threadpool_perform_wait_callback_method->save_lmf = TRUE;
 
-	domains_lock ();
-
-	previous_tpdomain = NULL;
-
 	while (!mono_runtime_is_shutting_down ()) {
 		gboolean retire = FALSE;
 
 		if (thread->state & (ThreadState_AbortRequested | ThreadState_SuspendRequested)) {
-			domains_unlock ();
-			if (mono_thread_interruption_checkpoint ()) {
-				domains_lock ();
+			if (mono_thread_interruption_checkpoint ())
 				continue;
-			}
-			domains_lock ();
 		}
 
-		tpdomain = tpdomain_get_next (previous_tpdomain);
+		tpdomain = tpdomain_get_next (previous_idx);
 		if (!tpdomain)
 			break;
 
-		tpdomain->outstanding_request --;
-		g_assert (tpdomain->outstanding_request >= 0);
+		previous_idx = tpdomain->index;
+		gint32 outstanding_request = tpdomain->outstanding_request;
+		if (outstanding_request < 1 || InterlockedCompareExchange (&tpdomain->outstanding_request, outstanding_request - 1, outstanding_request) != outstanding_request) {
+			tpdomain_unref (tpdomain);
+			continue;
+		}
+		g_assert (outstanding_request >= 0);
 
 		mono_trace (G_LOG_LEVEL_DEBUG, MONO_TRACE_THREADPOOL, "[%p] worker running in domain %p (outstanding requests %d)",
 			GUINT_TO_POINTER (MONO_NATIVE_THREAD_ID_TO_UINT (mono_native_thread_id_get ())), tpdomain->domain, tpdomain->outstanding_request);
 
 		g_assert (tpdomain->threadpool_jobs >= 0);
-		tpdomain->threadpool_jobs ++;
-
-		domains_unlock ();
+		InterlockedIncrement (&tpdomain->threadpool_jobs);
 
 		if (mono_thread_name_changed (thread)) {
 			MonoString *thread_name = mono_string_new_checked (mono_get_root_domain (), "Threadpool worker", &error);
@@ -375,28 +515,30 @@ worker_callback (void)
 		}
 		mono_thread_pop_appdomain_ref ();
 
-		domains_lock ();
 
-		tpdomain->threadpool_jobs --;
+		InterlockedDecrement (&tpdomain->threadpool_jobs);
 		g_assert (tpdomain->threadpool_jobs >= 0);
 
 		if (tpdomain->outstanding_request + tpdomain->threadpool_jobs == 0 && mono_domain_is_unloading (tpdomain->domain)) {
 			gboolean removed;
 
+			domains_set_lock ();
 			removed = tpdomain_remove (tpdomain);
 			g_assert (removed);
 
 			mono_coop_cond_signal (&tpdomain->cleanup_cond);
+			domains_set_unlock ();
+
+			tpdomain_unref (tpdomain);
+
 			tpdomain = NULL;
+		} else {
+			tpdomain_unref (tpdomain);
 		}
 
 		if (retire)
 			break;
-
-		previous_tpdomain = tpdomain;
 	}
-
-	domains_unlock ();
 
 	COUNTER_ATOMIC (counter, {
 		counter._.working --;
@@ -545,17 +687,15 @@ mono_threadpool_remove_domain_jobs (MonoDomain *domain, int timeout)
 
 	mono_refcount_inc (&threadpool);
 
-	domains_lock ();
-
 	tpdomain = tpdomain_get (domain);
 	if (!tpdomain) {
-		domains_unlock ();
 		mono_refcount_dec (&threadpool);
 		return TRUE;
 	}
 
 	ret = TRUE;
 
+	domains_set_lock ();
 	while (tpdomain->outstanding_request + tpdomain->threadpool_jobs > 0) {
 		if (timeout == -1) {
 			mono_coop_cond_wait (&tpdomain->cleanup_cond, &threadpool.domains_lock);
@@ -579,11 +719,9 @@ mono_threadpool_remove_domain_jobs (MonoDomain *domain, int timeout)
 
 	/* Remove from the list the worker threads look at */
 	tpdomain_remove (tpdomain);
+	domains_set_unlock ();
 
-	domains_unlock ();
-
-	mono_coop_cond_destroy (&tpdomain->cleanup_cond);
-	tpdomain_free (tpdomain);
+	tpdomain_unref (tpdomain);
 
 	mono_refcount_dec (&threadpool);
 
@@ -755,26 +893,30 @@ ves_icall_System_Threading_ThreadPool_RequestWorkerThread (void)
 		return FALSE;
 	}
 
-	domains_lock ();
-
 	tpdomain = tpdomain_get (domain);
 	if (!tpdomain) {
 		/* synchronize with mono_threadpool_remove_domain_jobs */
 		if (mono_domain_is_unloading (domain)) {
-			domains_unlock ();
 			mono_refcount_dec (&threadpool);
 			return FALSE;
 		}
 
-		tpdomain = tpdomain_create (domain);
+		//try_create is the sync point with remove_domain_jobs so it might fail */
+		tpdomain = tpdomain_try_create (domain);
+
+		// It's unloading
+		if (!tpdomain) {
+			mono_refcount_dec (&threadpool);
+			return FALSE;
+		}
 	}
 
 	g_assert (tpdomain);
 
-	tpdomain->outstanding_request ++;
-	g_assert (tpdomain->outstanding_request >= 1);
+	gint32 outstanding_request = InterlockedIncrement (&tpdomain->outstanding_request);
+	g_assert (outstanding_request >= 1);
 
-	domains_unlock ();
+	tpdomain_unref (tpdomain);
 
 	COUNTER_ATOMIC (counter, {
 		if (counter._.starting == 16) {
