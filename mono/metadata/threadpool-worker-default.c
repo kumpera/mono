@@ -26,6 +26,7 @@
 #include <mono/utils/atomic.h>
 #include <mono/utils/mono-compiler.h>
 #include <mono/utils/mono-complex.h>
+#include <mono/utils/mono-counters.h>
 #include <mono/utils/mono-logger.h>
 #include <mono/utils/mono-logger-internals.h>
 #include <mono/utils/mono-proclib.h>
@@ -34,6 +35,16 @@
 #include <mono/utils/mono-rand.h>
 #include <mono/utils/refcount.h>
 #include <mono/utils/w32api.h>
+
+static int try_unpark;
+static int signaled_unparks;
+
+static int worker_creation_calls;
+static int too_many_creates_per_sec;
+static int working_max_working;
+static int thread_creation_failed;
+static int worker_create_ok;
+static int working_max_working_fast_path;
 
 #define CPU_USAGE_LOW 80
 #define CPU_USAGE_HIGH 95
@@ -299,6 +310,17 @@ mono_threadpool_worker_init (MonoThreadPoolWorkerCallback callback)
 	worker.suspended = FALSE;
 
 	worker.monitor_status = MONITOR_STATUS_NOT_RUNNING;
+
+
+	mono_counters_register ("Unpark attempts", MONO_COUNTER_RUNTIME | MONO_COUNTER_INT, &try_unpark);
+	mono_counters_register ("Signaled unparks", MONO_COUNTER_RUNTIME | MONO_COUNTER_INT, &signaled_unparks);
+
+	mono_counters_register ("worker_creation_calls", MONO_COUNTER_RUNTIME | MONO_COUNTER_INT, &worker_creation_calls);
+	mono_counters_register ("too_many_creates_per_sec", MONO_COUNTER_RUNTIME | MONO_COUNTER_INT, &too_many_creates_per_sec);
+	mono_counters_register ("working_max_working", MONO_COUNTER_RUNTIME | MONO_COUNTER_INT, &working_max_working);
+	mono_counters_register ("working_max_working_fast_path", MONO_COUNTER_RUNTIME | MONO_COUNTER_INT, &working_max_working_fast_path);
+	mono_counters_register ("thread_creation_failed", MONO_COUNTER_RUNTIME | MONO_COUNTER_INT, &thread_creation_failed);
+	mono_counters_register ("worker_create_ok", MONO_COUNTER_RUNTIME | MONO_COUNTER_INT, &worker_create_ok);
 }
 
 void
@@ -445,12 +467,16 @@ worker_try_unpark (void)
 	mono_trace (G_LOG_LEVEL_DEBUG, MONO_TRACE_THREADPOOL, "[%p] try unpark worker",
 		GUINT_TO_POINTER (MONO_NATIVE_THREAD_ID_TO_UINT (mono_native_thread_id_get ())));
 
-	mono_coop_mutex_lock (&worker.parked_threads_lock);
-	if (worker.parked_threads_count > 0) {
-		mono_coop_cond_signal (&worker.parked_threads_cond);
-		res = TRUE;
+	if (worker.parked_threads_count) {
+		InterlockedIncrement (&try_unpark);
+		mono_coop_mutex_lock (&worker.parked_threads_lock);
+		if (worker.parked_threads_count > 0) {
+			InterlockedIncrement (&signaled_unparks);
+			mono_coop_cond_signal (&worker.parked_threads_cond);
+			res = TRUE;
+		}
+		mono_coop_mutex_unlock (&worker.parked_threads_lock);
 	}
-	mono_coop_mutex_unlock (&worker.parked_threads_lock);
 
 	mono_trace (G_LOG_LEVEL_DEBUG, MONO_TRACE_THREADPOOL, "[%p] try unpark worker, success? %s",
 		GUINT_TO_POINTER (MONO_NATIVE_THREAD_ID_TO_UINT (mono_native_thread_id_get ())), res ? "yes" : "no");
@@ -522,6 +548,18 @@ worker_try_create (void)
 	if (mono_runtime_is_shutting_down ())
 		return FALSE;
 
+	InterlockedIncrement (&worker_creation_calls);
+
+	//Fast path for no workers needed
+	counter = COUNTER_READ ();
+	if (counter._.working >= counter._.max_working) {
+		mono_trace (G_LOG_LEVEL_DEBUG, MONO_TRACE_THREADPOOL, "[%p] try create worker, failed: maximum number of working threads reached (FAST PATH)",
+			GUINT_TO_POINTER (MONO_NATIVE_THREAD_ID_TO_UINT (mono_native_thread_id_get ())));
+
+		InterlockedIncrement (&working_max_working_fast_path);
+		return FALSE;
+	}
+
 	mono_coop_mutex_lock (&worker.worker_creation_lock);
 
 	mono_trace (G_LOG_LEVEL_DEBUG, MONO_TRACE_THREADPOOL, "[%p] try create worker",
@@ -540,6 +578,8 @@ worker_try_create (void)
 			if (worker.worker_creation_current_count == WORKER_CREATION_MAX_PER_SEC) {
 				mono_trace (G_LOG_LEVEL_DEBUG, MONO_TRACE_THREADPOOL, "[%p] try create worker, failed: maximum number of worker created per second reached, current count = %d",
 					GUINT_TO_POINTER (MONO_NATIVE_THREAD_ID_TO_UINT (mono_native_thread_id_get ())), worker.worker_creation_current_count);
+
+				InterlockedIncrement (&too_many_creates_per_sec);
 				mono_coop_mutex_unlock (&worker.worker_creation_lock);
 				return FALSE;
 			}
@@ -550,6 +590,8 @@ worker_try_create (void)
 		if (counter._.working >= counter._.max_working) {
 			mono_trace (G_LOG_LEVEL_DEBUG, MONO_TRACE_THREADPOOL, "[%p] try create worker, failed: maximum number of working threads reached",
 				GUINT_TO_POINTER (MONO_NATIVE_THREAD_ID_TO_UINT (mono_native_thread_id_get ())));
+
+			InterlockedIncrement (&working_max_working);
 			mono_coop_mutex_unlock (&worker.worker_creation_lock);
 			return FALSE;
 		}
@@ -566,6 +608,7 @@ worker_try_create (void)
 			counter._.starting --;
 		});
 
+		InterlockedIncrement (&thread_creation_failed);
 		mono_coop_mutex_unlock (&worker.worker_creation_lock);
 
 		return FALSE;
@@ -576,6 +619,7 @@ worker_try_create (void)
 	mono_trace (G_LOG_LEVEL_DEBUG, MONO_TRACE_THREADPOOL, "[%p] try create worker, created %p, now = %d count = %d",
 		GUINT_TO_POINTER (MONO_NATIVE_THREAD_ID_TO_UINT (mono_native_thread_id_get ())), (gpointer) thread->tid, now, worker.worker_creation_current_count);
 
+	InterlockedIncrement (&worker_create_ok);
 	mono_coop_mutex_unlock (&worker.worker_creation_lock);
 	return TRUE;
 }
