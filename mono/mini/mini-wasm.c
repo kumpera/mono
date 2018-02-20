@@ -305,3 +305,26 @@ sem_timedwait (sem_t *sem, const struct timespec *abs_timeout)
 	return 0;
 	
 }
+
+static gboolean debugger_enabled;
+
+void
+mono_wasm_debugger_init (void)
+{
+	if (!debugger_enabled)
+		return;
+
+	mono_debug_init (MONO_DEBUG_FORMAT_MONO);
+	mini_get_debug_options ()->gen_sdb_seq_points = TRUE;
+	mini_get_debug_options ()->mdb_optimizations = TRUE;
+	mono_disable_optimizations (MONO_OPT_LINEARS);
+	mini_get_debug_options ()->load_aot_jit_info_eagerly = TRUE;
+}
+
+
+MONO_API void
+mono_wasm_enable_debugging (void)
+{
+	debugger_enabled = TRUE;
+}
+
