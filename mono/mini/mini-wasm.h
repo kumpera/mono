@@ -53,4 +53,7 @@ typedef struct {
 
 
 
+
+void mono_wasm_debugger_init (void);
+
 #endif /* __MONO_MINI_WASM_H__ */  

@@ -98,7 +98,7 @@ managed/nunitlite.dll: $(TOP)/mcs/class/lib/wasm/nunitlite.dll | managed/
 	cp $< $@
 
 managed/main.exe: $(TEST_DEPS) $(APP_SOURCES) | managed/
-	mcs /nostdlib /unsafe -out:$@ $(TEST_MCS_DEPS) $(APP_SOURCES)
+	csc /debug:portable /noconfig /nostdlib /unsafe -out:$@ $(TEST_MCS_DEPS) $(APP_SOURCES)
 
 $(TOP)/mcs/class/lib/wasm/tests/wasm_corlib_test.dll: FORCE
 	$(MAKE) -C "$(TOP)/mcs/class/corlib" test-local PROFILE=wasm
@@ -119,7 +119,7 @@ managed/wasm_System.Core_test.dll: $(TOP)/mcs/class/lib/wasm/tests/wasm_System.C
 	cp $< $@
 
 managed/mini_tests.dll: $(TEST_DEPS) $(MINI_TEST_SOURCES) mini-test-runner.cs | managed/
-	mcs /nostdlib /unsafe -target:library -out:$@ -define:__MOBILE__,ARCH_32 $(TEST_MCS_DEPS) $(MINI_TEST_SOURCES) mini-test-runner.cs 
+	csc /debug:portable /nostdlib /noconfig /unsafe -target:library -out:$@ -define:__MOBILE__,ARCH_32 $(TEST_MCS_DEPS) $(MINI_TEST_SOURCES) mini-test-runner.cs 
 
 build-managed: managed/nunitlite.dll managed/mini_tests.dll managed/main.exe managed/wasm_corlib_test.dll managed/wasm_System_test.dll managed/wasm_System.Core_test.dll
 

@@ -1,4 +1,7 @@
 #include "mini.h"
+#include "mini-runtime.h"
+#include <mono/metadata/mono-debug.h>
+#include <emscripten.h>
 
 #include <emscripten.h>
 
@@ -321,10 +324,17 @@ mono_wasm_debugger_init (void)
 	mini_get_debug_options ()->load_aot_jit_info_eagerly = TRUE;
 }
 
-
-MONO_API void
+void
 mono_wasm_enable_debugging (void)
 {
 	debugger_enabled = TRUE;
+}
+
+EMSCRIPTEN_KEEPALIVE
+int
+mono_wasm_set_breakpoint (const char *assembly, int method_token, int il_offset)
+{
+	printf ("assembly %s method %x offset %x\n", assembly, method_token, il_offset);
+	return 1;
 }
 
