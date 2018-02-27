@@ -160,7 +160,8 @@ mono_aot_get_trampoline_full (const char *name, MonoTrampInfo **out_tinfo)
 	else if (!strcmp (name, "interp_to_native_trampoline"))
 		code = wasm_interp_to_native_trampoline;
 
-	g_assert (code);
+	if (!code)
+		g_error ("could not find trampoline for %s\n", name);
 
 	if (out_tinfo) {
 		MonoTrampInfo *tinfo = g_new0 (MonoTrampInfo, 1);
