@@ -2,6 +2,10 @@ TOP=$(realpath $(CURDIR)/../..)
 include $(TOP)/sdks/versions.mk
 include $(TOP)/sdks/paths.mk
 
+#Use either 'release' or 'debug' dependending on what you need
+DRIVER_CONF=debug
+
+
 EMCC=source $(TOP)/sdks/builds/toolchains/emsdk/emsdk_env.sh && emcc
 D8=$(TOP)/sdks/wasm/v8/out.gn/x64.release/d8
 WASM_BCL_DIR=$(TOP)/sdks/out/bcl/wasm
@@ -68,18 +72,17 @@ debug/:
 release/:
 	mkdir -p $@
 
-debug/mono.js: driver.o library_mono.js $(TOP)/sdks/out/wasm-interp/lib/libmonosgen-2.0.a | debug/
+debug/mono.wasm debug/mono.js: driver.o library_mono.js $(TOP)/sdks/out/wasm-interp/lib/libmonosgen-2.0.a | debug/
 	$(EMCC) -g4 -Os -s WASM=1 -s ALLOW_MEMORY_GROWTH=1 -s BINARYEN=1 -s "BINARYEN_TRAP_MODE='clamp'" -s TOTAL_MEMORY=134217728 -s ALIASING_FUNCTION_POINTERS=0 -s ASSERTIONS=2 --js-library library_mono.js driver.o $(TOP)/sdks/out/wasm-interp/lib/libmonosgen-2.0.a -o debug/mono.js -s NO_EXIT_RUNTIME=1 -s "EXTRA_EXPORTED_RUNTIME_METHODS=['ccall', 'FS_createPath', 'FS_createDataFile', 'cwrap', 'setValue', 'getValue', 'UTF8ToString']"
 
-release/mono.js: driver.o library_mono.js $(TOP)/sdks/out/wasm-interp/lib/libmonosgen-2.0.a | release/
+release/mono.wasm release/mono.js: driver.o library_mono.js $(TOP)/sdks/out/wasm-interp/lib/libmonosgen-2.0.a | release/
 	$(EMCC) -Oz --llvm-opts 2 --llvm-lto 1 -s WASM=1 -s ALLOW_MEMORY_GROWTH=1 -s BINARYEN=1 -s "BINARYEN_TRAP_MODE='clamp'" -s TOTAL_MEMORY=134217728 -s ALIASING_FUNCTION_POINTERS=0 --js-library library_mono.js driver.o $(TOP)/sdks/out/wasm-interp/lib/libmonosgen-2.0.a -o release/mono.js -s NO_EXIT_RUNTIME=1 -s "EXTRA_EXPORTED_RUNTIME_METHODS=['ccall', 'FS_createPath', 'FS_createDataFile', 'cwrap', 'setValue', 'getValue', 'UTF8ToString']"
 
-release/mono.wasm: release/mono.js
 
-mono.js: release/mono.js
-	cp release/mono.js mono.js
+mono.js: $(DRIVER_CONF)/mono.js
+	cp $< $@
 
-mono.wasm: release/mono.wasm
+mono.wasm: $(DRIVER_CONF)/mono.wasm
 	cp $< $@
 
 build-native: mono.js mono.wasm debug/mono.js release/mono.js
