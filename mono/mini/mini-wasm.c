@@ -9,6 +9,12 @@
 #include <emscripten.h>
 
 void mono_wasm_enable_debugging (void);
+void wasm_breakpoint_hit (void);
+
+static int log_level = 1;
+
+#define DEBUG_PRINTF(level, ...) do { if (G_UNLIKELY ((level) <= log_level)) { fprintf (stdout, __VA_ARGS__); } } while (0)
+
 EMSCRIPTEN_KEEPALIVE int mono_wasm_set_breakpoint (char *mvid, int method_token, int il_offset);
 
 gpointer
@@ -424,12 +430,11 @@ insert_breakpoint (MonoSeqPointInfo *seq_points, MonoDomain *domain, MonoJitInfo
 
 	error_init (error);
 	
-	printf ("***insert_breakpoint JI [%p] method %s at %d SP DATA %p\n", ji, jinfo_get_method (ji)->name, bp->il_offset, seq_points);
+	DEBUG_PRINTF (1, "insert_breakpoint: JI [%p] method %s at %d SP %p\n", ji, jinfo_get_method (ji)->name, bp->il_offset, seq_points);
 
 	mono_seq_point_iterator_init (&it, seq_points);
 	while (mono_seq_point_iterator_next (&it)) {
 		if (it.seq_point.il_offset == bp->il_offset) {
-			printf (">>FOUND BP\n");
 			it_has_sp = TRUE;
 			break;
 		}
@@ -452,13 +457,13 @@ insert_breakpoint (MonoSeqPointInfo *seq_points, MonoDomain *domain, MonoJitInfo
 	}
 
 	if (!it_has_sp) {
-		printf ("Unable to insert breakpoint at %s:%d. SeqPoint data:", mono_method_full_name (jinfo_get_method (ji), TRUE), bp->il_offset);
+		DEBUG_PRINTF (1, "Unable to insert breakpoint at %s:%d. SeqPoint data:", mono_method_full_name (jinfo_get_method (ji), TRUE), bp->il_offset);
 
 		mono_seq_point_iterator_init (&it, seq_points);
 		while (mono_seq_point_iterator_next (&it))
-			printf ("\t%d\n", it.seq_point.il_offset);
+			DEBUG_PRINTF (1, "\t%d\n", it.seq_point.il_offset);
 
-		printf ("End of data\n");
+		DEBUG_PRINTF (1, "End of data\n");
 		mono_error_set_error (error, MONO_ERROR_GENERIC, "Failed to find the SP for the given il offset");
 		return FALSE;
 	}
@@ -484,9 +489,9 @@ insert_breakpoint (MonoSeqPointInfo *seq_points, MonoDomain *domain, MonoJitInfo
 	// dbg_unlock ();
 
 	if (it.seq_point.native_offset == SEQ_POINT_NATIVE_OFFSET_DEAD_CODE) {
-		printf ("[dbg] Attempting to insert seq point at dead IL offset %d, ignoring.\n", (int)bp->il_offset);
+		DEBUG_PRINTF (1, "Attempting to insert seq point at dead IL offset %d, ignoring.\n", (int)bp->il_offset);
 	} else if (count == 0) {
-		printf("ACTIVATING BREAKPOINT in %s\n", jinfo_get_method (ji)->name);
+		DEBUG_PRINTF (1, "ACTIVATING BREAKPOINT in %s\n", jinfo_get_method (ji)->name);
 		if (ji->is_interp) {
 			mini_get_interp_callbacks ()->set_breakpoint (ji, inst->ip);
 		} else {
@@ -509,7 +514,7 @@ resolve_request (BreakPointRequest *bp)
 
 	MonoAssembly *assembly = bp->assembly ? bp->assembly : g_hash_table_lookup (mvid_to_assembly, bp->mvid);
 	if (!assembly) {
-		printf ("coult not find assembly with mvid %s\n", bp->mvid);
+		DEBUG_PRINTF (1, "coult not find assembly with mvid %s\n", bp->mvid);
 		return FALSE;
 	}
 	bp->assembly = assembly;
@@ -517,7 +522,7 @@ resolve_request (BreakPointRequest *bp)
 	MonoMethod *method = bp->method ? bp->method : mono_get_method_checked (assembly->image, MONO_TOKEN_METHOD_DEF | bp->method_token, NULL, NULL, error);
 	if (!method) {
 		//FIXME don't swallow the error
-		printf ("Could not find method due to %s\n", mono_error_get_message (error));
+		DEBUG_PRINTF (1, "Could not find method due to %s\n", mono_error_get_message (error));
 		mono_error_cleanup (error);
 		return FALSE;
 	}
@@ -577,7 +582,7 @@ add_breakpoint (BreakPointRequest *bp)
 
 			if (!set_breakpoint (method, seq_points, bp, error)) {
 				//FIXME don't swallow the error
-				printf ("Error setting breaking due to %s\n", mono_error_get_message (error));
+				DEBUG_PRINTF (1, "Error setting breaking due to %s\n", mono_error_get_message (error));
 				mono_error_cleanup (error);
 				return;
 			}
@@ -600,7 +605,6 @@ add_pending_breakpoints (MonoMethod *method, MonoJitInfo *ji)
 	MonoDomain *domain;
 	MonoMethod *jmethod;
 
-	printf ("adding pending breakings for %s\n", method->name);
 	if (!active_breakpoints)
 		return;
 
@@ -618,7 +622,6 @@ add_pending_breakpoints (MonoMethod *method, MonoJitInfo *ji)
 		if (!breakpoint_matches (bp, method))
 			continue;
 
-		printf ("\tBP [%d] matched\n", i);
 		for (j = 0; j < bp->children->len; ++j) {
 			BreakpointInstance *inst = (BreakpointInstance *)g_ptr_array_index (bp->children, j);
 
@@ -629,7 +632,6 @@ add_pending_breakpoints (MonoMethod *method, MonoJitInfo *ji)
 		if (!found) {
 			ERROR_DECL (error);
 			MonoMethod *declaring = NULL;
-			printf ("\tBP not installed \\o/\n");
 
 			jmethod = jinfo_get_method (ji);
 			if (jmethod->is_inflated)
@@ -641,18 +643,15 @@ add_pending_breakpoints (MonoMethod *method, MonoJitInfo *ji)
 				seq_points = (MonoSeqPointInfo *)g_hash_table_lookup (domain_jit_info (domain)->seq_points, declaring);
 			mono_domain_unlock (domain);
 			if (!seq_points) {
-				printf ("\tno seq points\n");
 				/* Could be AOT code */
 				continue;
 			}
 			g_assert (seq_points);
 
 			if (!insert_breakpoint (seq_points, domain, ji, bp, error)) {
-				printf ("Failed to resolve pending BP due to %s\n", mono_error_get_message (error));
+				DEBUG_PRINTF (1, "Failed to resolve pending BP due to %s\n", mono_error_get_message (error));
 				mono_error_cleanup (error);
 			}
-		} else {
-			printf ("\tBP installed!\n");
 		}
 	}
 
@@ -671,7 +670,7 @@ assembly_loaded (MonoProfiler *prof, MonoAssembly *assembly)
 	char *mvid = mono_guid_to_string ((uint8_t*)assembly->image->heap_guid.data);
 	inplace_tolower (mvid);
 
-	printf ("ASSEMBLY %s loaded mvid: %s\n", assembly->image->name, mvid);
+	DEBUG_PRINTF (1, "ASSEMBLY %s loaded mvid: %s\n", assembly->image->name, mvid);
 	g_hash_table_insert (mvid_to_assembly, mvid, assembly);
 }
 
@@ -679,7 +678,6 @@ assembly_loaded (MonoProfiler *prof, MonoAssembly *assembly)
 void
 mono_wasm_debugger_init (void)
 {
-	printf ("INITING THE DEBUGGER %d\n", debugger_enabled);
 	if (!debugger_enabled)
 		return;
 
@@ -701,7 +699,7 @@ mono_wasm_debugger_init (void)
 void
 mono_wasm_enable_debugging (void)
 {
-	printf ("DEBUGGING ENABLED\n");
+	DEBUG_PRINTF (1, "DEBUGGING ENABLED");
 	debugger_enabled = TRUE;
 }
 
@@ -709,7 +707,7 @@ mono_wasm_enable_debugging (void)
 EMSCRIPTEN_KEEPALIVE int
 mono_wasm_set_breakpoint (char *mvid, int method_token, int il_offset)
 {
-	printf ("assembly %s method %x offset %x\n", mvid, method_token, il_offset);
+	DEBUG_PRINTF (1, "SET BREAKPOINT: assembly %s method %x offset %x\n", mvid, method_token, il_offset);
 
 	BreakPointRequest *req = breakpoint_request_new (mvid, method_token, il_offset);
 
@@ -717,3 +715,24 @@ mono_wasm_set_breakpoint (char *mvid, int method_token, int il_offset)
 	return req->bp_id;
 }
 
+//trampoline
+extern void mono_wasm_fire_bp (void);
+void
+wasm_breakpoint_hit (void)
+{
+	mono_wasm_fire_bp ();
+}
+
+EMSCRIPTEN_KEEPALIVE int
+mono_wasm_current_bp_id (void)
+{
+	return 1;
+}
+
+extern void mono_wasm_add_frame (int il_offset, int method_token, const char *assembly_mvid);
+
+EMSCRIPTEN_KEEPALIVE void
+mono_wasm_enum_frames (void)
+{
+	mono_wasm_add_frame (1, 1, "55571058-2776-4f09-8ddc-00bd0630bbe9");
+}

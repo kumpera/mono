@@ -12,6 +12,8 @@
 
 #ifdef TARGET_WASM
 
+void wasm_breakpoint_hit (void);
+
 static void
 wasm_restore_context (void)
 {
@@ -159,6 +161,8 @@ mono_aot_get_trampoline_full (const char *name, MonoTrampInfo **out_tinfo)
 		code = wasm_throw_corlib_exception;
 	else if (!strcmp (name, "interp_to_native_trampoline"))
 		code = wasm_interp_to_native_trampoline;
+	else if (!strcmp (name, "sdb_breakpoint_trampoline"))
+		code = wasm_breakpoint_hit;
 
 	if (!code)
 		g_error ("could not find trampoline for %s\n", name);
