@@ -5,17 +5,32 @@
 #include <mono/metadata/metadata.h>
 #include <mono/metadata/seq-points-data.h>
 #include <mono/mini/aot-runtime.h>
+#include <mono/mini/seq-points.h>
 
 #include <emscripten.h>
 
-void mono_wasm_enable_debugging (void);
-void wasm_breakpoint_hit (void);
 
 static int log_level = 1;
 
 #define DEBUG_PRINTF(level, ...) do { if (G_UNLIKELY ((level) <= log_level)) { fprintf (stdout, __VA_ARGS__); } } while (0)
 
+
+//XXX put this on mini-wasm.h
+void mono_wasm_enable_debugging (void);
+void wasm_breakpoint_hit (void);
+void mono_wasm_set_timeout (int timeout, int id);
+
+//functions exported to be used by JS
 EMSCRIPTEN_KEEPALIVE int mono_wasm_set_breakpoint (char *mvid, int method_token, int il_offset);
+EMSCRIPTEN_KEEPALIVE void mono_set_timeout_exec (int id);
+EMSCRIPTEN_KEEPALIVE int mono_wasm_current_bp_id (void);
+EMSCRIPTEN_KEEPALIVE void mono_wasm_enum_frames (void);
+
+//JS functions imported that we use
+extern void mono_wasm_add_frame (int il_offset, int method_token, const char *assembly_mvid);
+extern void mono_wasm_fire_bp (void);
+extern void mono_set_timeout (int t, int d);
+
 
 gpointer
 mono_arch_get_this_arg_from_call (mgreg_t *regs, guint8 *code)
@@ -198,8 +213,6 @@ mono_set_timeout_exec (int id)
 		g_free (type_name);
 	}
 }
-
-extern void mono_set_timeout (int t, int d);
 
 void
 mono_wasm_set_timeout (int timeout, int id)
@@ -716,7 +729,7 @@ mono_wasm_set_breakpoint (char *mvid, int method_token, int il_offset)
 }
 
 //trampoline
-extern void mono_wasm_fire_bp (void);
+
 void
 wasm_breakpoint_hit (void)
 {
@@ -726,13 +739,89 @@ wasm_breakpoint_hit (void)
 EMSCRIPTEN_KEEPALIVE int
 mono_wasm_current_bp_id (void)
 {
-	return 1;
+	int i, j;
+
+	DEBUG_PRINTF (1, "COMPUTING breapoint ID\n");
+	//FIXME handle compiled case
+
+	/* Interpreter */
+	MonoLMF *lmf = mono_get_lmf ();
+
+	g_assert (((guint64)lmf->previous_lmf) & 2);
+	MonoLMFExt *ext = (MonoLMFExt*)lmf;
+
+	g_assert (ext->interp_exit);
+	MonoInterpFrameHandle *frame = ext->interp_exit_data;
+	MonoJitInfo *ji = mini_get_interp_callbacks ()->frame_get_jit_info (frame);
+	guint8 *ip = mini_get_interp_callbacks ()->frame_get_ip (frame);
+
+	g_assert (ji && !ji->is_trampoline);
+	MonoMethod *method = jinfo_get_method (ji);
+
+	/* Compute the native offset of the breakpoint from the ip */
+	guint32 native_offset = ip - (guint8*)ji->code_start;
+
+	MonoSeqPointInfo *info = NULL;
+	SeqPoint sp;
+	gboolean found_sp = mono_find_prev_seq_point_for_native_offset (mono_domain_get (), method, native_offset, &info, &sp);
+	if (!found_sp)
+		DEBUG_PRINTF (1, "Could not find SP\n");
+
+	for (i = 0; i < active_breakpoints->len; ++i) {
+		BreakPointRequest *bp = (BreakPointRequest *)g_ptr_array_index (active_breakpoints, i);
+
+		if (!bp->method)
+			continue;
+
+		for (j = 0; j < bp->children->len; ++j) {
+			BreakpointInstance *inst = (BreakpointInstance *)g_ptr_array_index (bp->children, j);
+			if (inst->ji == ji && inst->il_offset == sp.il_offset && inst->native_offset == sp.native_offset) {
+				DEBUG_PRINTF (1, "FOUND BREAKPOINT idx %d ID %d\n", i, bp->bp_id);
+				return bp->bp_id;
+			}
+		}
+	}
+	DEBUG_PRINTF (1, "BP NOT FOUND for method %s JI %p il_offset %d\n", method->name, ji, sp.il_offset);
+
+	return -1;
 }
 
-extern void mono_wasm_add_frame (int il_offset, int method_token, const char *assembly_mvid);
+static gboolean
+list_frames (MonoStackFrameInfo *info, MonoContext *ctx, gpointer data)
+{
+	SeqPoint sp;
+	MonoMethod *method;
+
+	if (info->ji)
+		method = jinfo_get_method (info->ji);
+	else
+		method = info->method;
+
+	if (!method)
+		return FALSE;
+
+	DEBUG_PRINTF (2, "Reporting method %s (%p %d)\n", method->name, mono_get_root_domain (), info->native_offset);
+
+	if (!mono_find_prev_seq_point_for_native_offset (mono_get_root_domain (), method, info->native_offset, NULL, &sp))
+		DEBUG_PRINTF (1, "FAILED TO LOOKUP SEQ POINT\n");
+
+	while (method->is_inflated)
+		method = ((MonoMethodInflated*)method)->declaring;
+
+	char *mvid = mono_guid_to_string ((uint8_t*)method->klass->image->heap_guid.data);
+	inplace_tolower (mvid);
+
+	DEBUG_PRINTF (2, "adding off %d token %d mvid %s\n", sp.il_offset, mono_metadata_token_index (method->token), mvid);
+	if (method->wrapper_type == MONO_WRAPPER_NONE)
+		mono_wasm_add_frame (sp.il_offset, mono_metadata_token_index (method->token), mvid);
+
+	g_free (mvid);
+
+	return FALSE;
+}
 
 EMSCRIPTEN_KEEPALIVE void
 mono_wasm_enum_frames (void)
 {
-	mono_wasm_add_frame (1, 1, "55571058-2776-4f09-8ddc-00bd0630bbe9");
+	mono_get_eh_callbacks ()->mono_walk_stack_with_ctx (list_frames, NULL, MONO_UNWIND_NONE, NULL);
 }
