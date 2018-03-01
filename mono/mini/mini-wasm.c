@@ -7,6 +7,9 @@
 #include <mono/mini/aot-runtime.h>
 #include <mono/mini/seq-points.h>
 
+//XXX This is dirty, extend ee.h to support extracting info from MonoInterpFrameHandle
+#include <mono/mini/interp/interp-internals.h>
+
 #include <emscripten.h>
 
 
@@ -25,11 +28,13 @@ EMSCRIPTEN_KEEPALIVE int mono_wasm_set_breakpoint (char *mvid, int method_token,
 EMSCRIPTEN_KEEPALIVE void mono_set_timeout_exec (int id);
 EMSCRIPTEN_KEEPALIVE int mono_wasm_current_bp_id (void);
 EMSCRIPTEN_KEEPALIVE void mono_wasm_enum_frames (void);
+EMSCRIPTEN_KEEPALIVE void mono_wasm_get_var_info (int scope, int pos);
 
 //JS functions imported that we use
 extern void mono_wasm_add_frame (int il_offset, int method_token, const char *assembly_mvid);
 extern void mono_wasm_fire_bp (void);
 extern void mono_set_timeout (int t, int d);
+extern void mono_wasm_add_var (const char *var_type, const char *var_value);
 
 
 gpointer
@@ -825,3 +830,43 @@ mono_wasm_enum_frames (void)
 {
 	mono_get_eh_callbacks ()->mono_walk_stack_with_ctx (list_frames, NULL, MONO_UNWIND_NONE, NULL);
 }
+
+//FIXME this doesn't support getting the return value pseudo-var
+EMSCRIPTEN_KEEPALIVE void
+mono_wasm_get_var_info (int scope, int pos)
+{
+	ERROR_DECL (error);
+	printf ("getting var %d of scope %d\n", pos, scope);
+
+	InterpFrame *frame = mini_get_interp_callbacks ()->get_frame_by_idx (scope);
+	if (!frame) {
+		printf ("bad frame index %d\n", scope);
+		return;
+	}
+
+	MonoMethod *method = frame->imethod->method;
+	printf ("METHOD IS %p %s\n", method, method ? mono_method_full_name (method, TRUE) : "<null>");
+
+
+	MonoType *type;
+	gpointer addr;
+	if (pos < 0) {
+		pos = -pos - 1;
+		type = mono_method_signature (method)->params [pos];
+		addr = mini_get_interp_callbacks ()->frame_get_arg (frame, pos);
+	} else {
+		MonoMethodHeader *header = mono_method_get_header_checked (method, error);
+		mono_error_assert_ok (error); /* FIXME report error */
+
+		type = header->locals [pos];
+		addr = mini_get_interp_callbacks ()->frame_get_local (frame, pos);
+		mono_metadata_free_mh (header);
+	}
+
+	printf ("adding val %p type %s\n", addr, mono_type_full_name (type));
+
+	char *x = g_strdup_printf ("%d_%d", scope, pos);
+	mono_wasm_add_var ("string", x);
+	g_free (x);
+}
+

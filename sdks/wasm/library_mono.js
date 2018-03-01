@@ -36,18 +36,26 @@ var MonoSupportLib = {
 		},
 
 		mono_wasm_get_variables: function(scope, var_list) {
-			var res = [];
-			for(var i in var_list) {
-				res.push({
-					value: {
-						type: "string",
-						value: "scope_" + scope + "_" + i
-					}
-				})
-			}
+			if (!this.mono_wasm_get_var_info)
+				this.mono_wasm_get_var_info = Module.cwrap ("mono_wasm_get_var_info", 'void', [ 'number', 'number']);
+
+			//FIXME it would be more efficient to do a single call passing an array with var_list as argument instead
+			this.var_info = [];
+			for (var i in var_list)
+				this.mono_wasm_get_var_info (scope, i);
+
+			var res = this.var_info;
+			this.var_info = []
 
 			return res;
 		},
+	},
+
+	mono_wasm_add_var: function(var_type, var_value) {
+			MONO.var_info.push({
+				type: Module.UTF8ToString (var_type),
+				value: Module.UTF8ToString (var_value),
+			});
 	},
 
 	mono_wasm_add_frame: function(il, method, mvid) {

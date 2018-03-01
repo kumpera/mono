@@ -923,6 +923,25 @@ interp_walk_stack_with_ctx (MonoInternalStackWalk func, MonoContext *ctx, MonoUn
 	}
 }
 
+
+static MonoInterpFrameHandle
+interp_get_frame_by_idx (int idx)
+{
+	ThreadContext *context = mono_native_tls_get_value (thread_context_id);
+
+	if (!context)
+		return NULL;
+
+	InterpFrame *frame = context->current_frame;
+	
+	while (frame && idx > 0) {
+		frame = frame->parent;
+		--idx;
+	}
+
+	return frame;
+}
+
 static MonoPIFunc mono_interp_to_native_trampoline = NULL;
 
 #ifndef MONO_ARCH_HAVE_INTERP_PINVOKE_TRAMP
@@ -5484,5 +5503,6 @@ mono_ee_interp_init (const char *opts)
 	c.frame_arg_to_storage = interp_frame_arg_to_storage;
 	c.start_single_stepping = interp_start_single_stepping;
 	c.stop_single_stepping = interp_stop_single_stepping;
+	c.get_frame_by_idx = interp_get_frame_by_idx;
 	mini_install_interp_callbacks (&c);
 }
