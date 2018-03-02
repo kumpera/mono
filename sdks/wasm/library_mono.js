@@ -41,8 +41,8 @@ var MonoSupportLib = {
 
 			//FIXME it would be more efficient to do a single call passing an array with var_list as argument instead
 			this.var_info = [];
-			for (var i in var_list)
-				this.mono_wasm_get_var_info (scope, i);
+			for (var i = 0; i <  var_list.length; ++i)
+				this.mono_wasm_get_var_info (scope, var_list [i]);
 
 			var res = this.var_info;
 			this.var_info = []
@@ -51,12 +51,69 @@ var MonoSupportLib = {
 		},
 	},
 
-	mono_wasm_add_var: function(var_type, var_value) {
-			MONO.var_info.push({
-				type: Module.UTF8ToString (var_type),
-				value: Module.UTF8ToString (var_value),
-			});
+	mono_wasm_add_bool_var: function(var_value) {
+		MONO.var_info.push({
+			value: {
+				type: "boolean",
+				value: var_value != 0,
+			}
+		});
 	},
+
+	mono_wasm_add_int_var: function(var_value) {
+		MONO.var_info.push({
+			value: {
+				type: "number",
+				value: var_value,
+			}
+		});
+	},
+
+	mono_wasm_add_long_var: function(var_value) {
+		MONO.var_info.push({
+			value: {
+				type: "number",
+				value: var_value,
+			}
+		});
+	},
+
+	mono_wasm_add_float_var: function(var_value) {
+		MONO.var_info.push({
+			value: {
+				type: "number",
+				value: var_value,
+			}
+		});
+	},
+
+	mono_wasm_add_double_var: function(var_value) {
+		MONO.var_info.push({
+			value: {
+				type: "number",
+				value: var_value,
+			}
+		});
+	},
+
+	mono_wasm_add_string_var: function(var_value) {
+		if (var_value == 0) {
+			MONO.var_info.push({
+				value: {
+					type: "object",
+					subtype: "null"
+				}
+			});
+		} else {
+			MONO.var_info.push({
+				value: {
+					type: "string",
+					value: Module.UTF8ToString (var_value),
+				}
+			});
+		}
+	},
+
 
 	mono_wasm_add_frame: function(il, method, mvid) {
 		MONO.active_frames.push( {

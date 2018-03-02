@@ -34,7 +34,12 @@ EMSCRIPTEN_KEEPALIVE void mono_wasm_get_var_info (int scope, int pos);
 extern void mono_wasm_add_frame (int il_offset, int method_token, const char *assembly_mvid);
 extern void mono_wasm_fire_bp (void);
 extern void mono_set_timeout (int t, int d);
-extern void mono_wasm_add_var (const char *var_type, const char *var_value);
+extern void mono_wasm_add_bool_var (gint8);
+extern void mono_wasm_add_int_var (gint32);
+extern void mono_wasm_add_long_var (gint64);
+extern void mono_wasm_add_float_var (float);
+extern void mono_wasm_add_double_var (double);
+extern void mono_wasm_add_string_var (const char*);
 
 
 gpointer
@@ -835,6 +840,7 @@ mono_wasm_enum_frames (void)
 EMSCRIPTEN_KEEPALIVE void
 mono_wasm_get_var_info (int scope, int pos)
 {
+	MonoMethodHeader *header = NULL;
 	ERROR_DECL (error);
 	printf ("getting var %d of scope %d\n", pos, scope);
 
@@ -848,25 +854,73 @@ mono_wasm_get_var_info (int scope, int pos)
 	printf ("METHOD IS %p %s\n", method, method ? mono_method_full_name (method, TRUE) : "<null>");
 
 
-	MonoType *type;
-	gpointer addr;
+	MonoType *type = NULL;
+	gpointer addr = NULL;
 	if (pos < 0) {
 		pos = -pos - 1;
 		type = mono_method_signature (method)->params [pos];
 		addr = mini_get_interp_callbacks ()->frame_get_arg (frame, pos);
 	} else {
-		MonoMethodHeader *header = mono_method_get_header_checked (method, error);
+		header = mono_method_get_header_checked (method, error);
 		mono_error_assert_ok (error); /* FIXME report error */
 
+		printf (">header %plocals %p (num %d)\n", header, header->locals, header->num_locals);
 		type = header->locals [pos];
 		addr = mini_get_interp_callbacks ()->frame_get_local (frame, pos);
-		mono_metadata_free_mh (header);
 	}
 
-	printf ("adding val %p type %s\n", addr, mono_type_full_name (type));
+	printf ("adding val %p type [%p] %s\n", addr, type, mono_type_full_name (type));
 
-	char *x = g_strdup_printf ("%d_%d", scope, pos);
-	mono_wasm_add_var ("string", x);
-	g_free (x);
+
+	switch (type->type) {
+		case MONO_TYPE_BOOLEAN:
+			mono_wasm_add_bool_var (*(gint8*)addr);
+			break;
+		case MONO_TYPE_I1:
+		case MONO_TYPE_U1:
+			mono_wasm_add_int_var (*(gint8*)addr);
+			break;
+		case MONO_TYPE_CHAR:
+		case MONO_TYPE_I2:
+		case MONO_TYPE_U2:
+			mono_wasm_add_int_var (*(gint16*)addr);
+			break;
+		case MONO_TYPE_I4:
+		case MONO_TYPE_U4:
+		case MONO_TYPE_I:
+		case MONO_TYPE_U:
+			mono_wasm_add_int_var (*(gint32*)addr);
+			break;
+		case MONO_TYPE_I8:
+		case MONO_TYPE_U8:
+			mono_wasm_add_long_var (*(gint32*)addr);
+			break;
+		case MONO_TYPE_R4:
+			mono_wasm_add_float_var (*(float*)addr);
+			break;
+		case MONO_TYPE_R8:
+			mono_wasm_add_float_var (*(double*)addr);
+			break;
+		case MONO_TYPE_STRING: {
+			MonoString *str_obj = *(MonoString **)addr;
+			if (!str_obj)
+				mono_wasm_add_string_var (NULL);
+			char *str = mono_string_to_utf8_checked (str_obj, error);
+			mono_error_assert_ok (error); /* FIXME report error */
+
+			mono_wasm_add_string_var (str);
+			g_free (str);
+			break;
+		}
+		default: {
+			char *type_name = mono_type_full_name (type);
+			char *msg = g_strdup_printf("can't handle type %s [%p, %x]", type_name, type, type->type);
+			mono_wasm_add_string_var (msg);
+			g_free (msg);
+			g_free (type_name);
+		}
+	}
+	if (header)
+		mono_metadata_free_mh (header);
 }
 

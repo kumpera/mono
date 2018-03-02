@@ -903,6 +903,7 @@ interp_walk_stack_with_ctx (MonoInternalStackWalk func, MonoContext *ctx, MonoUn
 
 		/* TODO: hack to make some asserts happy. */
 		fi.ji = (MonoJitInfo *) frame->imethod;
+		fi.domain = frame->imethod->domain;
 
 		if (frame->imethod)
 			fi.method = fi.actual_method = frame->imethod->method;
