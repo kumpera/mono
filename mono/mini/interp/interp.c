@@ -913,7 +913,7 @@ interp_walk_stack_with_ctx (MonoInternalStackWalk func, MonoContext *ctx, MonoUn
 			fi.type = FRAME_TYPE_MANAGED_TO_NATIVE;
 		} else {
 			fi.type = FRAME_TYPE_MANAGED;
-			fi.native_offset = frame->ip - frame->imethod->code;
+			fi.native_offset = (guint8*)frame->ip - (guint8*)frame->imethod->code;
 			if (!fi.method->wrapper_type)
 				fi.managed = TRUE;
 		}

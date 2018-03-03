@@ -810,7 +810,7 @@ list_frames (MonoStackFrameInfo *info, MonoContext *ctx, gpointer data)
 	if (!method)
 		return FALSE;
 
-	DEBUG_PRINTF (2, "Reporting method %s (%p %d)\n", method->name, mono_get_root_domain (), info->native_offset);
+	DEBUG_PRINTF (2, "Reporting method %s native_offset %d\n", method->name, info->native_offset);
 
 	if (!mono_find_prev_seq_point_for_native_offset (mono_get_root_domain (), method, info->native_offset, NULL, &sp))
 		DEBUG_PRINTF (1, "FAILED TO LOOKUP SEQ POINT\n");
@@ -821,9 +821,10 @@ list_frames (MonoStackFrameInfo *info, MonoContext *ctx, gpointer data)
 	char *mvid = mono_guid_to_string ((uint8_t*)method->klass->image->heap_guid.data);
 	inplace_tolower (mvid);
 
-	DEBUG_PRINTF (2, "adding off %d token %d mvid %s\n", sp.il_offset, mono_metadata_token_index (method->token), mvid);
-	if (method->wrapper_type == MONO_WRAPPER_NONE)
+	if (method->wrapper_type == MONO_WRAPPER_NONE) {
+		DEBUG_PRINTF (2, "adding off %d token %d mvid %s\n", sp.il_offset, mono_metadata_token_index (method->token), mvid);
 		mono_wasm_add_frame (sp.il_offset, mono_metadata_token_index (method->token), mvid);
+	}
 
 	g_free (mvid);
 
@@ -842,16 +843,16 @@ mono_wasm_get_var_info (int scope, int pos)
 {
 	MonoMethodHeader *header = NULL;
 	ERROR_DECL (error);
-	printf ("getting var %d of scope %d\n", pos, scope);
+	DEBUG_PRINTF (2, "getting var %d of scope %d\n", pos, scope);
 
 	InterpFrame *frame = mini_get_interp_callbacks ()->get_frame_by_idx (scope);
 	if (!frame) {
-		printf ("bad frame index %d\n", scope);
+		DEBUG_PRINTF (1, "bad frame index %d\n", scope);
 		return;
 	}
 
 	MonoMethod *method = frame->imethod->method;
-	printf ("METHOD IS %p %s\n", method, method ? mono_method_full_name (method, TRUE) : "<null>");
+	DEBUG_PRINTF (2, "METHOD IS %p %s\n", method, method ? mono_method_full_name (method, TRUE) : "<null>");
 
 
 	MonoType *type = NULL;
@@ -864,12 +865,12 @@ mono_wasm_get_var_info (int scope, int pos)
 		header = mono_method_get_header_checked (method, error);
 		mono_error_assert_ok (error); /* FIXME report error */
 
-		printf (">header %plocals %p (num %d)\n", header, header->locals, header->num_locals);
+		DEBUG_PRINTF (2, ">header %plocals %p (num %d)\n", header, header->locals, header->num_locals);
 		type = header->locals [pos];
 		addr = mini_get_interp_callbacks ()->frame_get_local (frame, pos);
 	}
 
-	printf ("adding val %p type [%p] %s\n", addr, type, mono_type_full_name (type));
+	DEBUG_PRINTF (2, "adding val %p type [%p] %s\n", addr, type, mono_type_full_name (type));
 
 
 	switch (type->type) {
