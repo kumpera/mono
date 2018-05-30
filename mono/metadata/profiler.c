@@ -14,6 +14,7 @@
 #include <mono/utils/mono-dl.h>
 #include <mono/utils/mono-error-internals.h>
 #include <mono/utils/mono-logger-internals.h>
+#include <mono/utils/mono-counters.h>
 
 MonoProfilerState mono_profiler_state;
 
@@ -892,6 +893,19 @@ update_callback (volatile gpointer *location, gpointer new_, volatile gint32 *co
 		mono_atomic_inc_i32 (counter);
 }
 
+static void
+inc_lost_event_count (void)
+{
+	static int lost_event_count;
+	if (lost_event_count == 0)
+		mono_counters_register ("Lost Event Count", MONO_COUNTER_PROFILER | MONO_COUNTER_INT, &lost_event_count);
+
+	mono_atomic_inc_i32 (&lost_event_count);
+
+	g_error ("LETS trap on lost events to see where this is happening");
+}
+
+
 #define _MONO_PROFILER_EVENT(name, type) \
 	void \
 	mono_profiler_set_ ## name ## _callback (MonoProfilerHandle handle, MonoProfiler ## type ## Callback cb) \
@@ -923,7 +937,7 @@ update_callback (volatile gpointer *location, gpointer new_, volatile gint32 *co
 	void \
 	mono_profiler_raise_ ## name params \
 	{ \
-		if (!mono_profiler_state.startup_done) return;	\
+		if (!mono_profiler_state.startup_done) { inc_lost_event_count (); return; }	\
 		for (MonoProfilerHandle h = mono_profiler_state.profilers; h; h = h->next) { \
 			MonoProfiler ## type ## Callback cb = h->name ## _cb; \
 			if (cb) \
