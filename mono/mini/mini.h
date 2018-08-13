@@ -178,7 +178,7 @@ typedef struct {
  */
 typedef MonoStackFrameInfo StackFrameInfo;
 
-#ifndef MONO_CROSS_COMPILE
+#if !defined (MONO_CROSS_COMPILE) || defined (TARGET_WASM)
 /* Can't define these in object-offsets.h */
 #define MONO_SIZEOF_MonoMethodRuntimeGenericContext sizeof (MonoMethodRuntimeGenericContext)
 #define MONO_SIZEOF_MonoLMF sizeof (MonoLMF)

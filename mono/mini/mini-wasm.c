@@ -10,13 +10,106 @@
 //XXX This is dirty, extend ee.h to support extracting info from MonoInterpFrameHandle
 #include <mono/mini/interp/interp-internals.h>
 
-#include <emscripten.h>
+#ifndef DISABLE_JIT
 
-//functions exported to be used by JS
-EMSCRIPTEN_KEEPALIVE void mono_set_timeout_exec (int id);
+#include "ir-emit.h"
+#include "cpu-wasm.h"
 
-//JS functions imported that we use
-extern void mono_set_timeout (int t, int d);
+gboolean
+mono_arch_have_fast_tls (void)
+{
+	return FALSE;
+}
+
+guint32
+mono_arch_get_patch_offset (guint8 *code)
+{
+	g_error ("mono_arch_get_patch_offset");
+	return 0;
+}
+
+
+gpointer
+mono_arch_ip_from_context (void *sigctx)
+{
+	g_error ("mono_arch_ip_from_context");
+}
+
+gboolean 
+mono_arch_is_inst_imm (int opcode, int imm_opcode, gint64 imm)
+{
+	// g_error ("mono_arch_is_inst_imm");
+	return TRUE;
+}
+
+void
+mono_arch_lowering_pass (MonoCompile *cfg, MonoBasicBlock *bb)
+{
+	//DO NOTHING?
+}
+
+gboolean
+mono_arch_opcode_supported (int opcode)
+{
+	return FALSE;
+}
+
+void
+mono_arch_output_basic_block (MonoCompile *cfg, MonoBasicBlock *bb)
+{
+	g_error ("mono_arch_output_basic_block");
+}
+
+/*
+ * mono_arch_peephole_pass_1:
+ *
+ *   Perform peephole opts which should/can be performed before local regalloc
+ */
+void
+mono_arch_peephole_pass_1 (MonoCompile *cfg, MonoBasicBlock *bb)
+{
+}
+
+void
+mono_arch_peephole_pass_2 (MonoCompile *cfg, MonoBasicBlock *bb)
+{
+}
+
+guint32
+mono_arch_regalloc_cost (MonoCompile *cfg, MonoMethodVar *vmv)
+{
+	return 0;
+}
+
+GList *
+mono_arch_get_allocatable_int_vars (MonoCompile *cfg)
+{
+	g_error ("mono_arch_get_allocatable_int_vars");
+}
+
+int
+mono_arch_get_argument_info (MonoMethodSignature *csig, int param_count, MonoJitArgumentInfo *arg_info)
+{
+	g_error ("mono_arch_get_argument_info");
+}
+
+GSList*
+mono_arch_get_delegate_invoke_impls (void)
+{
+	g_error ("mono_arch_get_delegate_invoke_impls");
+}
+
+GList *
+mono_arch_get_global_int_regs (MonoCompile *cfg)
+{
+	g_error ("mono_arch_get_global_int_regs");
+}
+
+gpointer
+mono_arch_get_delegate_invoke_impl (MonoMethodSignature *sig, gboolean has_target)
+{
+	g_error ("mono_arch_get_delegate_invoke_impl");
+}
 
 gpointer
 mono_arch_get_this_arg_from_call (mgreg_t *regs, guint8 *code)
@@ -30,6 +123,304 @@ mono_arch_get_delegate_virtual_invoke_impl (MonoMethodSignature *sig, MonoMethod
 	g_error ("mono_arch_get_delegate_virtual_invoke_impl");
 }
 
+MonoInst*
+mono_arch_emit_inst_for_method (MonoCompile *cfg, MonoMethod *cmethod, MonoMethodSignature *fsig, MonoInst **args)
+{
+	return NULL;
+}
+
+void
+mono_arch_emit_call (MonoCompile *cfg, MonoCallInst *call)
+{
+	g_error ("mono_arch_emit_call");
+}
+
+MonoMethod*
+mono_arch_find_imt_method (mgreg_t *regs, guint8 *code)
+{
+	g_error ("mono_arch_find_imt_method");
+}
+
+MonoVTable*
+mono_arch_find_static_call_vtable (mgreg_t *regs, guint8 *code)
+{
+	g_error ("mono_arch_find_static_call_vtable");
+}
+
+gboolean
+mono_arch_tailcall_supported (MonoCompile *cfg, MonoMethodSignature *caller_sig, MonoMethodSignature *callee_sig)
+{
+	return FALSE;
+}
+
+MONO_NEVER_INLINE
+void
+mono_arch_flush_icache (guint8 *code, gint size)
+{
+	/* call/ret required (or likely other control transfer) */
+}
+
+const char*
+mono_arch_fregname (int reg)
+{
+	return "freg0";
+}
+
+const char*
+mono_arch_regname (int reg)
+{
+	return "r0";
+}
+
+void
+mono_arch_emit_outarg_vt (MonoCompile *cfg, MonoInst *ins, MonoInst *src)
+{
+	g_error ("mono_arch_emit_outarg_vt");
+}
+
+guint8 *
+mono_arch_emit_prolog (MonoCompile *cfg)
+{
+	g_error ("mono_arch_emit_prolog");
+}
+
+void
+mono_arch_emit_setret (MonoCompile *cfg, MonoMethod *method, MonoInst *val)
+{
+	MonoType *ret = mini_get_underlying_type (mono_method_signature (method)->ret);
+
+	if (!ret->byref) {
+		if (ret->type == MONO_TYPE_R4) {
+			MONO_EMIT_NEW_UNALU (cfg, cfg->r4fp ? OP_RMOVE : OP_FMOVE, cfg->ret->dreg, val->dreg);
+			return;
+		} else if (ret->type == MONO_TYPE_R8) {
+			MONO_EMIT_NEW_UNALU (cfg, OP_FMOVE, cfg->ret->dreg, val->dreg);
+			return;
+		} else if (ret->type == MONO_TYPE_I8 || ret->type == MONO_TYPE_U8) {
+			MONO_EMIT_NEW_UNALU (cfg, OP_LMOVE, cfg->ret->dreg, val->dreg);
+			return;
+		}
+	}
+	MONO_EMIT_NEW_UNALU (cfg, OP_MOVE, cfg->ret->dreg, val->dreg);
+}
+
+void
+mono_arch_allocate_vars (MonoCompile *cfg)
+{
+	g_error ("mono_arch_allocate_vars");
+}
+
+ //FIXME figure out if we need to distingush between i,l,f,d types
+typedef enum {
+	ArgOnStack,
+	ArgValuetypeAddrOnStack,
+	ArgGsharedVTOnStack,
+	ArgValuetypeAddrInIReg,
+	ArgInvalid,
+} ArgStorage;
+
+typedef struct {
+	ArgStorage storage : 8;
+} ArgInfo;
+
+typedef struct {
+	int nargs;
+	gboolean gsharedvt;
+
+	ArgInfo ret;
+	ArgInfo args [1];
+} CallInfo;
+
+static ArgStorage
+get_storage (MonoType *type, gboolean is_return)
+{
+	switch (type->type) {
+	case MONO_TYPE_I1:
+	case MONO_TYPE_U1:
+	case MONO_TYPE_I2:
+	case MONO_TYPE_U2:
+	case MONO_TYPE_I4:
+	case MONO_TYPE_U4:
+	case MONO_TYPE_I:
+	case MONO_TYPE_U:
+	case MONO_TYPE_PTR:
+	case MONO_TYPE_FNPTR:
+	case MONO_TYPE_OBJECT:
+		return ArgOnStack;
+
+	case MONO_TYPE_U8:
+	case MONO_TYPE_I8:
+		return ArgOnStack;
+
+	case MONO_TYPE_R4:
+		return ArgOnStack;
+
+	case MONO_TYPE_R8:
+		return ArgOnStack;
+
+	case MONO_TYPE_GENERICINST:
+		if (!mono_type_generic_inst_is_valuetype (type))
+			return ArgOnStack;
+
+		if (mini_is_gsharedvt_type (type)) {
+			return ArgGsharedVTOnStack;
+		}
+		/* fall through */
+	case MONO_TYPE_VALUETYPE:
+	case MONO_TYPE_TYPEDBYREF: {
+		return is_return ? ArgValuetypeAddrInIReg : ArgValuetypeAddrOnStack;
+		break;
+	}
+	case MONO_TYPE_VAR:
+	case MONO_TYPE_MVAR:
+		g_assert (mini_is_gsharedvt_type (type));
+		return ArgGsharedVTOnStack;
+		break;
+	case MONO_TYPE_VOID:
+		g_assert (is_return);
+		break;
+	default:
+		g_error ("Can't handle as return value 0x%x", type->type);
+	}
+	return ArgInvalid;
+}
+
+static CallInfo*
+get_call_info (MonoMemPool *mp, MonoMethodSignature *sig)
+{
+	int n = sig->hasthis + sig->param_count;
+	CallInfo *cinfo;
+
+	if (mp)
+		cinfo = (CallInfo *)mono_mempool_alloc0 (mp, sizeof (CallInfo) + (sizeof (ArgInfo) * n));
+	else
+		cinfo = (CallInfo *)g_malloc0 (sizeof (CallInfo) + (sizeof (ArgInfo) * n));
+
+	cinfo->nargs = n;
+	cinfo->gsharedvt = mini_is_gsharedvt_variable_signature (sig);
+
+	/* return value */
+	cinfo->ret.storage = get_storage (mini_get_underlying_type (sig->ret), TRUE);
+
+	if (sig->hasthis)
+		cinfo->args [0].storage = ArgOnStack;
+
+	// not supported
+	g_assert (sig->call_convention != MONO_CALL_VARARG);
+
+	int i;
+	for (i = 0; i < sig->param_count; ++i)
+		cinfo->args [i + sig->hasthis].storage = get_storage (mini_get_underlying_type (sig->params [i]), FALSE);
+
+	return cinfo;
+}
+
+
+void
+mono_arch_create_vars (MonoCompile *cfg)
+{
+	MonoMethodSignature *sig;
+	CallInfo *cinfo;
+	MonoType *sig_ret;
+
+	sig = mono_method_signature (cfg->method);
+
+	if (!cfg->arch.cinfo)
+		cfg->arch.cinfo = get_call_info (cfg->mempool, sig);
+	cinfo = (CallInfo *)cfg->arch.cinfo;
+
+	// if (cinfo->ret.storage == ArgValuetypeInReg)
+	// 	cfg->ret_var_is_local = TRUE;
+
+	sig_ret = mini_get_underlying_type (sig->ret);
+	if (cinfo->ret.storage == ArgValuetypeAddrInIReg || cinfo->ret.storage == ArgGsharedVTOnStack) {
+		cfg->vret_addr = mono_compile_create_var (cfg, mono_get_int_type (), OP_ARG);
+		if (G_UNLIKELY (cfg->verbose_level > 1)) {
+			printf ("vret_addr = ");
+			mono_print_ins (cfg->vret_addr);
+		}
+	}
+
+	if (cfg->gen_sdb_seq_points)
+		g_error ("gen_sdb_seq_points not supported");
+
+	if (cfg->method->save_lmf)
+		cfg->create_lmf_var = TRUE;
+
+	if (cfg->method->save_lmf)
+		cfg->lmf_ir = TRUE;
+}
+
+
+LLVMCallInfo*
+mono_arch_get_llvm_call_info (MonoCompile *cfg, MonoMethodSignature *sig)
+{
+	int i, n;
+	CallInfo *cinfo;
+	LLVMCallInfo *linfo;
+
+	cinfo = get_call_info (cfg->mempool, sig);
+	n = cinfo->nargs;
+
+	linfo = mono_mempool_alloc0 (cfg->mempool, sizeof (LLVMCallInfo) + (sizeof (LLVMArgInfo) * n));
+
+	if (mini_type_is_vtype (sig->ret)) {
+		/* Vtype returned using a hidden argument */
+		linfo->ret.storage = LLVMArgVtypeRetAddr;
+		// linfo->vret_arg_index = cinfo->vret_arg_index;
+	} else {
+		if (sig->ret->type != MONO_TYPE_VOID)
+			linfo->ret.storage = LLVMArgNormal;
+	}
+
+	for (i = 0; i < n; ++i) {
+		ArgInfo *ainfo = &cinfo->args[i];
+
+		switch (ainfo->storage) {
+		case ArgOnStack:
+			linfo->args [i].storage = LLVMArgNormal;
+			break;
+		case ArgValuetypeAddrOnStack:
+			linfo->args [i].storage = LLVMArgVtypeByRef;
+			break;
+		case ArgGsharedVTOnStack:
+			linfo->args [i].storage = LLVMArgGsharedvtVariable;
+			break;
+		case ArgValuetypeAddrInIReg:
+			g_error ("this is only valid for sig->ret");
+			break;
+		}
+	}
+
+	return linfo;
+}
+
+
+void
+mono_arch_emit_epilog (MonoCompile *cfg)
+{
+	g_error ("mono_arch_emit_epilog");
+}
+
+void
+mono_arch_emit_exceptions (MonoCompile *cfg)
+{
+	g_error ("mono_arch_emit_exceptions");
+}
+
+gpointer
+mono_arch_get_gsharedvt_call_info (gpointer addr, MonoMethodSignature *normal_sig, MonoMethodSignature *gsharedvt_sig, gboolean gsharedvt_in, gint32 vcall_offset, gboolean calli)
+{
+	g_error ("mono_arch_get_gsharedvt_call_info");
+}
+
+#endif
+
+gpointer
+mono_arch_build_imt_trampoline (MonoVTable *vtable, MonoDomain *domain, MonoIMTCheckItem **imt_entries, int count, gpointer fail_tramp)
+{
+	g_error ("mono_arch_build_imt_trampoline");
+}
 
 void
 mono_arch_cpu_init (void)
@@ -69,25 +460,11 @@ mono_arch_free_jit_tls_data (MonoJitTlsData *tls)
 {
 }
 
-
-MonoMethod*
-mono_arch_find_imt_method (mgreg_t *regs, guint8 *code)
+mgreg_t
+mono_arch_context_get_int_reg (MonoContext *ctx, int reg)
 {
-	g_error ("mono_arch_find_static_call_vtable");
-	return (MonoMethod*) regs [MONO_ARCH_IMT_REG];
-}
-
-MonoVTable*
-mono_arch_find_static_call_vtable (mgreg_t *regs, guint8 *code)
-{
-	g_error ("mono_arch_find_static_call_vtable");
-	return (MonoVTable*) regs [MONO_ARCH_RGCTX_REG];
-}
-
-gpointer
-mono_arch_build_imt_trampoline (MonoVTable *vtable, MonoDomain *domain, MonoIMTCheckItem **imt_entries, int count, gpointer fail_tramp)
-{
-	g_error ("mono_arch_build_imt_trampoline");
+	g_error ("mono_arch_context_get_int_reg");
+	return 0;
 }
 
 guint32
@@ -102,33 +479,20 @@ mono_arch_cpu_optimizations (guint32 *exclude_mask)
 	return 0;
 }
 
-GSList*
-mono_arch_get_delegate_invoke_impls (void)
-{
-	g_error ("mono_arch_get_delegate_invoke_impls");
-	return NULL;
-}
+#ifdef HOST_WASM
+#include <emscripten.h>
 
-gpointer
-mono_arch_get_delegate_invoke_impl (MonoMethodSignature *sig, gboolean has_target)
-{
-	g_error ("mono_arch_get_delegate_invoke_impl");
-	return NULL;
-}
+//functions exported to be used by JS
+EMSCRIPTEN_KEEPALIVE void mono_set_timeout_exec (int id);
 
-mgreg_t
-mono_arch_context_get_int_reg (MonoContext *ctx, int reg)
-{
-	g_error ("mono_arch_context_get_int_reg");
-	return 0;
-}
+//JS functions imported that we use
+extern void mono_set_timeout (int t, int d);
 
-int
-mono_arch_get_argument_info (MonoMethodSignature *csig, int param_count, MonoJitArgumentInfo *arg_info)
+MonoVTable*
+mono_arch_find_static_call_vtable (mgreg_t *regs, guint8 *code)
 {
-	g_error ("mono_arch_get_argument_info");
-	return 0;
-
+	g_error ("mono_arch_find_static_call_vtable");
+	return (MonoVTable*) regs [MONO_ARCH_RGCTX_REG];
 }
 
 void
@@ -201,10 +565,15 @@ mono_set_timeout_exec (int id)
 	}
 }
 
+#endif
+
+
 void
 mono_wasm_set_timeout (int timeout, int id)
 {
+#ifdef HOST_WASM
 	mono_set_timeout (timeout, id);
+#endif
 }
 
 void
@@ -218,6 +587,9 @@ mono_arch_patch_code_new (MonoCompile *cfg, MonoDomain *domain, guint8 *code, Mo
 {
 	g_error ("mono_arch_patch_code_new");
 }
+
+
+#ifdef HOST_WASM
 
 /*
 The following functions don't belong here, but are due to laziness.
@@ -333,3 +705,4 @@ sem_timedwait (sem_t *sem, const struct timespec *abs_timeout)
 	return 0;
 	
 }
+#endif
