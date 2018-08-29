@@ -2354,7 +2354,7 @@ lookup_start:
 		if ((code = mono_aot_get_method (domain, method, error))) {
 			MonoVTable *vtable;
 
-			if (mono_gc_is_critical_method (method)) {
+			if (FALSE && mono_gc_is_critical_method (method)) {
 				/*
 				 * The suspend code needs to be able to lookup these methods by ip in async context,
 				 * so preload their jit info.
@@ -2418,7 +2418,7 @@ lookup_start:
 	if (!code)
 		return NULL;
 
-	if (method->wrapper_type == MONO_WRAPPER_WRITE_BARRIER || method->wrapper_type == MONO_WRAPPER_ALLOC) {
+	if (FALSE && (method->wrapper_type == MONO_WRAPPER_WRITE_BARRIER || method->wrapper_type == MONO_WRAPPER_ALLOC)) {
 		MonoDomain *d;
 
 		/*
