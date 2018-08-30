@@ -6,7 +6,7 @@ $(dir $(LLVM_SRC)):
 $(TOP)/sdks/out:
 	mkdir -p $@
 
-.stamp-llvm-download: | setup-llvm-llvm32 setup-llvm-llvm64 $(TOP)/sdks/out
+.stamp-llvm-download: | $(TOP)/sdks/out
 	$(MAKE) -C $(TOP)/llvm -f build.mk download-llvm
 	$(RM) -r $(TOP)/sdks/out/ios-llvm32 $(TOP)/sdks/out/ios-llvm64
 	mv $(TOP)/llvm/llvm-tmp/usr32 $(TOP)/sdks/out/ios-llvm32
@@ -68,7 +68,9 @@ clean-llvm-$(1):
 		LLVM_BUILD="$$(TOP)/sdks/builds/llvm-$(1)" \
 		LLVM_PREFIX="$$(TOP)/sdks/out/ios-$(1)"
 
+ifndef DISABLE_LLVM
 TARGETS += llvm-$(1)
+endif
 
 endef
 
@@ -123,8 +125,9 @@ clean-llvm-$(1):
 		LLVM_BUILD="$$(TOP)/sdks/builds/llvm-$(1)" \
 		LLVM_PREFIX="$$(TOP)/sdks/out/ios-$(1)"
 
+ifndef DISABLE_LLVM
 TARGETS += llvm-$(1)
-
+endif
 endef
 
 ifneq ($(MXE_PREFIX),)
