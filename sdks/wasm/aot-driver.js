@@ -55,7 +55,7 @@ var Module = {
 			"managed",
 			"managed",
 			0,
-			[ "mscorlib.dll", "mini_tests_basic.dll",  ],
+			[ "mini_tests_basic.dll","mscorlib.dll","nunitlite.dll","System.Xml.dll","System.dll","Mono.Security.dll","System.Core.dll","main.exe" ],
 			function () { App.init (); },
 			function (file) { 
 				// print("loading " + file)
