@@ -190,6 +190,11 @@ namespace WsProxy {
 		{
 			// Debug ($"browser: {msg}");
 			var res = JObject.Parse (msg);
+			if (res ["id"] == null) {
+				Dump (string.Format("BROWSER: event method: {0}", res ["method"]));
+			} else {
+				Dump (string.Format ("BROWSER: response id: {0} method: {1}", res ["id"], res ["method"]));
+			}
 
 			if (res ["id"] == null)
 				pending_ops.Add (OnEvent (res ["method"].Value<string> (), res ["params"] as JObject, token));
@@ -201,6 +206,7 @@ namespace WsProxy {
 		{
 			var res = JObject.Parse (msg);
 
+			Dump (string.Format ("IDE: id: {0} method: {1}", res ["id"], res ["method"]));
 			pending_ops.Add (OnCommand (res ["id"].Value<int> (), res ["method"].Value<string> (), res ["params"] as JObject, token));
 		}
 
@@ -222,6 +228,7 @@ namespace WsProxy {
 			//Console.WriteLine ("add cmd id {0}", id);
 			pending_cmds.Add ((id, tcs));
 
+			Dump($"->BROWSER cmd id: {id} method: {method}");
 			Send (this.browser, o, token);
 			return tcs.Task;
 		}
@@ -239,6 +246,7 @@ namespace WsProxy {
 				@params = args
 			});
 
+			Dump($"->IDE cmd method: {method}");
 			Send (this.ide, o, token);
 		}
 
@@ -252,6 +260,7 @@ namespace WsProxy {
 		{
 			JObject o = result.ToJObject (id);
 
+			Dump($"->IDE reply id {id}");
 			Send (this.ide, o, token);
 		}
 
@@ -318,6 +327,11 @@ namespace WsProxy {
 		protected void Info (string msg)
 		{
 			Console.WriteLine (msg);
+		}
+
+		protected void Dump (string msg)
+		{
+			// Console.WriteLine (msg);
 		}
 	}
 }

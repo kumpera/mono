@@ -373,7 +373,9 @@ EMSCRIPTEN_KEEPALIVE void
 mono_wasm_clear_all_breakpoints (void)
 {
 	DEBUG_PRINTF (1, "CLEAR BREAKPOINTS\n");
+	printf ("**mono_wasm_clear_all_breakpoints**\n");
 	mono_de_clear_all_breakpoints ();
+	printf ("DONE with BPs\n");
 }
 
 EMSCRIPTEN_KEEPALIVE int

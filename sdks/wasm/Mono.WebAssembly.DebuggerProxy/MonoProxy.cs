@@ -253,6 +253,10 @@ namespace WsProxy {
 				return;
 			}
 			var bp = this.breakpoints.FirstOrDefault (b => b.RemoteId == bp_id.Value);
+			Console.WriteLine ($"bp is {bp} bp_id is {bp_id.Value}");
+			foreach (var b in this.breakpoints) {
+				Console.WriteLine ($"\tddd {b.RemoteId}");
+			}
 
 			var src = bp == null ? null : store.GetFileById (bp.Location.Id);
 
@@ -269,6 +273,7 @@ namespace WsProxy {
 						var method_token = mono_frame ["method_token"].Value<int> ();
 						var assembly_name = mono_frame ["assembly_name"].Value<string> ();
 
+						Console.WriteLine ($"frame pos {il_pos} method_token {method_token} asm {assembly_name}");
 						var asm = store.GetAssemblyByName (assembly_name);
 						var method = asm.GetMethodByToken (method_token);
 						var location = method.GetLocationByIl (il_pos);
@@ -332,6 +337,7 @@ namespace WsProxy {
 				hitBreakpoints = bp_list,
 			});
 
+			// Console.WriteLine ($"XXXXXXXXX {o}");
 			SendEvent ("Debugger.paused", o, token);
 		}
 
@@ -360,7 +366,7 @@ namespace WsProxy {
 			var is_ready = res.Value? ["result"]? ["value"]?.Value<bool> ();
 			//Debug ($"\t{is_ready}");
 			if (is_ready.HasValue && is_ready.Value == true) {
-				Debug ("RUNTIME LOOK READY. GO TIME!");
+				Debug ("RUNTIME LOOKS READY. GO TIME!");
 				await RuntimeReady (token);
 			}
 		}
@@ -435,6 +441,7 @@ namespace WsProxy {
 				result = var_list
 			});
 
+			Console.WriteLine ("ZZZZZ " + o);
 			SendResponse (msg_id, Result.Ok (o), token);
 		}
 
@@ -444,6 +451,7 @@ namespace WsProxy {
 			var method_token = bp.Location.CliLocation.Method.Token;
 			var il_offset = bp.Location.CliLocation.Offset;
 
+			Debug ($"EnableBP at {bp}");
 			var o = JObject.FromObject (new {
 				expression = string.Format (MonoCommands.SET_BREAK_POINT, asm_name, method_token, il_offset),
 				objectGroup = "mono_debugger",
@@ -454,11 +462,12 @@ namespace WsProxy {
 
 			var res = await SendCommand ("Runtime.evaluate", o, token);
 			var ret_code = res.Value? ["result"]? ["value"]?.Value<int> ();
+			Console.WriteLine ("XXXXX " + res.ToJObject(8888));
 
 			if (ret_code.HasValue) {
 				bp.RemoteId = ret_code.Value;
 				bp.State = BreakPointState.Active;
-				//Debug ($"BP local id {bp.LocalId} enabled with remote id {bp.RemoteId}");
+				Debug ($"BP local id {bp.LocalId} enabled with remote id {bp.RemoteId}");
 			}
 
 			return res;
@@ -499,11 +508,11 @@ namespace WsProxy {
 				returnByValue = true,
 			});
 
+			Debug ($"Sending CLEAR ALL BPS!");
 			var clear_result = await SendCommand ("Runtime.evaluate", o, token);
 			if (clear_result.IsErr) {
 				Debug ($"Failed to clear breakpoints due to {clear_result}");
 			}
-
 
 			runtime_ready = true;
 

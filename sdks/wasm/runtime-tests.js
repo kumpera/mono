@@ -224,7 +224,7 @@ var App = {
 			if (res == "SUCCESS") {
 				while (send_message ("pump-test", testArguments [i]) != "DONE") 
 				{
-					Module.pump_message ();
+					Module.mono_pump_message ();
 					print ("|");
 				}
 				print ("\nDONE")

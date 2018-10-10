@@ -14,8 +14,14 @@ namespace WsProxy
     {
         public static void Main(string[] args)
         {
-		    var host = new WebHostBuilder()
-		        .UseSetting(nameof(WebHostBuilderIISExtensions.UseIISIntegration), false.ToString())
+			var hostConfig = new WebHostBuilder();
+			if (args.Length > 0)
+				hostConfig.UseSetting("mono.nodejs.app", args[0]);
+			hostConfig.UseSetting ("mono.nodejs.app","Zzz");
+
+			var host = hostConfig
+				.UseSetting(nameof(WebHostBuilderIISExtensions.UseIISIntegration), false.ToString())
+				.ConfigureAppConfiguration (config => config.AddCommandLine (args))
 		        .UseKestrel()
 		        .UseContentRoot(Directory.GetCurrentDirectory())
 		        .UseStartup<Startup>()

@@ -410,8 +410,12 @@ collect_domain_bp (gpointer key, gpointer value, gpointer user_data)
 void
 mono_de_clear_all_breakpoints (void)
 {
-	while (breakpoints->len)
-		mono_de_clear_breakpoint ((MonoBreakpoint*)g_ptr_array_index (breakpoints, 0));
+	printf ("mono_de_clear_all_breakpoints %d\n", breakpoints->len);
+	while (breakpoints->len) {
+		MonoBreakpoint *bp = (MonoBreakpoint*)g_ptr_array_index (breakpoints, 0);
+		printf ("\tremoving bp %p id %d\n", bp, bp->req->id);
+		mono_de_clear_breakpoint (bp);
+	}
 }
 
 /*

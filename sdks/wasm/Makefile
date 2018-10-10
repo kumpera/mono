@@ -120,10 +120,15 @@ Simple.Dependency.dll: dependency.cs
 sample.dll: Simple.Dependency.dll sample.cs WebAssembly.Bindings.dll WebAssembly.Net.Http.dll
 	$(CSC) $(CSC_FLAGS) /target:library -out:$@ /r:Simple.Dependency.dll /r:$(WASM_BCL_DIR)/mscorlib.dll /r:$(WASM_BCL_DIR)/System.dll /r:$(WASM_BCL_DIR)/System.Core.dll /r:$(WASM_BCL_DIR)/System.Net.Http.dll /r:WebAssembly.Bindings.dll /r:WebAssembly.Net.Http.dll sample.cs
 
+debugger-test.exe: debugger-test.cs
+	$(CSC) $(CSC_FLAGS) /target:library -out:$@ /r:$(WASM_BCL_DIR)/mscorlib.dll debugger-test.cs
+
 OPTIONS_CS = $(TOP)/mcs/class/Mono.Options/Mono.Options/Options.cs
 
-Mono.Cecil.dll: Makefile
+Mono.Cecil.0.10.0/lib/net40/Mono.Cecil.dll:
 	nuget install -version 0.10.0 Mono.Cecil
+	
+Mono.Cecil.dll: Mono.Cecil.0.10.0/lib/net40/Mono.Cecil.dll
 	cp Mono.Cecil.0.10.0/lib/net40/Mono.Cecil.dll $@
 
 # We use system csc as this is a desktop program
@@ -142,6 +147,11 @@ TEST_ASSEMBLIES = $(WASM_BCL_DIR)/nunitlite.dll $(WASM_BCL_DIR)/tests/wasm_corli
 	ninja -v -C obj/test-suite
 	touch $@
 
+.stamp-build-debugger-test-suite: $(DRIVER_CONF)/.stamp-build packager.exe WebAssembly.Bindings.dll binding_tests.dll debugger-test.exe debugger-test-driver.js
+	mono --debug packager.exe --debugrt --template=runtime-nodejs.g.js --appdir=bin/debugger-test-suite --builddir=obj/debugger-test-suite debugger-test.exe --asset=debugger-test-driver.js
+	ninja -v -C obj/debugger-test-suite
+	touch $@
+
 aot-sample: $(DRIVER_CONF)/.stamp-build packager.exe mini_tests.dll main.exe runtime.js
 	mono packager.exe --emscripten-sdkdir=$(EMSCRIPTEN_SDKDIR) --mono-sdkdir=$(PWD)/../out -appdir=bin/aot-sample --nobinding --builddir=obj/aot-sample --aot --template=runtime-tests.js mini_tests.dll
 	ninja -v -C obj/aot-sample
@@ -153,6 +163,7 @@ build-debug-sample: .stamp-build-debug-sample
 
 build-test-suite: .stamp-build-test-suite
 
+build-debugger-test-suite: .stamp-build-debugger-test-suite
 build-managed: build-debug-sample build-test-suite $(WASM_BCL_DIR)/monolinker.exe
 
 build-dbg-proxy:
