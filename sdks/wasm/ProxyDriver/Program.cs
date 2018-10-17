@@ -14,12 +14,7 @@ namespace WsProxy
     {
         public static void Main(string[] args)
         {
-			var hostConfig = new WebHostBuilder();
-			if (args.Length > 0)
-				hostConfig.UseSetting("mono.nodejs.app", args[0]);
-			hostConfig.UseSetting ("mono.nodejs.app","Zzz");
-
-			var host = hostConfig
+			var host = new WebHostBuilder()
 				.UseSetting(nameof(WebHostBuilderIISExtensions.UseIISIntegration), false.ToString())
 				.ConfigureAppConfiguration (config => config.AddCommandLine (args))
 		        .UseKestrel()

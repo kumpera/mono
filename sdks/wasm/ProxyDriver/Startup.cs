@@ -67,10 +67,6 @@ namespace WsProxy
 			var response = resp_obj.ToString ();
 			await context.Response.WriteAsync (response, new CancellationTokenSource ().Token);
 		}
-		async Task Halp (HttpContext context) {
-			Console.WriteLine ("Halp! ");
-			await context.Response.WriteAsync ("SOMETHING", new CancellationTokenSource ().Token);
-		}
 
 		async Task SendNodeList (HttpContext context) {
 			Console.WriteLine ("hello chrome! json/list");
@@ -117,36 +113,74 @@ namespace WsProxy
 				});
 			});
 
-			Console.WriteLine ("GOT {0}", configuration ["NodeApp"]);
-			//if (app.GetSetting ("mono.nodejs.app") != null) {
+			if (configuration ["NodeApp"] != null) {
+				var nodeApp = configuration ["NodeApp"];
+				Console.WriteLine($"Doing the nodejs: {nodeApp}");
+				Console.WriteLine (Path.GetFullPath (nodeApp));
+				app.UseRouter (router => {
+					//Inspector API for using chrome devtools directly
+					router.MapGet ("json", SendNodeList);
+					router.MapGet ("json/list", SendNodeList);
+					router.MapGet ("json/version", SendNodeVersion);
+					router.MapGet ("launch-and-connect", async context => {
+						if (!context.WebSockets.IsWebSocketRequest) {
+							context.Response.StatusCode = 400;
+							return;
+						}
 
-			//	var nodeApp = env.GetSetting ("mono.nodejs.app");
-			//	Console.WriteLine($"Doing the nodejs: {nodeApp}");
-			//	app.UseRouter (router => {
-			//		//Inspector API for using chrome devtools directly
-			//		router.MapGet ("json", SendNodeList);
-			//		router.MapGet ("json/list", SendNodeList);
-			//		router.MapGet ("json/version", SendNodeVersion);
-			//		router.MapGet ("91d87807-8a81-4f49-878c-a5604103b0a4", async context => {
-			//			if (!context.WebSockets.IsWebSocketRequest) {
-			//				context.Response.StatusCode = 400;
-			//				return;
-			//			}
+						var nodeFullPath = Path.GetFullPath (nodeApp);
+						var psi = new ProcessStartInfo ();
+						psi.Arguments = $"--inspect-brk=localhost:0 {nodeFullPath}";
+						psi.UseShellExecute = false;
+						psi.FileName = "node";
+						psi.WorkingDirectory = Path.GetDirectoryName (nodeFullPath);
+						psi.RedirectStandardError = true;
+						psi.RedirectStandardOutput = true;
 
-			//			try {
-			//				var proxy = new MonoProxy ();
-			//				// var browserUri = GetBrowserUri (context.Request.Path.ToString ());
-			//				var browserUri = new Uri ("ws://127.0.0.1:9229/5396589f-0696-4572-8027-0d4dacdb083c");
-			//				var ideSocket = await context.WebSockets.AcceptWebSocketAsync ();
+						var tcs = new TaskCompletionSource<string> ();
 
-			//				await proxy.Run (browserUri, ideSocket);
-			//			} catch (Exception e) {
-			//				Console.WriteLine ("got exception {0}", e);
-			//			}
-			//		});
-			//	});
-			//}
-			
+						var proc = Process.Start (psi);
+						try {
+							proc.ErrorDataReceived += (sender, e) => {
+								Console.WriteLine ($"stderr: {e.Data}");
+								if (e.Data.StartsWith ("Debugger listening on ", StringComparison.Ordinal)) {
+									tcs.TrySetResult (e.Data.Substring (e.Data.IndexOf ("ws://", StringComparison.Ordinal)));
+								}
+							};
+							proc.OutputDataReceived += (sender, e) => {
+								Console.WriteLine ($"stdout: {e.Data}");
+							};
+							proc.BeginErrorReadLine ();
+							proc.BeginOutputReadLine ();
+
+							if (await Task.WhenAny (tcs.Task, Task.Delay (2000)) != tcs.Task) {
+								Console.WriteLine ("Didnt get the con string after 2s.");
+								throw new Exception ("node.js timedout");
+							}
+							var con_str = await tcs.Task;
+							Console.WriteLine ($"lauching proxy for {con_str}");
+
+							try {
+								var proxy = new MonoProxy ();
+								var browserUri = new Uri (con_str);
+								var ideSocket = await context.WebSockets.AcceptWebSocketAsync ();
+
+								await proxy.Run (browserUri, ideSocket);
+								Console.WriteLine("Proxy done");
+							} catch (Exception e) {
+								Console.WriteLine ("got exception {0}", e.GetType().FullName);
+							}
+						} finally {
+							Console.WriteLine ("DONE");
+							proc.CancelErrorRead ();
+							proc.CancelOutputRead ();
+							proc.Kill ();
+							proc.WaitForExit ();
+							proc.Close ();
+						}
+					});
+				});
+			}
 		}
 	}
 }
