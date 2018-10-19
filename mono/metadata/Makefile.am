@@ -40,6 +40,26 @@ export HOST_CC
 AM_CFLAGS = -O
 else
 
+if HOST_WASM
+assembliesdir = $(exec_prefix)/lib
+confdir = $(sysconfdir)
+wasm_sources = \
+	console-wasm.c \
+	w32mutex-wasm.c \
+	w32semaphore-wasm.c \
+	w32event-wasm.c \
+	w32process-wasm.c \
+	w32process-wasm-internals.h \
+	w32socket-wasm.c \
+	w32file-wasm.c \
+	w32file-wasm-glob.c \
+	w32file-wasm-glob.h \
+	w32error-wasm.c
+
+platform_sources = $(wasm_sources)
+
+else
+
 assembliesdir = $(exec_prefix)/lib
 confdir = $(sysconfdir)
 unix_sources = \
@@ -60,6 +80,7 @@ unix_sources = \
 	w32error-unix.c
 
 platform_sources = $(unix_sources)
+endif
 endif
 
 glib_libs = $(top_builddir)/mono/eglib/libeglib.la
