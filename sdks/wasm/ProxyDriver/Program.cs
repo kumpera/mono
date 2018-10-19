@@ -16,14 +16,38 @@ namespace WsProxy
         {
 			var host = new WebHostBuilder()
 				.UseSetting(nameof(WebHostBuilderIISExtensions.UseIISIntegration), false.ToString())
-				.ConfigureAppConfiguration (config => config.AddCommandLine (args))
 		        .UseKestrel()
 		        .UseContentRoot(Directory.GetCurrentDirectory())
 		        .UseStartup<Startup>()
 		        .UseUrls("http://localhost:9300")
 		        .Build();
-
 		    host.Run();
         }
     }
+
+	public class TestHarnessProxy {
+		static IWebHost host;
+
+		public static void Start (string chrome_path, string app_path, string page_path) {
+			if (host != null)
+				return;
+
+			//FIXME wtf ConfigureAppConfiguration
+			string[] args = new [] {
+				$"/ChromePath={chrome_path}",
+				$"/AppPath={app_path}",
+				$"/PagePath={page_path}",
+			};
+
+			var h = new WebHostBuilder()
+				.UseSetting(nameof(WebHostBuilderIISExtensions.UseIISIntegration), false.ToString())
+				.ConfigureAppConfiguration (config => config.AddCommandLine (args))
+		        .UseKestrel()
+		        .UseStartup<TestHarnessStartup>()
+		        .UseUrls("http://localhost:9300")
+		        .Build();
+			host = h;
+			Task.Run(() => host.Run ());
+		}
+	}
 }

@@ -9,7 +9,7 @@ using System.IO;
 using System.Text;
 using System.Collections.Generic;
 
-namespace WsProxy {
+namespace Mono.WebAssembly {
 
 	internal class MonoCommands {
 		public const string GET_CALL_STACK = "MONO.mono_wasm_get_call_stack()";
@@ -486,6 +486,8 @@ namespace WsProxy {
 			var loaded_pdbs = await SendCommand ("Runtime.evaluate", o, token);
 			var the_value = loaded_pdbs.Value? ["result"]? ["value"];
 			var the_pdbs = the_value?.ToObject<string[]> ();
+			Console.WriteLine ("pdbs {0}", string.Join(",", the_pdbs));
+
 			this.store = new DebugStore (the_pdbs);
 
 			foreach (var s in store.AllSources ()) {
@@ -496,7 +498,7 @@ namespace WsProxy {
 					hash = s.DocHashCode,
 					executionContextAuxData = this.aux_ctx_data
 				});
-				//Debug ($"\tsending {s.Url}");
+				Debug ($"\tsending {s.Url}");
 				SendEvent ("Debugger.scriptParsed", ok, token);
 			}
 
@@ -529,6 +531,8 @@ namespace WsProxy {
 					bp.State = BreakPointState.Disabled;
 				}
 			}
+
+			SendEvent ("Mono.runtimeReady", new JObject (), token);
 		}
 
 		async Task<bool> RemoveBreakpoint(int msg_id, JObject args, CancellationToken token) {
