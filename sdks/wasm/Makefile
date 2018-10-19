@@ -120,8 +120,8 @@ Simple.Dependency.dll: dependency.cs
 sample.dll: Simple.Dependency.dll sample.cs WebAssembly.Bindings.dll WebAssembly.Net.Http.dll
 	$(CSC) $(CSC_FLAGS) /target:library -out:$@ /r:Simple.Dependency.dll /r:$(WASM_BCL_DIR)/mscorlib.dll /r:$(WASM_BCL_DIR)/System.dll /r:$(WASM_BCL_DIR)/System.Core.dll /r:$(WASM_BCL_DIR)/System.Net.Http.dll /r:WebAssembly.Bindings.dll /r:WebAssembly.Net.Http.dll sample.cs
 
-debugger-test.exe: debugger-test.cs
-	$(CSC) $(CSC_FLAGS) /target:library -out:$@ /r:$(WASM_BCL_DIR)/mscorlib.dll debugger-test.cs
+debugger-test.dll: debugger-test.cs debugger-test2.cs Simple.Dependency.dll
+	$(CSC) $(CSC_FLAGS) /target:library -out:$@ /r:$(WASM_BCL_DIR)/mscorlib.dll /r:Simple.Dependency.dll debugger-test.cs debugger-test2.cs
 
 OPTIONS_CS = $(TOP)/mcs/class/Mono.Options/Mono.Options/Options.cs
 
@@ -146,8 +146,8 @@ TEST_ASSEMBLIES = $(WASM_BCL_DIR)/nunitlite.dll $(WASM_BCL_DIR)/tests/wasm_corli
 	ninja -v -C obj/test-suite
 	touch $@
 
-.stamp-build-debugger-test-suite: $(DRIVER_CONF)/.stamp-build packager.exe WebAssembly.Bindings.dll binding_tests.dll debugger-test.exe debugger-test-driver.js
-	mono --debug packager.exe --debugrt --template=runtime.js --appdir=bin/debugger-test-suite --builddir=obj/debugger-test-suite debugger-test.exe --asset=debugger-driver.html
+.stamp-build-debugger-test-app: $(DRIVER_CONF)/.stamp-build packager.exe WebAssembly.Bindings.dll binding_tests.dll debugger-test.dll debugger-test-driver.js
+	mono --debug packager.exe --debugrt --debug --template=runtime.js --appdir=bin/debugger-test-suite --builddir=obj/debugger-test-suite debugger-test.dll --asset=debugger-driver.html
 	ninja -v -C obj/debugger-test-suite
 	touch $@
 
@@ -162,7 +162,7 @@ build-debug-sample: .stamp-build-debug-sample
 
 build-test-suite: .stamp-build-test-suite
 
-build-debugger-test-suite: .stamp-build-debugger-test-suite
+build-debugger-test-app: .stamp-build-debugger-test-app
 build-managed: build-debug-sample build-test-suite $(WASM_BCL_DIR)/monolinker.exe
 
 build-dbg-proxy:

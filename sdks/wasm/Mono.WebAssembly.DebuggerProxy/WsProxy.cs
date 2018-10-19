@@ -335,12 +335,12 @@ namespace Mono.WebAssembly {
 
 		protected void Debug (string msg)
 		{
-			Console.WriteLine (msg);
+			// Console.WriteLine (msg);
 		}
 
 		protected void Info (string msg)
 		{
-			Console.WriteLine (msg);
+			// Console.WriteLine (msg);
 		}
 
 		protected void Dump (string msg)

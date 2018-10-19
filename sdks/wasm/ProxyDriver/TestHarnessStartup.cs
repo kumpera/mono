@@ -33,30 +33,6 @@ namespace WsProxy
 			services.AddRouting ();
 		}
 
-		public static async Task ProxyMsg (string desc, WebSocket from, WebSocket to)
-		{
-			byte [] buff = new byte [4000];
-			var mem = new MemoryStream ();
-			while (true) {
-				var result = await from.ReceiveAsync (new ArraySegment<byte> (buff), CancellationToken.None);
-				if (result.MessageType == WebSocketMessageType.Close) {
-					await to.SendAsync (new ArraySegment<byte> (mem.GetBuffer (), 0, (int)mem.Length), WebSocketMessageType.Close, true, CancellationToken.None);
-					return;
-				}
-
-				if (result.EndOfMessage) {
-					mem.Write (buff, 0, result.Count);
-
-					var str = Encoding.UTF8.GetString (mem.GetBuffer (), 0, (int)mem.Length);
-
-					await to.SendAsync (new ArraySegment<byte> (mem.GetBuffer (), 0, (int)mem.Length), WebSocketMessageType.Text, true, CancellationToken.None);
-					mem.SetLength (0);
-				} else {
-					mem.Write (buff, 0, result.Count);
-				}
-			}
-		}
-
 		async Task SendNodeVersion (HttpContext context) {
 			Console.WriteLine ("hello chrome! json/version");
 			var resp_obj = new JObject();
@@ -97,13 +73,13 @@ namespace WsProxy
 			var proc = Process.Start (psi);
 			try {
 				proc.ErrorDataReceived += (sender, e) => {
-					Console.WriteLine ($"stderr: {e.Data}");
+					// Console.WriteLine ($"stderr: {e.Data}");
 					var res = extract_conn_url (e.Data);
 					if (res != null)
 						tcs.TrySetResult (res);
 				};
 				proc.OutputDataReceived += (sender, e) => {
-					Console.WriteLine ($"stdout: {e.Data}");
+					// Console.WriteLine ($"stdout: {e.Data}");
 				};
 				proc.BeginErrorReadLine ();
 				proc.BeginOutputReadLine ();
@@ -113,7 +89,7 @@ namespace WsProxy
 					throw new Exception ("node.js timedout");
 				}
 				var con_str = await tcs.Task;
-				Console.WriteLine ($"lauching proxy for {con_str}");
+				// Console.WriteLine ($"lauching proxy for {con_str}");
 
 				try {
 					var proxy = new MonoProxy ();
@@ -121,12 +97,12 @@ namespace WsProxy
 					var ideSocket = await context.WebSockets.AcceptWebSocketAsync ();
 
 					await proxy.Run (browserUri, ideSocket);
-					Console.WriteLine("Proxy done");
+					// Console.WriteLine("Proxy done");
 				} catch (Exception e) {
 					Console.WriteLine ("got exception {0}", e.GetType().FullName);
 				}
 			} finally {
-				Console.WriteLine ("DONE");
+				// Console.WriteLine ("DONE");
 				proc.CancelErrorRead ();
 				proc.CancelOutputRead ();
 				proc.Kill ();
@@ -148,9 +124,9 @@ namespace WsProxy
 			Console.WriteLine ("Files from: '{0}'", filesPath);
 			Console.WriteLine ("Using page : '{0}'", pagePath);
 
-
 		    app.UseStaticFiles(new StaticFileOptions {
 				FileProvider = new PhysicalFileProvider(filesPath),
+				ServeUnknownFileTypes = true, //Cuz .wasm is not a known file type :cry:
 				RequestPath = ""
 			});
 			
@@ -165,6 +141,7 @@ namespace WsProxy
 
 			app.UseRouter (router => {
 				router.MapGet ("launch-chrome-and-connect", async context => {
+					Console.WriteLine ("New test request");
 					await LaunchAndServe (psi, context, str => {
 						//We wait for it as a signal that chrome finished launching
 						if (!str.StartsWith ("DevTools listening on "))
@@ -172,10 +149,10 @@ namespace WsProxy
 
 						var client = new HttpClient ();
 						var res = client.GetStringAsync ("http://localhost:9333/json/list").Result;
-						Console.WriteLine ("res is {0}", res);
+						// Console.WriteLine ("res is {0}", res);
 						var obj = JArray.Parse (res);
 						var wsURl = obj?[0]?["webSocketDebuggerUrl"]?.Value<string> ();
-						Console.WriteLine (">>> {0}", wsURl);
+						// Console.WriteLine (">>> {0}", wsURl);
 
 						return wsURl;
 					});

@@ -364,7 +364,7 @@ namespace Mono.WebAssembly {
 			Debug ("checking if the runtime is ready");
 			var res = await SendCommand ("Runtime.evaluate", o, token);
 			var is_ready = res.Value? ["result"]? ["value"]?.Value<bool> ();
-			//Debug ($"\t{is_ready}");
+			Debug ($"\t{is_ready}");
 			if (is_ready.HasValue && is_ready.Value == true) {
 				Debug ("RUNTIME LOOKS READY. GO TIME!");
 				await RuntimeReady (token);

@@ -36,12 +36,10 @@ namespace Mono.WebAssembly {
 
 		Task Pump (Task task, CancellationToken token)
 		{
-			// Console.WriteLine ("PUMPING");
 			if (task != current_write)
 				return null;
 			current_write = null;
 
-			// Console.WriteLine ("PUMPING GOOD! {0}", pending_writes.Count);
 			pending_writes.RemoveAt (0);
 
 			if (pending_writes.Count > 0) {
@@ -97,6 +95,7 @@ namespace Mono.WebAssembly {
 			Func<CancellationToken, Task> send,
 			CancellationToken token) {
 
+			Console.WriteLine ("connecting to {0}", uri);
 			this.socket = new ClientWebSocket ();
 			this.socket.Options.KeepAliveInterval = Timeout.InfiniteTimeSpan;
 

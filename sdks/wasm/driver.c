@@ -279,7 +279,7 @@ mono_wasm_load_runtime (const char *managed_path, int enable_debugging)
 	if (enable_debugging)
 		mono_wasm_enable_debugging ();
 #endif
-
+	mono_icall_table_init ();
 #ifndef ENABLE_AOT
 	mono_ee_interp_init ("");
 	mono_marshal_ilgen_init ();
@@ -300,7 +300,6 @@ mono_wasm_load_runtime (const char *managed_path, int enable_debugging)
 		mono_register_bundled_assemblies ((const MonoBundledAssembly**)bundle_array);
 	}
 
-	mono_set_assemblies_path (m_strdup (managed_path));
 	root_domain = mono_jit_init_version ("mono", "v4.0.30319");
 
 	mono_add_internal_call ("WebAssembly.Runtime::InvokeJS", mono_wasm_invoke_js);

@@ -19,7 +19,7 @@ namespace Mono.WebAssembly {
 		{
 			var res = JObject.Parse (msg);
 			if (res ["id"] == null)
-				DumpProtocol (string.Format("Event method: {0}", res ["method"]));
+				DumpProtocol (string.Format("Event method: {0} params: {1}", res ["method"], res ["params"]));
 			else
 				DumpProtocol (string.Format ("Response id: {0} res: {1}", res ["id"], res));
 
